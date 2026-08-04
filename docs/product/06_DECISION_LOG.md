@@ -1,5 +1,48 @@
 # Decision Log — Matchday
 
+## 2026-08-03 — Notification delivery resolved: in-app centre plus Web Push
+
+### Context
+
+The v0.2 pack left one blocking question open: whether “app notification” means
+an in-app inbox only, or an in-app inbox plus operating-system push. `PRD §14`
+records the underlying risk — “in-app notifications are not noticed when the app
+is closed” — which matters for a product whose core job is collecting a response
+before a deadline.
+
+### Decision
+
+The eventual product supports **an in-app notification centre plus real
+operating-system phone notifications through Web Push**. The in-app centre is
+the source of truth; Web Push is a delivery channel on top of it, so a user who
+never grants push permission loses no information.
+
+### Scope
+
+Recorded as a **future requirement**, deliberately not yet built:
+
+- **Phase 1:** nothing. No notifications, service workers, push subscriptions,
+  Web Push or permission prompts exist in the Phase 1 codebase.
+- **Phase 3:** the in-app notification centre, as already planned.
+- **A later phase:** Web Push delivery.
+
+### Consequences
+
+- A `push_subscriptions` table, a service worker, a PWA manifest, VAPID
+  server-only secrets, delivery-attempt logging and stale-endpoint pruning are
+  all added to the backlog.
+- Push payloads must carry no roster, attendance, disciplinary or gender detail,
+  since they render on a lock screen (`PRD §12`, applied outside the app).
+- Notification events stay channel-independent, so no domain logic needs to
+  change when push is added.
+- `03_MVP_ROADMAP.md` §12 lists “Web Push, when not included in MVP” as
+  post-MVP; it is now a committed future requirement rather than an option.
+
+Full record:
+[`docs/decisions/0001-notifications-in-app-center-plus-web-push.md`](../decisions/0001-notifications-in-app-center-plus-web-push.md).
+
+---
+
 ## 2026-08-03 — Product scope revision
 
 ### Context

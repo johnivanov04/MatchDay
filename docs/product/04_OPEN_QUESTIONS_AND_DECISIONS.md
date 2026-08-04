@@ -85,11 +85,21 @@
 - Dedicated sponsor/guest workflow is deferred.
 - League administrator can manage eligibility through membership approval and notes during MVP.
 
-## 2. Remaining blocking question
+## 2. Resolved 2026-08-03 — what “app notification” means
 
-### What does “app notification” mean for the MVP?
+> **Decision: Option B.** The eventual product supports an in-app notification
+> centre **plus** operating-system notifications delivered through Web Push.
+> The in-app centre remains the source of truth; Web Push is a delivery channel
+> layered on top of it.
+>
+> Recorded as a **future requirement**. Not implemented in Phase 1: no
+> notifications, service workers, push subscriptions or Web Push exist in the
+> Phase 1 codebase. The in-app centre arrives in Phase 3; Web Push in a later
+> phase.
+>
+> Full record: [`docs/decisions/0001-notifications-in-app-center-plus-web-push.md`](../decisions/0001-notifications-in-app-center-plus-web-push.md).
 
-Choose one:
+The options that were under consideration:
 
 **A. In-app notification inbox only**
 
@@ -103,7 +113,7 @@ Choose one:
 - Requires service worker, push subscription storage, permission UX, browser/device testing, and delivery infrastructure.
 - On iPhone, users generally need the PWA installed before web push is useful.
 
-**Recommended decision:** Build the in-app inbox as the source of truth and include Web Push in the MVP only if proactive phone alerts are essential for the first pilot. Email can remain limited to authentication.
+**Outcome:** Option B was chosen. Build the in-app inbox as the source of truth first, then add Web Push on top of the same channel-independent notification events. Email remains limited to authentication.
 
 ## 3. Non-blocking defaults unless changed
 

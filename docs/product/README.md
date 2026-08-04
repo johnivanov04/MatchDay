@@ -23,14 +23,20 @@ RMV Football Club is the first pilot configuration. The product is designed for 
 6. Require Claude to stop after Phase 1 and report exact validation results.
 7. Review the implementation before starting the next roadmap phase.
 
-## Current unresolved decision
+## Notification decision — resolved 2026-08-03
 
-Determine whether the MVP notification experience is:
+The previously open notification question has been decided: the eventual product
+supports **an in-app notification centre plus operating-system notifications via
+Web Push**. The in-app centre is the source of truth; Web Push is a delivery
+channel layered on top of it.
 
-- an in-app notification inbox only, or
-- an in-app inbox plus Web Push notifications that can appear while the app is closed.
+This is a **future requirement**. It is not implemented in Phase 1 — the Phase 1
+codebase contains no notifications, service workers, push subscriptions or Web
+Push. The in-app centre arrives in Phase 3, Web Push in a later phase, and the
+schema and domain service remain channel-independent throughout.
 
-The schema and domain service should remain channel-independent either way.
+See [`docs/decisions/0001-notifications-in-app-center-plus-web-push.md`](../decisions/0001-notifications-in-app-center-plus-web-push.md)
+and the dated entry in `06_DECISION_LOG.md`.
 
 ## Source material
 
