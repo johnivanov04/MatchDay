@@ -1,0 +1,49 @@
+# dependencies
+/node_modules
+/.pnp
+.pnp.*
+.yarn/*
+
+# next.js
+/.next/
+/out/
+next-env.d.ts
+
+# production
+/build
+
+# testing
+/coverage
+/test-results
+
+# local database artefacts (embedded Postgres data directories)
+/.tmp/
+/supabase/.branches
+/supabase/.temp
+
+# environment — never commit real credentials
+.env
+.env.local
+.env.*.local
+.env.development
+.env.production
+!.env.example
+
+# misc
+.DS_Store
+*.pem
+*.tsbuildinfo
+
+# debug logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# editors
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# vercel
+.vercel
