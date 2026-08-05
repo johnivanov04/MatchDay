@@ -41,6 +41,39 @@ describe('secret hygiene', () => {
     for (const path of sourceFiles) {
       expect(read(path), relative(REPO_ROOT, path)).not.toMatch(/NEXT_PUBLIC_[A-Z_]*SERVICE/);
       expect(read(path), relative(REPO_ROOT, path)).not.toMatch(/NEXT_PUBLIC_[A-Z_]*SECRET/);
+      // The VAPID *private* key signs pushes to every subscribed device.
+      expect(read(path), relative(REPO_ROOT, path)).not.toMatch(/NEXT_PUBLIC_VAPID_PRIVATE/);
+    }
+  });
+
+  it('names the VAPID private key in exactly one module', () => {
+    const offenders = sourceFiles
+      .filter((path) => read(path).includes('VAPID_PRIVATE_KEY'))
+      .map((path) => relative(REPO_ROOT, path));
+
+    expect(offenders).toEqual(['src/lib/push/sender.ts']);
+  });
+
+  it('keeps the VAPID private key out of every client component', () => {
+    const clientComponents = sourceFiles.filter((path) => {
+      const contents = read(path);
+      return contents.startsWith("'use client'") || contents.startsWith('"use client"');
+    });
+
+    for (const path of clientComponents) {
+      const contents = read(path);
+      expect(contents, relative(REPO_ROOT, path)).not.toContain('VAPID_PRIVATE_KEY');
+      // The public key is browser-visible by design and may appear.
+      expect(contents, relative(REPO_ROOT, path)).not.toContain('lib/push/sender');
+      expect(contents, relative(REPO_ROOT, path)).not.toContain('lib/push/push-store');
+    }
+  });
+
+  it('never lets the service worker reference a secret', () => {
+    // sw.js is served verbatim to every visitor.
+    const serviceWorker = read(join(REPO_ROOT, 'public/sw.js'));
+    for (const secret of ['VAPID_PRIVATE_KEY', 'SERVICE_ROLE', 'auth_secret', 'p256dh']) {
+      expect(serviceWorker).not.toContain(secret);
     }
   });
 
@@ -66,6 +99,15 @@ describe('secret hygiene', () => {
       'src/lib/auth/page-guards.ts',
       'src/lib/leagues/active-league.ts',
       'src/lib/audit/record-audit-event.ts',
+      // Phase 3: the push modules read subscription credentials and dispatch
+      // to other users' devices. None may ever be bundled for a browser.
+      'src/lib/push/sender.ts',
+      'src/lib/push/dispatch.ts',
+      'src/lib/push/push-store.ts',
+      'src/lib/push/notify.ts',
+      'src/lib/guidelines/guidelines.ts',
+      'src/lib/matches/matches.ts',
+      'src/lib/notifications/notifications.ts',
     ]) {
       expect(read(join(REPO_ROOT, relativePath)), relativePath).toContain("import 'server-only'");
     }

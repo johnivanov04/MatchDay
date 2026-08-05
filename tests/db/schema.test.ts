@@ -152,6 +152,31 @@ describe('schema', () => {
       ]);
     });
 
+    it('grants EXECUTE to PUBLIC on no function in the public schema', async () => {
+      // Regression guard for the defect fixed in 20260805030900. PostgreSQL
+      // grants EXECUTE to PUBLIC on every new function, and the Phase 2
+      // `ALTER DEFAULT PRIVILEGES … REVOKE EXECUTE … FROM PUBLIC` silently
+      // recorded nothing — so every Phase 3 function shipped PUBLIC-executable,
+      // including the worker-only `record_push_delivery_result`, which could
+      // then be used to switch off another person's phone notifications.
+      //
+      // An empty ACL means "built-in default", which for a function *is*
+      // PUBLIC EXECUTE, so a null proacl counts as a failure here too.
+      const { rows } = await db.pool.query<{ proname: string }>(
+        `select p.proname
+           from pg_proc p
+           join pg_namespace n on n.oid = p.pronamespace
+          where n.nspname = 'public'
+            and (
+              p.proacl is null
+              or exists (select 1 from unnest(p.proacl) entry where entry::text like '=%')
+            )
+          order by p.proname`,
+      );
+
+      expect(rows.map((row) => row.proname)).toEqual([]);
+    });
+
     it('grants the anon role nothing on any base table', async () => {
       const { rows } = await db.pool.query<{ table_name: string }>(
         `select g.table_name

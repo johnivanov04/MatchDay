@@ -30,10 +30,11 @@ supports **an in-app notification centre plus operating-system notifications via
 Web Push**. The in-app centre is the source of truth; Web Push is a delivery
 channel layered on top of it.
 
-This is a **future requirement**. It is not implemented in Phase 1 — the Phase 1
-codebase contains no notifications, service workers, push subscriptions or Web
-Push. The in-app centre arrives in Phase 3, Web Push in a later phase, and the
-schema and domain service remain channel-independent throughout.
+**Both halves were implemented in Phase 3** (2026-08-05): the canonical in-app
+notification centre and opt-in Web Push phone notifications. Web Push is no
+longer unresolved or future work. The domain layer stays channel-independent —
+no database function knows push exists; delivery reads canonical notifications
+after the fact.
 
 See [`docs/decisions/0001-notifications-in-app-center-plus-web-push.md`](../decisions/0001-notifications-in-app-center-plus-web-push.md)
 and the dated entry in `06_DECISION_LOG.md`.

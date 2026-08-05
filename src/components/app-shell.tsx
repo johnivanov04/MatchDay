@@ -13,10 +13,12 @@ import type { LeagueContext } from '@/lib/leagues/active-league';
 export function AppShell({
   displayName,
   leagueContext,
+  unreadNotifications,
   children,
 }: {
   displayName: string;
   leagueContext: LeagueContext;
+  unreadNotifications: number;
   children: ReactNode;
 }) {
   const activeLeague = leagueContext.active;
@@ -29,6 +31,22 @@ export function AppShell({
             Matchday
           </Link>
           <div className="flex items-center gap-3">
+            <Link
+              href="/notifications"
+              className="flex items-center gap-1.5 text-sm font-medium underline underline-offset-4"
+              aria-label={
+                unreadNotifications === 0
+                  ? 'Notifications'
+                  : `Notifications, ${unreadNotifications} unread`
+              }
+            >
+              Inbox
+              {unreadNotifications > 0 ? (
+                <span className="inline-flex min-w-5 items-center justify-center rounded-full bg-pitch-600 px-1.5 py-0.5 text-xs font-semibold text-white no-underline">
+                  {unreadNotifications > 99 ? '99+' : unreadNotifications}
+                </span>
+              ) : null}
+            </Link>
             <Link href="/profile" className="text-sm font-medium underline underline-offset-4">
               {displayName}
             </Link>
@@ -65,6 +83,22 @@ export function AppShell({
           {/* Administrator links appear only for the active league, and only
               when the session's own membership says so. This is presentation,
               not authorization — every target re-checks server-side. */}
+          {activeLeague === null ? null : (
+            <>
+              <Link
+                href={`/leagues/${activeLeague.league.slug}/matches`}
+                className="underline underline-offset-4"
+              >
+                Matches
+              </Link>
+              <Link
+                href={`/leagues/${activeLeague.league.slug}/guidelines`}
+                className="underline underline-offset-4"
+              >
+                Guidelines
+              </Link>
+            </>
+          )}
           {activeLeague !== null && activeLeague.membership.role === 'league_admin' ? (
             <>
               <Link
@@ -81,6 +115,9 @@ export function AppShell({
               </Link>
             </>
           ) : null}
+          <Link href="/settings/devices" className="underline underline-offset-4">
+            Alerts
+          </Link>
         </nav>
       </header>
 

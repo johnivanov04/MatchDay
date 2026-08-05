@@ -1,9 +1,17 @@
 # ADR 0001 — Notifications: in-app centre **plus** operating-system Web Push
 
-- **Status:** Accepted
-- **Date:** 2026-08-03
+- **Status:** Accepted — **implemented in Phase 3** (2026-08-05)
+- **Date:** 2026-08-03; scope amended 2026-08-05
 - **Supersedes:** the open question in `docs/product/04_OPEN_QUESTIONS_AND_DECISIONS.md` §2
-- **Applies to:** a future phase. **Nothing in this ADR is implemented in Phase 1.**
+- **Amends:** `03_MVP_ROADMAP.md` §6, which scoped Phase 3 to in-app notifications
+  only, and §12, which listed Web Push as post-MVP
+
+> **Amendment, 2026-08-05.** This ADR originally deferred Web Push to "a later
+> phase". The approved product decision brought it forward: the product must
+> support real operating-system phone notifications, and both the in-app centre
+> and Web Push were delivered together in Phase 3. Web Push is **no longer
+> unresolved, optional, or future work** anywhere in this repository. The
+> decision below is unchanged; only its timing was.
 
 ## Context
 
@@ -34,15 +42,23 @@ grants push permission must lose no information.
 
 ## Scope and sequencing
 
-This decision is recorded as a **future requirement**. It is deliberately not
-built yet:
+Delivered as follows:
 
-- **Phase 1 (this phase):** no notifications, no service worker, no push
-  subscriptions, no Web Push, no permission prompts. None of the above appear
-  anywhere in the codebase.
-- **Phase 3:** the in-app notification centre, as already specified in
-  `03_MVP_ROADMAP.md` §6. Notification events stay channel-independent.
-- **A later phase:** Web Push delivery on top of the same events.
+- **Phase 1:** nothing. No notifications, service worker, push subscriptions or
+  permission prompts existed in the codebase.
+- **Phase 2:** nothing, beyond the league and membership events that Phase 3
+  later attached notifications to.
+- **Phase 3 (both halves, shipped together):**
+  - **3C** — the canonical in-app notification centre. `public.notifications`
+    is the source of truth for every alert, with recipient-only RLS,
+    idempotency keys, an unread count and an inbox.
+  - **3D** — Web Push as a delivery channel on top of it: a PWA manifest, a
+    service worker, per-device opt-in subscriptions, VAPID server-only signing,
+    and delivery bookkeeping with temporary/permanent failure classification.
+
+The layering held: no SQL function knows that push exists. Delivery reads
+canonical notifications after the domain transaction has committed, and a push
+failure cannot roll back a publication or lose an in-app notification.
 
 ## Consequences
 
@@ -64,6 +80,26 @@ Work this creates when the notification phases arrive:
    so it must carry no roster, attendance, disciplinary or gender information —
    only enough to bring the user into the app. This is the same rule as
    `PRD §12`, applied to a surface outside the app.
+
+How each consequence was actually met in Phase 3:
+
+1. `public.push_subscriptions` — per user, per device, with `endpoint`,
+   `p256dh` and `auth_secret` excluded from every client grant, because
+   together they are a bearer credential for that device.
+2. `src/app/manifest.ts` and `public/sw.js`. Real PNG icons remain a manual
+   follow-up; the manifest currently ships an SVG.
+3. `VAPID_PRIVATE_KEY` and `VAPID_SUBJECT` are server-only and are named in
+   exactly one module, which `tests/unit/secret-hygiene.test.ts` asserts.
+   `NEXT_PUBLIC_VAPID_PUBLIC_KEY` is browser-visible by design.
+4. `public.push_delivery_attempts` records status, attempt count and a failure
+   *category* — never a provider response, which can embed the endpoint.
+   404/410 retires the subscription; ten consecutive temporary failures retires
+   it too.
+5. Permission is requested only from an explicit "Enable phone notifications"
+   button, never on load.
+6. `buildPushPayload()` constructs four fields by hand rather than spreading a
+   row, so there is no object that could widen. A test asserts that roster,
+   attendance, gender, phone and administrator-note values cannot appear.
 
 Consequences already honoured by the Phase 1 foundation:
 

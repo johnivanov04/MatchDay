@@ -20,6 +20,19 @@ import type { Database } from '@/types/database';
  * Use only after performing an explicit authorization check. Phase 1 needs it
  * for nothing; it exists so later phases have one reviewed way to reach it.
  */
+/**
+ * Whether a service-role key is configured.
+ *
+ * Exists so that callers which merely need to *know* — the push dispatcher
+ * degrades to in-app-only without one — never have to name the environment
+ * variable themselves. Keeping the name in exactly one module is what makes
+ * `tests/unit/secret-hygiene.test.ts` able to assert where it may appear.
+ */
+export function isServiceRoleConfigured(): boolean {
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  return key !== undefined && key.trim() !== '';
+}
+
 export function createSupabaseAdminClient() {
   if (typeof window !== 'undefined') {
     throw new Error('The Supabase service-role client must never run in the browser.');

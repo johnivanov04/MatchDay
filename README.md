@@ -18,8 +18,13 @@ league with 10 players is equally first-class.
   administrator transfer, league settings, and audit events for every
   administrative change.
 
-Matches, signup, rosters, waitlists, teams, notifications and attendance are
-later phases — see [`NEXT_STEPS.md`](NEXT_STEPS.md).
+- **Phase 3** — versioned league guidelines with immutable acknowledgements and
+  a signup-eligibility predicate, reusable match templates, match creation and
+  publication, canonical in-app notifications, and opt-in **Web Push** phone
+  notifications delivered through a PWA service worker.
+
+Signup, rosters, waitlists, teams and attendance are later phases — see
+[`NEXT_STEPS.md`](NEXT_STEPS.md).
 
 The product specification is the source of truth and lives in
 [`docs/product/`](docs/product/). Decisions taken after v0.2 are recorded in
@@ -64,7 +69,10 @@ git-ignored.
 | `NEXT_PUBLIC_SUPABASE_URL` | browser + server | Safe to expose |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | browser + server | Safe to expose; RLS is what protects data |
 | `NEXT_PUBLIC_SITE_URL` | browser + server | e.g. `http://localhost:3000` |
+| `NEXT_PUBLIC_VAPID_PUBLIC_KEY` | browser + server | Web Push application server key. Browser-visible by design |
 | `SUPABASE_SERVICE_ROLE_KEY` | **server only** | Bypasses RLS. Never `NEXT_PUBLIC_`, never in a client component |
+| `VAPID_PRIVATE_KEY` | **server only** | Signs Web Push. `npx web-push generate-vapid-keys` |
+| `VAPID_SUBJECT` | **server only** | `mailto:` contact required by the Web Push protocol |
 | `TEST_DATABASE_URL` | tests only | Optional; see [Testing](#testing) |
 
 ### 3. Start the local database
@@ -140,6 +148,16 @@ one.
 | `…020400_phase2_rls_and_grants` | Phase 2 RLS, column-level grants, `anon` gets the view only |
 | `…020500_harden_admin_cardinality_trigger` | Makes the single-admin check independent of caller RLS |
 | `…020600_function_execute_hardening` | Revokes `EXECUTE` from `PUBLIC`; re-grants by name |
+| `…030000_guidelines` | `guideline_versions`, `guideline_acceptances`, immutability |
+| `…030100_guideline_functions` | Publish/archive/accept + the signup-eligibility predicate |
+| `…030200_matches` | Lifecycle enum, transition guard, templates, matches, admin notes |
+| `…030300_match_functions` | Create/publish/cancel/edit, with `AT TIME ZONE` resolution |
+| `…030400_notifications` | Canonical notifications, idempotent creator, league fanout |
+| `…030500_web_push` | Push subscriptions and delivery attempts |
+| `…030600_phase3_audit_triggers` | Audit on guideline, template and match changes |
+| `…030700_notification_integration` | Attaches fanout to Phase 2 and Phase 3 events |
+| `…030800_phase3_rls_and_grants` | Phase 3 RLS, column grants, function EXECUTE |
+| `…030900_revoke_public_function_execute` | Takes `EXECUTE` back from `PUBLIC` on Phase 3 functions |
 
 ### Exactly one active league administrator
 
@@ -172,6 +190,14 @@ all.
 | `league_join_requests` | own requests, or league administrator | none — functions only |
 | `league_invites` | league administrator, **minus `token_hash`** | none — functions only |
 | `searchable_leagues_public` | **anyone**, including `anon` | — (view) |
+| `guideline_versions` | admin: all · member: published | admin: drafts only |
+| `guideline_acceptances` | own, or league administrator | none — immutable |
+| `match_templates` | league administrator | league administrator |
+| `matches` | admin: all · member: published only | admin: drafts only |
+| `match_admin_notes` | league administrator | league administrator |
+| `notifications` | **recipient only** | none — functions only |
+| `push_subscriptions` | own, **minus endpoint and keys** | none — functions only |
+| `push_delivery_attempts` | own device only | service role only |
 
 ### Public discovery
 
@@ -301,9 +327,36 @@ tests/
 
 ---
 
+## Guidelines and signup eligibility
+
+A league publishes versioned guidelines. Publishing freezes the text — a trigger
+refuses to edit a published body, because members accepted that exact wording;
+corrections are new versions. Acceptance is explicit, per-version, and immutable
+once recorded.
+
+`public.has_accepted_required_guidelines(league_id)` is the predicate Phase 4's
+signup will call. It answers **only about the caller**, so it cannot be used to
+probe another member, and it is scoped per league: an unaccepted version in one
+league never blocks a match in another.
+
+## Notifications and Web Push
+
+Every alert exists first as a row in `public.notifications` — the canonical
+record, readable only by its recipient, keyed for idempotency so a retried
+publication cannot notify twice. Web Push delivers *copies* of those records to
+opted-in devices.
+
+Push never affects the domain. Delivery runs after the transaction commits,
+through an injectable sender, and a failure is recorded as a category and
+swallowed. A user who never grants permission, or whose browser has no push
+support, loses nothing.
+
+Payloads carry a title, a short body, a validated local path and a notification
+id — nothing else, because a payload renders on a lock screen.
+
 ## Not built yet
 
-Guidelines acknowledgement, match templates, matches, RSVP, roster selection,
-waitlists, notifications, service workers, Web Push, cancellations, attendance,
-team building, billing and native apps are all out of scope through Phase 2. See
+Match signup, rosters, waitlists, waitlist promotion, player cancellation,
+reminder scheduling, team building, attendance, billing, email or SMS
+notifications and native apps are all out of scope through Phase 3. See
 [`TODO.md`](TODO.md) and [`NEXT_STEPS.md`](NEXT_STEPS.md).

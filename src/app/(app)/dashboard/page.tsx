@@ -21,6 +21,8 @@ const NOTICE_MESSAGES: Record<DashboardNotice, string> = {
     'Administration transferred. You are now an ordinary player in that league.',
   [DASHBOARD_NOTICES.notLeagueAdmin]:
     'That page is only available to the league administrator.',
+  [DASHBOARD_NOTICES.notLeagueMember]:
+    'That page is only available to active members of that league.',
 };
 
 export default async function DashboardPage({
