@@ -54,6 +54,34 @@ export function AppShell({
           model={leagueContext.switcher}
           activeLeagueId={activeLeague?.league.id ?? null}
         />
+
+        <nav aria-label="League navigation" className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
+          <Link href="/leagues/discover" className="underline underline-offset-4">
+            Find a league
+          </Link>
+          <Link href="/leagues/new" className="underline underline-offset-4">
+            Create a league
+          </Link>
+          {/* Administrator links appear only for the active league, and only
+              when the session's own membership says so. This is presentation,
+              not authorization — every target re-checks server-side. */}
+          {activeLeague !== null && activeLeague.membership.role === 'league_admin' ? (
+            <>
+              <Link
+                href={`/leagues/${activeLeague.league.slug}/members`}
+                className="underline underline-offset-4"
+              >
+                Members
+              </Link>
+              <Link
+                href={`/leagues/${activeLeague.league.slug}/settings`}
+                className="underline underline-offset-4"
+              >
+                Settings
+              </Link>
+            </>
+          ) : null}
+        </nav>
       </header>
 
       <main id="main" className="flex flex-1 flex-col gap-6 px-5 py-6">

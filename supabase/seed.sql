@@ -258,6 +258,38 @@ values
    'Join request arrived through the searchable listing; awaiting approval.',
    '11111111-1111-4111-8111-000000000002');
 
+-- ── Phase 2 fixtures ───────────────────────────────────────────────────────
+-- One pending join request against the searchable league, so the administrator
+-- queue is not empty on a fresh database.
+insert into public.league_join_requests (id, league_id, user_id, status, message)
+values (
+  '66666666-6666-4666-8666-000000000001',
+  '22222222-2222-4222-8222-000000000002',
+  '11111111-1111-4111-8111-000000000008',
+  'pending',
+  'Found you through search — I play most Thursdays and would like to join.'
+);
+
+-- One live invitation for the private league.
+--
+-- The token below is public knowledge and exists only so the redemption flow
+-- can be exercised locally. Only its SHA-256 digest is stored, exactly as
+-- create_league_invite() does it — the raw token is never a column value.
+-- Production invitations use 32 bytes from a CSPRNG; see
+-- src/lib/leagues/invite-token.ts.
+insert into public.league_invites (
+  id, league_id, token_hash, label, grants_status, max_uses, expires_at, created_by
+) values (
+  '77777777-7777-4777-8777-000000000001',
+  '22222222-2222-4222-8222-000000000001',
+  sha256(convert_to('matchday-local-development-invite-token-0001', 'UTF8')),
+  'Local development link',
+  'active',
+  25,
+  now() + interval '14 days',
+  '11111111-1111-4111-8111-000000000001'
+);
+
 insert into public.audit_events (
   id, league_id, actor_user_id, entity_type, entity_id, action, before_data, after_data, reason
 ) values

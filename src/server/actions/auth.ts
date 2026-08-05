@@ -2,6 +2,7 @@
 
 import { redirect } from 'next/navigation';
 import { z } from 'zod';
+import { safeRedirectPath } from '@/lib/auth/safe-redirect';
 import { getSiteUrl } from '@/lib/env';
 import { actionFailure, actionSuccess, DomainError, type ActionResult } from '@/lib/errors';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
@@ -42,13 +43,20 @@ export async function requestSignInEmailAction(
     );
   }
 
+  // Where to land after authenticating — an invitation link, usually. Passed
+  // through `safeRedirectPath` here as well as in the callback, so a crafted
+  // value cannot even be placed into the outgoing email.
+  const next = safeRedirectPath(
+    typeof formData.get('next') === 'string' ? String(formData.get('next')) : null,
+  );
+
   const supabase = await createSupabaseServerClient();
   const { error } = await supabase.auth.signInWithOtp({
     email: parsed.data,
     options: {
       shouldCreateUser: true,
       // Built from configuration, never from the request Host header.
-      emailRedirectTo: `${getSiteUrl()}/auth/callback`,
+      emailRedirectTo: `${getSiteUrl()}/auth/callback?next=${encodeURIComponent(next)}`,
     },
   });
 
@@ -97,5 +105,9 @@ export async function verifySignInCodeAction(
     );
   }
 
-  redirect('/dashboard');
+  redirect(
+    safeRedirectPath(
+      typeof formData.get('next') === 'string' ? String(formData.get('next')) : null,
+    ),
+  );
 }

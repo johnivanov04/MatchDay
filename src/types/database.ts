@@ -105,6 +105,58 @@ export type AuditEventRow = {
   created_at: string;
 };
 
+export type JoinRequestStatus = 'pending' | 'approved' | 'rejected' | 'withdrawn';
+
+export type LeagueJoinRequestRow = {
+  id: string;
+  league_id: string;
+  user_id: string;
+  status: JoinRequestStatus;
+  message: string | null;
+  decided_by: string | null;
+  decided_at: string | null;
+  decision_note: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+/**
+ * Phase 2 invitation.
+ *
+ * `token_hash` is intentionally absent from this type. `authenticated` holds a
+ * column-level grant that excludes it, so selecting it fails at the database;
+ * leaving it out of the type means a `select *` cannot be written by accident
+ * either.
+ */
+export type LeagueInviteRow = {
+  id: string;
+  league_id: string;
+  label: string | null;
+  grants_status: Extract<MembershipStatus, 'active' | 'pending'>;
+  max_uses: number | null;
+  use_count: number;
+  expires_at: string;
+  revoked_at: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+/**
+ * The public search projection — exactly the fields PRD §12 permits in a public
+ * or search result. Adding a field here means adding it to the view, which
+ * means re-reading PRD §12 first.
+ */
+export type SearchableLeaguePublicRow = {
+  id: string;
+  slug: string;
+  name: string;
+  general_area: string;
+  sport_label: string;
+  typical_schedule: string | null;
+  description: string;
+};
+
 export type LeagueMembershipAdminNoteRow = {
   id: string;
   league_id: string;
@@ -168,9 +220,94 @@ export interface Database {
         Update: Partial<Pick<LeagueMembershipAdminNoteRow, 'note'>>;
         Relationships: [];
       };
+      league_join_requests: {
+        Row: LeagueJoinRequestRow;
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      league_invites: {
+        Row: LeagueInviteRow;
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
     };
-    Views: Record<string, never>;
+    Views: {
+      searchable_leagues_public: {
+        Row: SearchableLeaguePublicRow;
+        Relationships: [];
+      };
+    };
     Functions: {
+      create_league: {
+        Args: {
+          p_name: string;
+          p_slug: string;
+          p_general_area: string;
+          p_timezone: string;
+          p_sport_label: string;
+          p_description: string;
+          p_default_capacity: number;
+          p_default_min_players?: number;
+          p_default_selection_mode?: SelectionMode;
+          p_default_waitlist_mode?: WaitlistMode;
+          p_default_team_count?: number;
+          p_default_location?: string | null;
+          p_typical_schedule?: string | null;
+          p_gender_field_enabled?: boolean;
+          p_goalkeeper_field_enabled?: boolean;
+        };
+        Returns: string;
+      };
+      request_to_join_league: {
+        Args: { p_league_id: string; p_message?: string | null };
+        Returns: string;
+      };
+      withdraw_join_request: {
+        Args: { p_request_id: string };
+        Returns: undefined;
+      };
+      decide_join_request: {
+        Args: { p_request_id: string; p_approve: boolean; p_note?: string | null };
+        Returns: string | null;
+      };
+      create_league_invite: {
+        Args: {
+          p_league_id: string;
+          p_token: string;
+          p_label?: string | null;
+          p_grants_status?: MembershipStatus;
+          p_max_uses?: number | null;
+          p_expires_in_days?: number;
+        };
+        Returns: string;
+      };
+      revoke_league_invite: {
+        Args: { p_invite_id: string };
+        Returns: undefined;
+      };
+      redeem_league_invite: {
+        Args: { p_token: string };
+        Returns: {
+          league_id: string;
+          membership_id: string;
+          status: MembershipStatus;
+          joined: boolean;
+        };
+      };
+      add_league_member_by_email: {
+        Args: { p_league_id: string; p_email: string; p_status?: MembershipStatus };
+        Returns: string;
+      };
+      transfer_league_administration: {
+        Args: {
+          p_league_id: string;
+          p_target_membership_id: string;
+          p_reason?: string | null;
+        };
+        Returns: undefined;
+      };
       record_audit_event: {
         Args: {
           p_league_id: string;
@@ -190,6 +327,7 @@ export interface Database {
       membership_status: MembershipStatus;
       selection_mode: SelectionMode;
       waitlist_mode: WaitlistMode;
+      join_request_status: JoinRequestStatus;
     };
     CompositeTypes: Record<string, never>;
   };

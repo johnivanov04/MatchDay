@@ -40,6 +40,7 @@ const mocks = vi.hoisted(() => {
     }),
     getSessionUser: vi.fn(),
     getCurrentProfile: vi.fn(),
+    findMyLeagueBySlug: vi.fn(),
   };
 });
 
@@ -48,11 +49,18 @@ vi.mock('@/lib/auth/session', () => ({
   getSessionUser: mocks.getSessionUser,
   getCurrentProfile: mocks.getCurrentProfile,
 }));
+vi.mock('@/lib/leagues/league-admin', () => ({
+  findMyLeagueBySlug: mocks.findMyLeagueBySlug,
+}));
 
 const {
+  DASHBOARD_NOTICES,
   DASHBOARD_PATH,
   ONBOARDING_PATH,
   SIGN_IN_PATH,
+  dashboardPathWithNotice,
+  parseDashboardNotice,
+  requireLeagueAdminPage,
   requireOnboardedUser,
   requireOnboardingCandidate,
   requireSignedInUser,
@@ -172,6 +180,118 @@ describe('requireOnboardingCandidate', () => {
 
     await expect(requireOnboardingCandidate()).resolves.toEqual(SESSION_USER);
     expect(mocks.redirect).not.toHaveBeenCalled();
+  });
+});
+
+describe('requireLeagueAdminPage', () => {
+  const league = { id: 'league-1', slug: 'sunday-futsal', name: 'Sunday Futsal' };
+
+  function membership(role: 'league_admin' | 'player', status = 'active') {
+    return { league, membership: { id: 'm-1', league_id: league.id, role, status } };
+  }
+
+  beforeEach(() => {
+    mocks.getSessionUser.mockResolvedValue(SESSION_USER);
+    mocks.getCurrentProfile.mockResolvedValue(PROFILE);
+  });
+
+  it('lets the league administrator through', async () => {
+    mocks.findMyLeagueBySlug.mockResolvedValue(membership('league_admin'));
+
+    const result = await requireLeagueAdminPage('sunday-futsal');
+
+    expect(result.league).toEqual(league);
+    expect(result.user).toEqual(SESSION_USER);
+    expect(mocks.redirect).not.toHaveBeenCalled();
+  });
+
+  it('redirects a player to the dashboard instead of throwing', async () => {
+    // The regression this exists for: a thrown DomainError here surfaces as an
+    // unhandled Next.js error, because it escapes a Server Component render.
+    mocks.findMyLeagueBySlug.mockResolvedValue(membership('player'));
+
+    const path = await expectRedirect(() => requireLeagueAdminPage('sunday-futsal'));
+
+    expect(path).toBe(dashboardPathWithNotice(DASHBOARD_NOTICES.notLeagueAdmin));
+    expect(path.startsWith(DASHBOARD_PATH)).toBe(true);
+  });
+
+  it('redirects a former administrator once they hold a player membership', async () => {
+    // Exactly the post-transfer state: still on the members route, no longer
+    // entitled to it.
+    mocks.findMyLeagueBySlug.mockResolvedValue(membership('player'));
+
+    const error = await requireLeagueAdminPage('sunday-futsal').catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(mocks.RedirectSignal);
+    expect((error as Error).message).toContain('NEXT_REDIRECT');
+    expect((error as Error).message).not.toContain('NOT_LEAGUE_ADMIN');
+  });
+
+  it.each([
+    ['suspended', 'league_admin'],
+    ['pending', 'league_admin'],
+    ['removed', 'league_admin'],
+  ])('redirects an administrator whose membership is %s', async (status, role) => {
+    mocks.findMyLeagueBySlug.mockResolvedValue(
+      membership(role as 'league_admin', status),
+    );
+
+    const path = await expectRedirect(() => requireLeagueAdminPage('sunday-futsal'));
+    expect(path).toBe(dashboardPathWithNotice(DASHBOARD_NOTICES.notLeagueAdmin));
+  });
+
+  it('gives an unknown slug the same answer as a league the caller only plays in', async () => {
+    // A distinguishable response would let anyone probe for private leagues by
+    // guessing slugs.
+    mocks.findMyLeagueBySlug.mockResolvedValue(null);
+    const unknown = await expectRedirect(() => requireLeagueAdminPage('does-not-exist'));
+
+    mocks.findMyLeagueBySlug.mockResolvedValue(membership('player'));
+    const notAdmin = await expectRedirect(() => requireLeagueAdminPage('sunday-futsal'));
+
+    expect(unknown).toBe(notAdmin);
+  });
+
+  it('sends an unauthenticated visitor to sign-in, not to the dashboard', async () => {
+    mocks.getSessionUser.mockResolvedValue(null);
+
+    expect(await expectRedirect(() => requireLeagueAdminPage('sunday-futsal'))).toBe(SIGN_IN_PATH);
+    expect(mocks.findMyLeagueBySlug).not.toHaveBeenCalled();
+  });
+
+  it('lets a genuine failure surface rather than redirecting', async () => {
+    mocks.findMyLeagueBySlug.mockRejectedValue(new Error('connection terminated unexpectedly'));
+
+    await expect(requireLeagueAdminPage('sunday-futsal')).rejects.toThrow(
+      'connection terminated unexpectedly',
+    );
+    expect(mocks.redirect).not.toHaveBeenCalled();
+  });
+});
+
+describe('dashboard notices', () => {
+  it('accepts only known codes', () => {
+    expect(parseDashboardNotice(DASHBOARD_NOTICES.notLeagueAdmin)).toBe(
+      DASHBOARD_NOTICES.notLeagueAdmin,
+    );
+    expect(parseDashboardNotice(DASHBOARD_NOTICES.administrationTransferred)).toBe(
+      DASHBOARD_NOTICES.administrationTransferred,
+    );
+  });
+
+  it.each([
+    ['made-up-code'],
+    ['<script>alert(1)</script>'],
+    [''],
+    [null],
+    [undefined],
+    [42],
+    [['not-league-admin']],
+  ])('rejects %s', (candidate) => {
+    // The notice only chooses a sentence, but an unvalidated value would still
+    // reach the DOM as a lookup key.
+    expect(parseDashboardNotice(candidate)).toBeNull();
   });
 });
 

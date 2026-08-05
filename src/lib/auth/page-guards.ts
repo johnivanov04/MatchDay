@@ -2,7 +2,8 @@ import 'server-only';
 
 import { redirect } from 'next/navigation';
 import { getCurrentProfile, getSessionUser, type SessionUser } from '@/lib/auth/session';
-import type { ProfileRow } from '@/types/database';
+import { findMyLeagueBySlug } from '@/lib/leagues/league-admin';
+import type { LeagueMembershipRow, LeagueRow, ProfileRow } from '@/types/database';
 
 /**
  * Route guards for pages and layouts.
@@ -30,6 +31,32 @@ import type { ProfileRow } from '@/types/database';
 export const SIGN_IN_PATH = '/sign-in';
 export const ONBOARDING_PATH = '/onboarding';
 export const DASHBOARD_PATH = '/dashboard';
+
+/**
+ * Why a redirect carries a notice code.
+ *
+ * Bouncing someone to the dashboard with no explanation reads as a broken link.
+ * These codes let the dashboard say what happened. They are display hints only:
+ * nothing is authorized from them, and a fabricated one can at most show the
+ * wrong sentence to the person who fabricated it.
+ */
+export const DASHBOARD_NOTICES = {
+  administrationTransferred: 'administration-transferred',
+  notLeagueAdmin: 'not-league-admin',
+} as const;
+
+export type DashboardNotice = (typeof DASHBOARD_NOTICES)[keyof typeof DASHBOARD_NOTICES];
+
+export function dashboardPathWithNotice(notice: DashboardNotice): string {
+  return `${DASHBOARD_PATH}?notice=${notice}`;
+}
+
+export function parseDashboardNotice(value: unknown): DashboardNotice | null {
+  return typeof value === 'string' &&
+    (Object.values(DASHBOARD_NOTICES) as string[]).includes(value)
+    ? (value as DashboardNotice)
+    : null;
+}
 
 /** The signed-in user, or a clean redirect to sign-in. */
 export async function requireSignedInUser(): Promise<SessionUser> {
@@ -67,6 +94,48 @@ export async function requireOnboardedUser(): Promise<OnboardedUser> {
   }
 
   return { user, profile };
+}
+
+export interface LeagueAdminPage {
+  user: SessionUser;
+  profile: ProfileRow;
+  league: LeagueRow;
+  membership: LeagueMembershipRow;
+}
+
+/**
+ * Guard for the administrator-only league pages.
+ *
+ * `requireLeagueAdmin()` from `@/lib/auth/authorization` stays exactly as it is
+ * and remains the check used by every server action — it throws
+ * `NOT_LEAGUE_ADMIN`, which is right when a caller turns that into an
+ * `ActionResult`. It is the wrong shape for a *render*: an ordinary error
+ * escaping a Server Component is reported by Next.js as an unhandled
+ * application error, which is what a demoted administrator saw after handing
+ * over a league while still sitting on `/leagues/[slug]/members`.
+ *
+ * So this guard expresses the same rule as a redirect. It is not weaker: it
+ * still requires an active `league_admin` membership, still derives the actor
+ * from the session, and Row Level Security refuses the underlying rows
+ * independently.
+ *
+ * An unknown slug and a league the caller merely plays in produce the *same*
+ * redirect. A distinguishable answer would let anyone probe which private
+ * leagues exist by URL.
+ */
+export async function requireLeagueAdminPage(slug: string): Promise<LeagueAdminPage> {
+  const { user, profile } = await requireOnboardedUser();
+  const entry = await findMyLeagueBySlug(slug);
+
+  if (
+    entry === null ||
+    entry.membership.status !== 'active' ||
+    entry.membership.role !== 'league_admin'
+  ) {
+    redirect(dashboardPathWithNotice(DASHBOARD_NOTICES.notLeagueAdmin));
+  }
+
+  return { user, profile, league: entry.league, membership: entry.membership };
 }
 
 /**

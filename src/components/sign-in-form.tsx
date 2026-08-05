@@ -8,7 +8,7 @@ import { requestSignInEmailAction, verifySignInCodeAction } from '@/server/actio
  * Email-only sign-in. The same email carries a magic link and a 6-digit code,
  * so a player who opens their mail on a different device is not stuck.
  */
-export function SignInForm() {
+export function SignInForm({ nextPath }: { nextPath: string }) {
   const [emailState, submitEmail, sendingEmail] = useActionState(requestSignInEmailAction, null);
   const [codeState, submitCode, verifyingCode] = useActionState(verifySignInCodeAction, null);
   const [email, setEmail] = useState('');
@@ -28,6 +28,7 @@ export function SignInForm() {
 
         <form action={submitCode} className="flex flex-col gap-4">
           <input type="hidden" name="email" value={sentTo} />
+          <input type="hidden" name="next" value={nextPath} />
           <FormError
             message={codeState?.ok === false ? codeState.fieldErrors['form'] : undefined}
           />
@@ -56,6 +57,7 @@ export function SignInForm() {
 
   return (
     <form action={submitEmail} className="flex flex-col gap-4">
+      <input type="hidden" name="next" value={nextPath} />
       <FormError message={emailState?.ok === false ? emailState.fieldErrors['form'] : undefined} />
       <Field
         label="Email address"
