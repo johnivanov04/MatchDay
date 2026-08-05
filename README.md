@@ -7,11 +7,19 @@ hard-coded to any one club or format.
 RMV Football Club is the first pilot configuration (11v11, 22 players). A 5v5
 league with 10 players is equally first-class.
 
-**Current state: Phase 1 (foundation) only.** Authentication, global profiles,
-leagues, memberships, tenant-aware Row Level Security, the audit-event
-foundation and the league-switcher shell. Matches, signup, rosters, waitlists,
-teams, notifications and attendance are later phases — see
-[`NEXT_STEPS.md`](NEXT_STEPS.md).
+**Current state: Phases 1–2.**
+
+- **Phase 1** — authentication, global profiles, leagues, memberships,
+  tenant-aware Row Level Security, the audit-event foundation, the
+  league-switcher shell.
+- **Phase 2** — league creation, private/searchable visibility, public
+  discovery through a limited projection, join requests with administrator
+  approval, revocable invitation links, manual member addition, atomic
+  administrator transfer, league settings, and audit events for every
+  administrative change.
+
+Matches, signup, rosters, waitlists, teams, notifications and attendance are
+later phases — see [`NEXT_STEPS.md`](NEXT_STEPS.md).
 
 The product specification is the source of truth and lives in
 [`docs/product/`](docs/product/). Decisions taken after v0.2 are recorded in
@@ -124,7 +132,14 @@ one.
 | `…010800_user_app_state` | Active-league selection, validated against live membership |
 | `…010900_authorization_functions` | RLS helpers and `record_audit_event` |
 | `…011000_row_level_security` | RLS enabled + forced, and every policy |
-| `…011100_grants` | Deny-by-default privileges; `anon` gets nothing |
+| `…011100_grants` | Deny-by-default table privileges |
+| `…020000_join_requests_and_invites` | `league_join_requests`, `league_invites` (digest-only tokens) |
+| `…020100_public_league_search` | `searchable_leagues_public` — the seven-column public projection |
+| `…020200_league_management_functions` | Create, join, decide, invite, redeem, add-by-email, transfer |
+| `…020300_audit_triggers` | Audit on every league and membership change, whatever the path |
+| `…020400_phase2_rls_and_grants` | Phase 2 RLS, column-level grants, `anon` gets the view only |
+| `…020500_harden_admin_cardinality_trigger` | Makes the single-admin check independent of caller RLS |
+| `…020600_function_execute_hardening` | Revokes `EXECUTE` from `PUBLIC`; re-grants by name |
 
 ### Exactly one active league administrator
 
@@ -154,6 +169,31 @@ all.
 | `league_membership_admin_notes` | league administrator | league administrator |
 | `audit_events` | league administrator | none — `record_audit_event()` or service role only |
 | `user_app_state` | own row | own row |
+| `league_join_requests` | own requests, or league administrator | none — functions only |
+| `league_invites` | league administrator, **minus `token_hash`** | none — functions only |
+| `searchable_leagues_public` | **anyone**, including `anon` | — (view) |
+
+### Public discovery
+
+`searchable_leagues_public` is the only object `anon` may read. It publishes
+exactly seven columns — `id`, `slug`, `name`, `general_area`, `sport_label`,
+`typical_schedule`, `description` — for leagues whose visibility is
+`searchable`. The `leagues` base table stays member-only; publishing a league
+never widens it. Withheld on purpose: `default_location` (PRD §12 forbids exact
+private locations), `settings_json`, every capacity/threshold/mode default,
+`logo_url`, `public_contact` and `created_by`.
+
+### Invitation links
+
+32 bytes from the platform CSPRNG, base64url. The raw token is shown to the
+creating administrator **once** and never stored — only `sha256(token)` reaches
+the database, hashed inside `create_league_invite()`. Reading `league_invites`,
+even as its own administrator, yields nothing redeemable: `token_hash` is
+excluded by a column-level grant. Every invitation expires (14 days by default,
+90 maximum), can be revoked, and may carry a usage limit. Redemption is
+idempotent and does not spend a use for someone who already belongs. A bad,
+expired, revoked or exhausted link all fail identically, so a guessed token
+cannot confirm that a private league exists.
 
 Policies call `SECURITY DEFINER` helpers (`is_league_member`, `is_active_member`,
 `is_league_admin`, `administers_league_of_user`) that break RLS recursion, pin
@@ -247,7 +287,8 @@ supabase/
   migrations/       forward-only SQL migrations
   seed.sql          local development seed
 src/
-  app/              routes: sign-in, auth callback, onboarding, dashboard, profile
+  app/              routes: sign-in, auth callback, onboarding, dashboard,
+                    profile, league create/discover/settings/members, invite
   components/       app shell, league switcher, forms
   lib/              env, errors, Supabase clients, auth + authorization, audit
   server/actions/   server actions (auth, profile, active league)
@@ -262,8 +303,7 @@ tests/
 
 ## Not built yet
 
-League creation UI, invitations, public search, join requests, guidelines,
-match templates, matches, RSVP, roster selection, waitlists, notifications,
-service workers, Web Push, cancellations, attendance, team building, billing and
-native apps are all out of Phase 1 scope. See [`TODO.md`](TODO.md) and
-[`NEXT_STEPS.md`](NEXT_STEPS.md).
+Guidelines acknowledgement, match templates, matches, RSVP, roster selection,
+waitlists, notifications, service workers, Web Push, cancellations, attendance,
+team building, billing and native apps are all out of scope through Phase 2. See
+[`TODO.md`](TODO.md) and [`NEXT_STEPS.md`](NEXT_STEPS.md).

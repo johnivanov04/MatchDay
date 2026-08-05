@@ -8,6 +8,38 @@ newly discovered while building the foundation.
 
 ---
 
+## Security follow-ups found while building Phase 2
+
+Two defects were found by Phase 2's own tests and fixed forward. Both are worth
+remembering as patterns rather than one-off bugs:
+
+- **Integrity triggers must not depend on the caller's RLS.**
+  `enforce_single_active_league_admin()` was not `SECURITY DEFINER`, so its
+  "was this league deleted?" guard was answered by the caller's visibility. An
+  administrator who removed their own membership made the league invisible to
+  themselves, the guard skipped the check, and the league could commit with zero
+  administrators. Fixed in `20260803020500`. Audit any future trigger that reads
+  a table for the same mistake.
+- **An expected authorization outcome must be a redirect, not a throw, inside a
+  render.** This has now bitten three times: `PROFILE_INCOMPLETE` on the
+  dashboard (Phase 1), and `NOT_LEAGUE_ADMIN` on the members and settings pages
+  after an administration transfer (Phase 2). A `DomainError` escaping a Server
+  Component is reported by Next.js as an unhandled application error — the user
+  sees a 500 even though the app behaved correctly. Server actions keep the
+  throwing helpers (`requireLeagueAdmin`) because they turn them into an
+  `ActionResult`; pages use the redirecting guards in `@/lib/auth/page-guards`.
+  **Any new admin-only route must use `requireLeagueAdminPage()`.**
+- **An action that revokes the caller's own access to the current route must
+  `redirect()`, not just `revalidatePath()`.** Revalidation re-renders the route
+  the caller is standing on, which is exactly the one they just lost. And the
+  `redirect()` must sit outside the action's try/catch, or `actionFailure`
+  swallows the `NEXT_REDIRECT` signal and turns a success into a generic error.
+- **`REVOKE ... FROM anon, authenticated` does not remove a function's `PUBLIC`
+  grant.** PostgreSQL grants `EXECUTE` to `PUBLIC` by default, so the revokes in
+  the Phase 1 grants migration had no effect and the unchecked audit writer was
+  callable by any signed-in user. Fixed in `20260803020600`, which revokes from
+  `PUBLIC` and re-grants by name.
+
 ## Carried over from Phase 1 (deliberately deferred)
 
 - [ ] **Gender field values.** No product document enumerates them, so `gender`
@@ -32,26 +64,33 @@ newly discovered while building the foundation.
       Re-run `npm run test:db` against `TEST_DATABASE_URL` pointing at the local
       Supabase stack before the first deployment.
 
-## Phase 2 — League creation, invitations, discovery, join requests
+## Phase 2 — complete
 
-- [ ] `createLeague` as a single transactional function: insert the league **and**
-      its administrator membership together. The deferred constraint trigger
-      rejects a league committed without exactly one active administrator, so
-      this cannot be two separate statements.
-- [ ] `transferLeagueAdministration`, demoting the outgoing administrator
-      **before** promoting the incoming one. The partial unique index is not
-      deferrable; see `tests/db/single-active-admin.test.ts` for both orderings.
-- [ ] `league_join_requests` table, with a unique active-pending request per
-      league and user.
-- [ ] `league_invites` table: hashed token, expiry, usage limit, revocation.
-- [ ] Public search projection — a **view** exposing only name, general area,
-      sport label, typical schedule and description for `searchable` leagues.
-      Do not widen the `leagues` RLS policy to achieve it.
-- [ ] `anon` grants for that view only. Everything else stays denied.
-- [ ] INSERT policies for `league_memberships` once joining exists.
-- [ ] Manual member addition by email.
-- [ ] League settings screen, with an audit event on every change (the write path
-      already exists: `recordAuditEvent`).
+Delivered: transactional `create_league`, atomic administrator transfer,
+`league_join_requests`, `league_invites` with digest-only tokens, the
+`searchable_leagues_public` projection, `anon` grants limited to that view,
+manual member addition, the league settings screen, and audit triggers covering
+every league and membership change.
+
+Carried forward from Phase 2:
+
+- [ ] **Account-existence oracle in add-by-email.** `add_league_member_by_email()`
+      necessarily reveals whether an address has a Matchday account, and anyone
+      can create a league to become an administrator. F-03 requires the feature.
+      Mitigation to consider: rate-limit per administrator, and offer
+      "invite by email" that sends a link and reports success either way.
+- [ ] **No rate limiting** on league creation, join requests or invite
+      redemption. A single account can create unlimited leagues and burn invite
+      guesses without penalty. Redemption guessing is not a realistic threat at
+      256 bits, but the endpoints deserve a limiter.
+- [ ] **Administrator notes UI** still absent; `league_membership_admin_notes`
+      remains written only by the seed.
+- [ ] **Slug changes are not offered** in the settings form, so a league's
+      address is fixed after creation. Add a rename flow with redirect handling
+      if leagues ask for it.
+- [ ] **Invite links are not emailed.** The administrator copies the link and
+      distributes it. Sending it requires the email infrastructure that Phase 3
+      notifications will introduce.
 - [ ] Move `eligibility_notes` handling into the admin-notes table's UI rather
       than onto the membership row — see the note in
       `20260803010600_league_membership_admin_notes.sql`.

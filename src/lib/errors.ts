@@ -24,6 +24,12 @@ export const DOMAIN_ERROR_CODES = [
   'NOTIFICATION_NOT_FOUND',
   'NOT_AUTHORIZED',
   'VALIDATION_FAILED',
+  // Phase 2 additions. 02 §21 predates league creation, invitations and
+  // discovery; these extend that list rather than renaming anything in it.
+  'MEMBERSHIP_EXISTS',
+  'INVITE_INVALID',
+  'PROFILE_NOT_FOUND',
+  'SLUG_TAKEN',
 ] as const;
 
 export type DomainErrorCode = (typeof DOMAIN_ERROR_CODES)[number];
@@ -56,6 +62,12 @@ const USER_FACING_MESSAGES: Record<DomainErrorCode, string> = {
   NOTIFICATION_NOT_FOUND: 'That notification is no longer available.',
   NOT_AUTHORIZED: 'You do not have permission to do that.',
   VALIDATION_FAILED: 'Please check the highlighted fields and try again.',
+  MEMBERSHIP_EXISTS: 'You already belong to that league.',
+  // Deliberately identical for a bad, expired, revoked or exhausted link: the
+  // distinction would tell a probe that a private league exists.
+  INVITE_INVALID: 'That invitation link is not valid or has expired.',
+  PROFILE_NOT_FOUND: 'No Matchday account uses that email address.',
+  SLUG_TAKEN: 'That league address is already taken.',
 };
 
 export class DomainError extends Error {

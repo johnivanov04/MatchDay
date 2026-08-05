@@ -134,11 +134,31 @@ describe('schema', () => {
       expect(rows.map((row) => row.relname)).toEqual([]);
     });
 
-    it('grants the anon role no privileges on any public table', async () => {
+    it('grants the anon role nothing beyond the public search projection', async () => {
+      // Phase 1 granted `anon` nothing at all. Phase 2 publishes exactly one
+      // object to unauthenticated visitors: the seven-column
+      // `searchable_leagues_public` view (PRD §12). Asserting the precise list
+      // is stronger than asserting emptiness — it fails if any base table, or
+      // any second view, is ever exposed.
       const { rows } = await db.pool.query<{ table_name: string; privilege_type: string }>(
         `select table_name, privilege_type
            from information_schema.role_table_grants
-          where table_schema = 'public' and grantee = 'anon'`,
+          where table_schema = 'public' and grantee = 'anon'
+          order by table_name, privilege_type`,
+      );
+
+      expect(rows).toEqual([
+        { table_name: 'searchable_leagues_public', privilege_type: 'SELECT' },
+      ]);
+    });
+
+    it('grants the anon role nothing on any base table', async () => {
+      const { rows } = await db.pool.query<{ table_name: string }>(
+        `select g.table_name
+           from information_schema.role_table_grants g
+           join pg_class c on c.relname = g.table_name
+           join pg_namespace n on n.oid = c.relnamespace and n.nspname = 'public'
+          where g.table_schema = 'public' and g.grantee = 'anon' and c.relkind = 'r'`,
       );
       expect(rows).toEqual([]);
     });

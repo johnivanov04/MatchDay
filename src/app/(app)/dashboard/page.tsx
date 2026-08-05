@@ -1,18 +1,50 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
-import { requireOnboardedUser } from '@/lib/auth/page-guards';
+import {
+  DASHBOARD_NOTICES,
+  parseDashboardNotice,
+  requireOnboardedUser,
+  type DashboardNotice,
+} from '@/lib/auth/page-guards';
 import { getLeagueContext } from '@/lib/leagues/active-league';
 
 export const metadata: Metadata = { title: 'Home' };
 
-export default async function DashboardPage() {
+/**
+ * Explains why someone arrived here from somewhere else.
+ *
+ * Purely informational. The redirect that produced it already enforced the
+ * rule; this only stops a clean redirect from reading as a broken link.
+ */
+const NOTICE_MESSAGES: Record<DashboardNotice, string> = {
+  [DASHBOARD_NOTICES.administrationTransferred]:
+    'Administration transferred. You are now an ordinary player in that league.',
+  [DASHBOARD_NOTICES.notLeagueAdmin]:
+    'That page is only available to the league administrator.',
+};
+
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const { profile } = await requireOnboardedUser();
   const { active, switcher } = await getLeagueContext();
+  const notice = parseDashboardNotice((await searchParams)['notice']);
   const totalMemberships =
     switcher.active.length + switcher.pending.length + switcher.suspended.length;
 
   return (
     <>
+      {notice === null ? null : (
+        <p
+          role="status"
+          className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-raised)] px-3 py-2 text-sm"
+        >
+          {NOTICE_MESSAGES[notice]}
+        </p>
+      )}
+
       <section className="flex flex-col gap-2">
         <h1 className="text-2xl font-bold">Hello, {profile.first_name}</h1>
         <p className="text-sm text-muted">
@@ -28,7 +60,7 @@ export default async function DashboardPage() {
           <p className="mt-1 text-sm text-muted">
             {switcher.pending.length > 0
               ? 'Your membership is still awaiting approval from the league administrator.'
-              : 'Joining a league happens through an invitation or a join request, which arrive in the next phase.'}
+              : 'Find a searchable league to join, open an invitation link, or create your own.'}
           </p>
         </section>
       ) : (

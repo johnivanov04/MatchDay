@@ -47,6 +47,23 @@ export const SEED_MEMBERSHIPS = {
   fivesPending: '33333333-3333-4333-8333-000000000013',
 } as const;
 
+/** Phase 2 fixtures. */
+export const SEED_JOIN_REQUESTS = {
+  /** `outsider` → Weeknight 5v5, still pending. */
+  outsiderToFives: '66666666-6666-4666-8666-000000000001',
+} as const;
+
+export const SEED_INVITES = {
+  /** A live invitation to the private RMVFC league. */
+  rmvfc: '77777777-7777-4777-8777-000000000001',
+} as const;
+
+/**
+ * The raw token behind `SEED_INVITES.rmvfc`. Public by design — the seed stores
+ * only its SHA-256 digest, exactly as `create_league_invite()` does.
+ */
+export const SEED_INVITE_TOKEN = 'matchday-local-development-invite-token-0001';
+
 export interface SeedUser {
   readonly id: string;
   readonly email: string;
@@ -120,6 +137,7 @@ async function inRole<T>(
   role: 'anon' | 'authenticated' | 'service_role',
   claims: Record<string, unknown> | null,
   fn: (client: PoolClient) => Promise<T>,
+  commit = false,
 ): Promise<T> {
   const client = await db.pool.connect();
   try {
@@ -133,15 +151,22 @@ async function inRole<T>(
       ]);
     }
     await client.query(`set local role ${role}`);
-    return await fn(client);
+    const result = await fn(client);
+    if (commit) {
+      // Reset the role first: COMMIT itself is unrestricted, but the deferred
+      // constraint triggers that fire during it must not run as `authenticated`.
+      await client.query('reset role');
+      await client.query('commit');
+    }
+    return result;
   } finally {
-    // Always roll back: an RLS probe must never leave residue for the next
-    // test, and a write that is *expected* to succeed is asserted inside the
-    // transaction before it is discarded.
+    // Roll back unless the caller asked to commit: an RLS probe must never
+    // leave residue for the next test, and a write that is *expected* to
+    // succeed is asserted inside the transaction before it is discarded.
     try {
       await client.query('rollback');
     } catch {
-      /* the transaction was already aborted by the failure under test */
+      /* already committed, or the transaction was aborted by the failure under test */
     }
     client.release();
   }
@@ -163,6 +188,28 @@ export async function asUser<T>(
     role: 'authenticated',
     aud: 'authenticated',
   }, fn);
+}
+
+/**
+ * As `asUser`, but COMMITs instead of rolling back.
+ *
+ * Needed wherever the behaviour under test only happens at COMMIT — the
+ * deferred single-administrator constraint, most importantly. A test that
+ * always rolled back would never fire it and would pass whether or not the
+ * constraint existed. Use a per-test database with this.
+ */
+export async function asUserCommitting<T>(
+  db: TestDatabase,
+  user: SeedUser,
+  fn: (client: PoolClient) => Promise<T>,
+): Promise<T> {
+  return inRole(
+    db,
+    'authenticated',
+    { sub: user.id, email: user.email, role: 'authenticated', aud: 'authenticated' },
+    fn,
+    true,
+  );
 }
 
 /** Runs `fn` as an unauthenticated visitor (role `anon`, no claims). */
