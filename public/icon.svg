@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Matchday">
+  <rect width="512" height="512" rx="112" fill="#1f7a4d" />
+  <circle cx="256" cy="256" r="150" fill="none" stroke="#ffffff" stroke-width="26" />
+  <path d="M256 150 L318 196 L294 268 L218 268 L194 196 Z" fill="#ffffff" />
+  <path d="M256 150 L256 106 M318 196 L360 182 M294 268 L320 306 M218 268 L192 306 M194 196 L152 182"
+        stroke="#ffffff" stroke-width="20" stroke-linecap="round" />
+</svg>

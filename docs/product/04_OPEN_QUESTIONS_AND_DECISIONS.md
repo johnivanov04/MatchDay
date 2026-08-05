@@ -92,10 +92,10 @@
 > The in-app centre remains the source of truth; Web Push is a delivery channel
 > layered on top of it.
 >
-> Recorded as a **future requirement**. Not implemented in Phase 1: no
-> notifications, service workers, push subscriptions or Web Push exist in the
-> Phase 1 codebase. The in-app centre arrives in Phase 3; Web Push in a later
-> phase.
+> **Implemented in Phase 3 (2026-08-05).** Both halves shipped together: the
+> canonical in-app notification centre *and* opt-in Web Push phone
+> notifications. Web Push is no longer future work or an open option anywhere
+> in this repository.
 >
 > Full record: [`docs/decisions/0001-notifications-in-app-center-plus-web-push.md`](../decisions/0001-notifications-in-app-center-plus-web-push.md).
 
@@ -113,7 +113,10 @@ The options that were under consideration:
 - Requires service worker, push subscription storage, permission UX, browser/device testing, and delivery infrastructure.
 - On iPhone, users generally need the PWA installed before web push is useful.
 
-**Outcome:** Option B was chosen. Build the in-app inbox as the source of truth first, then add Web Push on top of the same channel-independent notification events. Email remains limited to authentication.
+**Outcome:** Option B was chosen and is now built. The in-app inbox is the
+source of truth (`public.notifications`); Web Push delivers copies of those
+records to opted-in devices and can fail without affecting them. Email remains
+limited to authentication, and no email or SMS notification channel exists.
 
 ## 3. Non-blocking defaults unless changed
 

@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { AppShell } from '@/components/app-shell';
 import { requireOnboardedUser } from '@/lib/auth/page-guards';
 import { getLeagueContext } from '@/lib/leagues/active-league';
+import { getUnreadNotificationCount } from '@/lib/notifications/notifications';
 
 /**
  * Guard for every authenticated page.
@@ -14,10 +15,17 @@ import { getLeagueContext } from '@/lib/leagues/active-league';
  */
 export default async function AuthenticatedLayout({ children }: { children: ReactNode }) {
   const { profile } = await requireOnboardedUser();
-  const leagueContext = await getLeagueContext();
+  const [leagueContext, unreadNotifications] = await Promise.all([
+    getLeagueContext(),
+    getUnreadNotificationCount(),
+  ]);
 
   return (
-    <AppShell displayName={profile.first_name} leagueContext={leagueContext}>
+    <AppShell
+      displayName={profile.first_name}
+      leagueContext={leagueContext}
+      unreadNotifications={unreadNotifications}
+    >
       {children}
     </AppShell>
   );

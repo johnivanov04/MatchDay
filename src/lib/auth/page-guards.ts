@@ -43,6 +43,7 @@ export const DASHBOARD_PATH = '/dashboard';
 export const DASHBOARD_NOTICES = {
   administrationTransferred: 'administration-transferred',
   notLeagueAdmin: 'not-league-admin',
+  notLeagueMember: 'not-league-member',
 } as const;
 
 export type DashboardNotice = (typeof DASHBOARD_NOTICES)[keyof typeof DASHBOARD_NOTICES];
@@ -136,6 +137,43 @@ export async function requireLeagueAdminPage(slug: string): Promise<LeagueAdminP
   }
 
   return { user, profile, league: entry.league, membership: entry.membership };
+}
+
+export interface LeagueMemberPage {
+  user: SessionUser;
+  profile: ProfileRow;
+  league: LeagueRow;
+  membership: LeagueMembershipRow;
+  isAdmin: boolean;
+}
+
+/**
+ * Guard for member-facing league pages — guidelines, matches, match detail.
+ *
+ * Requires an **active** membership. Pending, suspended and removed members are
+ * redirected, which is also what makes a notification deep link safe to hand
+ * out: authorization is re-checked when the link is opened, so removing
+ * somebody's membership immediately closes every old link they hold.
+ *
+ * An unknown slug, another tenant's slug and an inactive membership all produce
+ * the same redirect, preserving the anti-enumeration behaviour Phase 2
+ * established.
+ */
+export async function requireLeagueMemberPage(slug: string): Promise<LeagueMemberPage> {
+  const { user, profile } = await requireOnboardedUser();
+  const entry = await findMyLeagueBySlug(slug);
+
+  if (entry === null || entry.membership.status !== 'active') {
+    redirect(dashboardPathWithNotice(DASHBOARD_NOTICES.notLeagueMember));
+  }
+
+  return {
+    user,
+    profile,
+    league: entry.league,
+    membership: entry.membership,
+    isAdmin: entry.membership.role === 'league_admin',
+  };
 }
 
 /**

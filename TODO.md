@@ -34,6 +34,15 @@ remembering as patterns rather than one-off bugs:
   the caller is standing on, which is exactly the one they just lost. And the
   `redirect()` must sit outside the action's try/catch, or `actionFailure`
   swallows the `NEXT_REDIRECT` signal and turns a success into a generic error.
+- **`ALTER DEFAULT PRIVILEGES … REVOKE EXECUTE … FROM PUBLIC` silently did
+  nothing.** Phase 2 used it to try to make new functions unreachable by
+  default, and recorded no `pg_default_acl` row, so every Phase 3 function
+  shipped with the built-in `EXECUTE` grant to `PUBLIC` — including the
+  worker-only `record_push_delivery_result`, which could then be used to switch
+  off another person's phone notifications. Fixed in `20260805030900` with an
+  explicit revoke plus an in-function actor check. **Do not trust default
+  privileges**: `tests/db/schema.test.ts` now asserts directly that no function
+  in `public` grants `EXECUTE` to `PUBLIC`, and that assertion is the control.
 - **`REVOKE ... FROM anon, authenticated` does not remove a function's `PUBLIC`
   grant.** PostgreSQL grants `EXECUTE` to `PUBLIC` by default, so the revokes in
   the Phase 1 grants migration had no effect and the unchecked audit writer was
@@ -95,13 +104,30 @@ Carried forward from Phase 2:
       than onto the membership row — see the note in
       `20260803010600_league_membership_admin_notes.sql`.
 
-## Phase 3 — Guidelines, templates, matches, in-app notifications
+## Phase 3 — complete
 
-- [ ] `guideline_versions` and `guideline_acceptances`.
-- [ ] `match_templates` and `matches`.
-- [ ] In-app notification centre with idempotency keys.
-- [ ] Keep notification events channel-independent — Web Push arrives later
-      (see [ADR 0001](docs/decisions/0001-notifications-in-app-center-plus-web-push.md)).
+Delivered: versioned guidelines with immutable acknowledgements and the
+signup-eligibility predicate, match templates and matches with database-side
+timezone resolution, canonical in-app notifications, and opt-in Web Push.
+
+Carried forward from Phase 3:
+
+- [ ] **Real PWA icons.** The manifest ships an SVG with `sizes: "any"`.
+      Generate 192px and 512px PNGs (including a maskable variant) before
+      relying on home-screen install on Android.
+- [ ] **Push delivery is inline, not queued.** `dispatchPushForKeyPrefix` runs
+      inside the request that published the match. It cannot fail the domain
+      operation, but a large league means a slow response. Move it to a queue
+      or a background function before a league grows past a few dozen members.
+- [ ] **No retry scheduler.** A `temporary_failure` is recorded and left. There
+      is nothing that comes back to retry it; `push_delivery_attempts` holds
+      everything a worker would need.
+- [ ] **Reminder scheduling is stored, not executed.** `reminder_offsets` on a
+      template is future-compatible metadata; the scheduler is Phase 5.
+- [ ] **Notification retention.** 04 §3 suggests 90 days in the default UI.
+      Nothing prunes or paginates yet; `archived_at` exists for it.
+- [ ] **Per-type notification preferences.** One enabled/disabled switch per
+      device is the whole model, deliberately. Revisit only if members ask.
 
 ## Phase 4–7
 

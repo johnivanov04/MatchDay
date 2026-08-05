@@ -167,6 +167,179 @@ export type LeagueMembershipAdminNoteRow = {
   updated_at: string;
 };
 
+// ── Phase 3 ────────────────────────────────────────────────────────────────
+
+/** All six states exist in the enum; Phase 3 only transitions between three. */
+export type MatchLifecycleStatus =
+  | 'draft'
+  | 'open'
+  | 'roster_finalized'
+  | 'teams_published'
+  | 'canceled'
+  | 'completed';
+
+export type NotificationType =
+  | 'join_request_submitted'
+  | 'join_request_approved'
+  | 'join_request_rejected'
+  | 'league_invitation_accepted'
+  | 'match_published'
+  | 'match_changed'
+  | 'match_canceled'
+  | 'guideline_version_published'
+  | 'guideline_acceptance_required';
+
+export type PushDeliveryStatus =
+  | 'pending'
+  | 'sent'
+  | 'temporary_failure'
+  | 'permanent_failure'
+  | 'invalidated';
+
+export type GuidelineVersionRow = {
+  id: string;
+  league_id: string;
+  version_label: string;
+  title: string;
+  body: string;
+  document_url: string | null;
+  effective_at: string;
+  requires_acceptance: boolean;
+  published_at: string | null;
+  archived_at: string | null;
+  content_checksum: string;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type GuidelineAcceptanceRow = {
+  id: string;
+  league_id: string;
+  guideline_version_id: string;
+  membership_id: string;
+  accepted_at: string;
+};
+
+export type MatchTemplateRow = {
+  id: string;
+  league_id: string;
+  name: string;
+  day_of_week: number | null;
+  recurrence_note: string | null;
+  arrival_time: string;
+  kickoff_time: string;
+  end_time: string;
+  location_name: string;
+  location_map_url: string | null;
+  capacity: number;
+  min_players: number;
+  selection_mode: SelectionMode;
+  waitlist_mode: WaitlistMode;
+  team_count: number;
+  priority_window: string | null;
+  signup_closes_before: string;
+  cancellation_cutoff_before: string;
+  roster_publish_before: string | null;
+  reminder_offsets: string[];
+  is_active: boolean;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type MatchRow = {
+  id: string;
+  league_id: string;
+  template_id: string | null;
+  title: string;
+  match_date: string;
+  timezone: string;
+  arrival_at: string;
+  kickoff_at: string;
+  end_at: string;
+  location_name: string;
+  location_map_url: string | null;
+  capacity: number;
+  min_players: number;
+  selection_mode: SelectionMode;
+  waitlist_mode: WaitlistMode;
+  team_count: number;
+  priority_window: string | null;
+  priority_window_ends_at: string | null;
+  signup_closes_at: string;
+  cancellation_cutoff_at: string;
+  roster_publish_target_at: string | null;
+  status: MatchLifecycleStatus;
+  public_notes: string | null;
+  revision: number;
+  created_by: string | null;
+  published_at: string | null;
+  canceled_at: string | null;
+  cancellation_reason: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type MatchAdminNoteRow = {
+  match_id: string;
+  league_id: string;
+  notes: string;
+  updated_by: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type NotificationRow = {
+  id: string;
+  recipient_user_id: string;
+  league_id: string;
+  match_id: string | null;
+  type: NotificationType;
+  title: string;
+  body: string;
+  deep_link: string;
+  read_at: string | null;
+  archived_at: string | null;
+  idempotency_key: string;
+  delivery_metadata: Record<string, unknown>;
+  created_at: string;
+};
+
+/**
+ * Push subscription as a client may see it.
+ *
+ * `endpoint`, `p256dh` and `auth_secret` are absent because they are excluded
+ * from the column-level grant — together they are a bearer credential for that
+ * device. Leaving them out of the type means a `select *` cannot be written by
+ * accident either.
+ */
+export type PushSubscriptionRow = {
+  id: string;
+  user_id: string;
+  device_label: string | null;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+  last_seen_at: string;
+  last_success_at: string | null;
+  consecutive_failures: number;
+  disabled_reason: string | null;
+};
+
+export type PushDeliveryAttemptRow = {
+  id: string;
+  notification_id: string;
+  subscription_id: string;
+  status: PushDeliveryStatus;
+  attempt_count: number;
+  last_error_category: string | null;
+  last_attempted_at: string | null;
+  delivered_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 /**
  * Shape expected by the `supabase-js` generics.
  *
@@ -228,6 +401,82 @@ export interface Database {
       };
       league_invites: {
         Row: LeagueInviteRow;
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      guideline_versions: {
+        Row: GuidelineVersionRow;
+        Insert: Pick<
+          GuidelineVersionRow,
+          'league_id' | 'version_label' | 'title' | 'body'
+        > &
+          Partial<
+            Pick<
+              GuidelineVersionRow,
+              'document_url' | 'effective_at' | 'requires_acceptance' | 'created_by'
+            >
+          >;
+        Update: Partial<
+          Pick<
+            GuidelineVersionRow,
+            'version_label' | 'title' | 'body' | 'document_url' | 'effective_at' | 'requires_acceptance'
+          >
+        >;
+        Relationships: [];
+      };
+      guideline_acceptances: {
+        Row: GuidelineAcceptanceRow;
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      match_templates: {
+        Row: MatchTemplateRow;
+        Insert: Omit<MatchTemplateRow, 'id' | 'created_at' | 'updated_at'> & { id?: string };
+        Update: Partial<Omit<MatchTemplateRow, 'id' | 'league_id' | 'created_at' | 'updated_at'>>;
+        Relationships: [];
+      };
+      matches: {
+        Row: MatchRow;
+        Insert: never;
+        Update: Partial<
+          Pick<
+            MatchRow,
+            | 'title'
+            | 'location_name'
+            | 'location_map_url'
+            | 'capacity'
+            | 'min_players'
+            | 'team_count'
+            | 'public_notes'
+            | 'selection_mode'
+            | 'waitlist_mode'
+          >
+        >;
+        Relationships: [];
+      };
+      match_admin_notes: {
+        Row: MatchAdminNoteRow;
+        Insert: Pick<MatchAdminNoteRow, 'match_id' | 'league_id' | 'notes'> &
+          Partial<Pick<MatchAdminNoteRow, 'updated_by'>>;
+        Update: Partial<Pick<MatchAdminNoteRow, 'notes' | 'updated_by'>>;
+        Relationships: [];
+      };
+      notifications: {
+        Row: NotificationRow;
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      push_subscriptions: {
+        Row: PushSubscriptionRow;
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      push_delivery_attempts: {
+        Row: PushDeliveryAttemptRow;
         Insert: never;
         Update: never;
         Relationships: [];
@@ -308,6 +557,107 @@ export interface Database {
         };
         Returns: undefined;
       };
+      current_required_guideline_version: {
+        Args: { p_league_id: string };
+        Returns: string | null;
+      };
+      has_accepted_required_guidelines: {
+        Args: { p_league_id: string };
+        Returns: boolean;
+      };
+      accept_guideline_version: {
+        Args: { p_guideline_version_id: string };
+        Returns: string;
+      };
+      publish_guideline_version: {
+        Args: { p_guideline_version_id: string };
+        Returns: string;
+      };
+      archive_guideline_version: {
+        Args: { p_guideline_version_id: string };
+        Returns: string;
+      };
+      league_guideline_acceptance_status: {
+        Args: { p_league_id: string };
+        Returns: {
+          membership_id: string;
+          user_id: string;
+          membership_status: MembershipStatus;
+          required_version_id: string | null;
+          accepted: boolean;
+          accepted_at: string | null;
+        }[];
+      };
+      create_match: {
+        Args: {
+          p_league_id: string;
+          p_title: string;
+          p_match_date: string;
+          p_arrival_time: string;
+          p_kickoff_time: string;
+          p_end_time: string;
+          p_location_name: string;
+          p_capacity: number;
+          p_min_players: number;
+          p_selection_mode: SelectionMode;
+          p_waitlist_mode: WaitlistMode;
+          p_team_count?: number;
+          p_template_id?: string | null;
+          p_location_map_url?: string | null;
+          p_priority_window?: string | null;
+          p_signup_closes_before?: string;
+          p_cancellation_cutoff_before?: string;
+          p_roster_publish_before?: string | null;
+          p_public_notes?: string | null;
+          p_admin_notes?: string | null;
+        };
+        Returns: string;
+      };
+      publish_match: { Args: { p_match_id: string }; Returns: string };
+      cancel_match: { Args: { p_match_id: string; p_reason?: string | null }; Returns: string };
+      update_published_match: {
+        Args: {
+          p_match_id: string;
+          p_title: string;
+          p_match_date: string;
+          p_arrival_time: string;
+          p_kickoff_time: string;
+          p_end_time: string;
+          p_location_name: string;
+          p_capacity: number;
+          p_min_players: number;
+          p_team_count: number;
+          p_location_map_url?: string | null;
+          p_public_notes?: string | null;
+          p_change_note?: string | null;
+        };
+        Returns: number;
+      };
+      mark_notification_read: { Args: { p_notification_id: string }; Returns: string };
+      mark_all_notifications_read: { Args: Record<string, never>; Returns: number };
+      register_push_subscription: {
+        Args: {
+          p_endpoint: string;
+          p_p256dh: string;
+          p_auth: string;
+          p_device_label?: string | null;
+        };
+        Returns: string;
+      };
+      set_push_subscription_enabled: {
+        Args: { p_subscription_id: string; p_enabled: boolean };
+        Returns: string;
+      };
+      remove_push_subscription: { Args: { p_subscription_id: string }; Returns: undefined };
+      record_push_delivery_result: {
+        Args: {
+          p_notification_id: string;
+          p_subscription_id: string;
+          p_status: PushDeliveryStatus;
+          p_error_category?: string | null;
+        };
+        Returns: undefined;
+      };
       record_audit_event: {
         Args: {
           p_league_id: string;
@@ -328,6 +678,9 @@ export interface Database {
       selection_mode: SelectionMode;
       waitlist_mode: WaitlistMode;
       join_request_status: JoinRequestStatus;
+      match_lifecycle_status: MatchLifecycleStatus;
+      notification_type: NotificationType;
+      push_delivery_status: PushDeliveryStatus;
     };
     CompositeTypes: Record<string, never>;
   };

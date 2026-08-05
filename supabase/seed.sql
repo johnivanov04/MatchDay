@@ -304,4 +304,188 @@ insert into public.audit_events (
    '{"visibility": "private"}'::jsonb, '{"visibility": "searchable"}'::jsonb,
    'Opening the league to new players');
 
+
+-- ── Phase 3A fixtures — guidelines ─────────────────────────────────────────
+--
+-- DEVELOPMENT-ONLY SAMPLE TEXT. This repository does not contain the RMV
+-- Football Club "Guidelines for Play" document that PRD §1 cites as source
+-- material, and inventing club rules that read as authentic would be worse
+-- than useless — someone would eventually ship them. The bodies below are
+-- obviously-placeholder prose whose only job is to exercise the acceptance
+-- flow. Replace them with the real document before the pilot.
+--
+-- RMVFC's version requires acceptance, so the seeded members start ineligible
+-- for signup and the Phase 4 predicate has something real to test against.
+-- Weeknight 5v5's is informational, so the two branches of
+-- publish_guideline_version() are both represented.
+insert into public.guideline_versions (
+  id, league_id, version_label, title, body, effective_at,
+  requires_acceptance, published_at, created_by
+) values
+  (
+    '88888888-8888-4888-8888-000000000001',
+    '22222222-2222-4222-8222-000000000001',
+    '2026-development',
+    'RMV Football Club — Guidelines for Play (development sample)',
+    E'DEVELOPMENT SAMPLE TEXT — NOT THE CLUB''S ACTUAL GUIDELINES.\n\n'
+      'Arrive by the stated arrival time so teams can be organised before '
+      'kickoff.\n\n'
+      'Cancel through the app as soon as you know you cannot play, so that '
+      'somebody on the waitlist can take the spot.\n\n'
+      'Treat opponents, teammates and neighbours with respect. The club is a '
+      'guest at this pitch.\n\n'
+      'Replace this text with the real Guidelines for Play before the pilot.',
+    now() - interval '30 days',
+    true,
+    now() - interval '30 days',
+    '11111111-1111-4111-8111-000000000001'
+  ),
+  (
+    '88888888-8888-4888-8888-000000000002',
+    '22222222-2222-4222-8222-000000000002',
+    '2026-house-rules',
+    'Weeknight 5v5 — House rules (development sample)',
+    E'DEVELOPMENT SAMPLE TEXT — NOT ACTUAL LEAGUE RULES.\n\n'
+      'Small-sided, self-refereed, no slide tackles.\n\n'
+      'Rotate goalkeeper every fifteen minutes unless somebody volunteers to '
+      'stay in.\n\n'
+      'Informational only: this version does not require acceptance.',
+    now() - interval '10 days',
+    false,
+    now() - interval '10 days',
+    '11111111-1111-4111-8111-000000000002'
+  );
+
+-- One member has already accepted, one has not, so the eligibility predicate
+-- has both answers available on a fresh database.
+insert into public.guideline_acceptances (league_id, guideline_version_id, membership_id)
+values (
+  '22222222-2222-4222-8222-000000000001',
+  '88888888-8888-4888-8888-000000000001',
+  '33333333-3333-4333-8333-000000000002'   -- the multi-league player
+);
+
+
+-- ── Phase 3B fixtures — templates and matches ──────────────────────────────
+-- PRD §7 describes the RMVFC pilot as Monday and Wednesday evening matches at
+-- 11v11 with a capacity of 22. Both leagues use America/Los_Angeles, matching
+-- the timezone currently stored on the seeded leagues.
+insert into public.match_templates (
+  id, league_id, name, day_of_week, arrival_time, kickoff_time, end_time,
+  location_name, capacity, min_players, selection_mode, waitlist_mode,
+  team_count, priority_window, signup_closes_before, cancellation_cutoff_before,
+  roster_publish_before, reminder_offsets, created_by
+) values
+  (
+    '99999999-9999-4999-8999-000000000001',
+    '22222222-2222-4222-8222-000000000001',
+    'Monday evening 11v11', 1,
+    '18:30', '19:00', '20:30',
+    'RMV Community Pitch', 22, 14, 'admin_approval', 'admin_controlled',
+    2, interval '24 hours', interval '6 hours', interval '19 hours',
+    interval '8 hours', array[interval '24 hours', interval '2 hours'],
+    '11111111-1111-4111-8111-000000000001'
+  ),
+  (
+    '99999999-9999-4999-8999-000000000002',
+    '22222222-2222-4222-8222-000000000001',
+    'Wednesday evening 11v11', 3,
+    '18:30', '19:00', '20:30',
+    'RMV Community Pitch', 22, 14, 'admin_approval', 'admin_controlled',
+    2, interval '24 hours', interval '6 hours', interval '19 hours',
+    interval '8 hours', array[interval '24 hours', interval '2 hours'],
+    '11111111-1111-4111-8111-000000000001'
+  ),
+  (
+    '99999999-9999-4999-8999-000000000011',
+    '22222222-2222-4222-8222-000000000002',
+    'Thursday 5v5', 4,
+    '19:45', '20:00', '21:00',
+    'Eastside Indoor Courts', 10, 8, 'first_come', 'automatic',
+    2, null, interval '2 hours', interval '4 hours',
+    null, array[interval '3 hours'], '11111111-1111-4111-8111-000000000002'
+  );
+
+-- Concrete matches. Times are resolved against each league's timezone exactly
+-- as create_match() does it, so the seed exercises the same arithmetic the
+-- application uses rather than hard-coded UTC literals.
+insert into public.matches (
+  id, league_id, template_id, title, match_date, timezone,
+  arrival_at, kickoff_at, end_at, location_name,
+  capacity, min_players, selection_mode, waitlist_mode, team_count,
+  priority_window, priority_window_ends_at,
+  signup_closes_at, cancellation_cutoff_at, roster_publish_target_at,
+  status, public_notes, created_by, published_at
+)
+select
+  seed.id, seed.league_id, seed.template_id, seed.title, seed.match_date, l.timezone,
+  (seed.match_date + seed.arrival_time) at time zone l.timezone,
+  (seed.match_date + seed.kickoff_time) at time zone l.timezone,
+  (seed.match_date + seed.end_time) at time zone l.timezone,
+  seed.location_name,
+  seed.capacity, seed.min_players, seed.selection_mode, seed.waitlist_mode, 2,
+  seed.priority_window,
+  case when seed.priority_window is null then null
+       else least(now() + seed.priority_window,
+                  ((seed.match_date + seed.kickoff_time) at time zone l.timezone)
+                    - seed.signup_closes_before) end,
+  ((seed.match_date + seed.kickoff_time) at time zone l.timezone) - seed.signup_closes_before,
+  ((seed.match_date + seed.kickoff_time) at time zone l.timezone) - seed.cancellation_cutoff_before,
+  case when seed.roster_publish_before is null then null
+       else ((seed.match_date + seed.kickoff_time) at time zone l.timezone)
+              - seed.roster_publish_before end,
+  seed.status, seed.public_notes, seed.created_by,
+  case when seed.status = 'draft' then null else now() end
+from (
+  values
+    -- An open RMVFC match, a week out.
+    ('aaaaaaaa-aaaa-4aaa-8aaa-000000000001'::uuid,
+     '22222222-2222-4222-8222-000000000001'::uuid,
+     '99999999-9999-4999-8999-000000000001'::uuid,
+     'Monday night 11v11', (current_date + 7)::date,
+     '18:30'::time, '19:00'::time, '20:30'::time, 'RMV Community Pitch',
+     22, 14, 'admin_approval'::public.selection_mode,
+     'admin_controlled'::public.waitlist_mode,
+     interval '24 hours', interval '6 hours', interval '19 hours',
+     interval '8 hours', 'open'::public.match_lifecycle_status,
+     'Development sample match.', '11111111-1111-4111-8111-000000000001'::uuid),
+    -- A draft, to prove members cannot see it.
+    ('aaaaaaaa-aaaa-4aaa-8aaa-000000000002'::uuid,
+     '22222222-2222-4222-8222-000000000001'::uuid,
+     '99999999-9999-4999-8999-000000000002'::uuid,
+     'Wednesday night 11v11 (draft)', (current_date + 9)::date,
+     '18:30'::time, '19:00'::time, '20:30'::time, 'RMV Community Pitch',
+     22, 14, 'admin_approval'::public.selection_mode,
+     'admin_controlled'::public.waitlist_mode,
+     interval '24 hours', interval '6 hours', interval '19 hours',
+     interval '8 hours', 'draft'::public.match_lifecycle_status,
+     null, '11111111-1111-4111-8111-000000000001'::uuid),
+    -- An open 5v5 match with a completely different configuration.
+    ('aaaaaaaa-aaaa-4aaa-8aaa-000000000011'::uuid,
+     '22222222-2222-4222-8222-000000000002'::uuid,
+     '99999999-9999-4999-8999-000000000011'::uuid,
+     'Thursday 5v5', (current_date + 3)::date,
+     '19:45'::time, '20:00'::time, '21:00'::time, 'Eastside Indoor Courts',
+     10, 8, 'first_come'::public.selection_mode,
+     'automatic'::public.waitlist_mode,
+     null, interval '2 hours', interval '4 hours',
+     null, 'open'::public.match_lifecycle_status,
+     'Development sample match.', '11111111-1111-4111-8111-000000000002'::uuid)
+) as seed (
+  id, league_id, template_id, title, match_date,
+  arrival_time, kickoff_time, end_time, location_name,
+  capacity, min_players, selection_mode, waitlist_mode,
+  priority_window, signup_closes_before, cancellation_cutoff_before,
+  roster_publish_before, status, public_notes, created_by
+)
+join public.leagues l on l.id = seed.league_id;
+
+insert into public.match_admin_notes (match_id, league_id, notes, updated_by)
+values (
+  'aaaaaaaa-aaaa-4aaa-8aaa-000000000001',
+  '22222222-2222-4222-8222-000000000001',
+  'Development sample note. Members must never be able to read this row.',
+  '11111111-1111-4111-8111-000000000001'
+);
+
 commit;

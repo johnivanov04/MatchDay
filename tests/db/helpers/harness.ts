@@ -64,6 +64,26 @@ export const SEED_INVITES = {
  */
 export const SEED_INVITE_TOKEN = 'matchday-local-development-invite-token-0001';
 
+/** Phase 3 fixtures. */
+export const SEED_GUIDELINES = {
+  /** RMVFC, published, requires acceptance. */
+  rmvfcRequired: '88888888-8888-4888-8888-000000000001',
+  /** Weeknight 5v5, published, informational only. */
+  fivesInformational: '88888888-8888-4888-8888-000000000002',
+} as const;
+
+export const SEED_TEMPLATES = {
+  rmvfcMonday: '99999999-9999-4999-8999-000000000001',
+  rmvfcWednesday: '99999999-9999-4999-8999-000000000002',
+  fivesThursday: '99999999-9999-4999-8999-000000000011',
+} as const;
+
+export const SEED_MATCHES = {
+  rmvfcOpen: 'aaaaaaaa-aaaa-4aaa-8aaa-000000000001',
+  rmvfcDraft: 'aaaaaaaa-aaaa-4aaa-8aaa-000000000002',
+  fivesOpen: 'aaaaaaaa-aaaa-4aaa-8aaa-000000000011',
+} as const;
+
 export interface SeedUser {
   readonly id: string;
   readonly email: string;
@@ -226,6 +246,20 @@ export async function asServiceRole<T>(
   fn: (client: PoolClient) => Promise<T>,
 ): Promise<T> {
   return inRole(db, 'service_role', null, fn);
+}
+
+/**
+ * As `asServiceRole`, but COMMITs.
+ *
+ * Needed wherever a later assertion reads the result back on a different
+ * connection — the delivery-bookkeeping tests, mainly, where the point is what
+ * persisted rather than what one transaction saw.
+ */
+export async function asServiceRoleCommitting<T>(
+  db: TestDatabase,
+  fn: (client: PoolClient) => Promise<T>,
+): Promise<T> {
+  return inRole(db, 'service_role', null, fn, true);
 }
 
 export interface CapturedDatabaseError {
