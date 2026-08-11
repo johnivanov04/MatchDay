@@ -160,6 +160,31 @@ export const createMatchSchema = z
   .superRefine(thresholdWithinCapacity);
 
 /**
+ * Editing a draft.
+ *
+ * Identical to creation minus `template_id` and `admin_notes`: a draft is
+ * already attached to whatever template it came from, and notes are saved by
+ * their own action so that changing them does not require re-submitting the
+ * whole match. Every other field is editable, because nobody has seen the match
+ * yet and there are no expectations to preserve.
+ */
+export const updateDraftMatchSchema = z
+  .object({
+    ...sharedMatchFields,
+    title: requiredText('Match title', 160),
+    match_date: localDateSchema,
+    selection_mode: z.enum(['first_come', 'admin_approval']),
+    waitlist_mode: z.enum(['automatic', 'admin_controlled']),
+    priority_window_hours: optionalHoursSchema(720),
+    signup_closes_before_hours: hoursSchema('Signup close', 720),
+    cancellation_cutoff_before_hours: hoursSchema('Cancellation cutoff', 720),
+    roster_publish_before_hours: optionalHoursSchema(720),
+    public_notes: optionalText(2000),
+  })
+  .superRefine(orderedTimes)
+  .superRefine(thresholdWithinCapacity);
+
+/**
  * The editable subset of a published match.
  *
  * Deliberately narrower than creation: selection mode, waitlist mode and the
@@ -180,7 +205,16 @@ export const updatePublishedMatchSchema = z
 
 export type MatchTemplateInput = z.infer<typeof matchTemplateSchema>;
 export type CreateMatchInput = z.infer<typeof createMatchSchema>;
+export type UpdateDraftMatchInput = z.infer<typeof updateDraftMatchSchema>;
 export type UpdatePublishedMatchInput = z.infer<typeof updatePublishedMatchSchema>;
+
+/** Administrator notes, saved separately from the match itself. */
+export const matchAdminNotesSchema = z.object({
+  notes: z
+    .string()
+    .transform((value) => value.trim())
+    .refine((value) => value.length <= 4000, { message: 'Use 4000 characters or fewer.' }),
+});
 
 /** PostgreSQL interval literal, or `null`. Hours are the only unit any form offers. */
 export function hoursToInterval(hours: number | null): string | null {

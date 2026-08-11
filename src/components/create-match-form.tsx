@@ -1,6 +1,12 @@
 'use client';
 
 import { useActionState, useState } from 'react';
+import {
+  MatchCoreFields,
+  MatchPolicyFields,
+  type MatchCoreDefaults,
+  type MatchPolicyDefaults,
+} from '@/components/match-fields';
 import { Field, FormError, inputClassName, SubmitButton } from '@/components/ui/field';
 import { createMatchAction } from '@/server/actions/matches';
 import type { LeagueRow, MatchTemplateRow } from '@/types/database';
@@ -16,7 +22,22 @@ import type { LeagueRow, MatchTemplateRow } from '@/types/database';
  * Times are entered and submitted as local wall-clock values. The database
  * resolves them against the league's IANA zone, which is the only place that
  * conversion happens.
+ *
+ * The fields themselves come from the same components the edit forms use, so
+ * the field list, its bounds and its help text exist once.
  */
+
+/** PostgreSQL renders intervals as `HH:MM:SS`, or `N days ...` past a day. */
+function intervalToHours(interval: string | null): string {
+  if (interval === null) return '';
+  const days = /(\d+)\s+day/.exec(interval);
+  const clock = /(\d+):(\d{2}):(\d{2})/.exec(interval);
+  const total =
+    (days === null ? 0 : Number(days[1]) * 24) +
+    (clock === null ? 0 : Number(clock[1]) + Number(clock[2]) / 60);
+  return days === null && clock === null ? '' : String(Math.round(total));
+}
+
 export function CreateMatchForm({
   league,
   templates,
@@ -30,6 +51,30 @@ export function CreateMatchForm({
   const template = templates.find((candidate) => candidate.id === selectedTemplateId);
   const fieldError = (name: string): string | undefined =>
     state?.ok === false ? state.fieldErrors[name] : undefined;
+
+  const core: MatchCoreDefaults = {
+    title: template?.name ?? '',
+    match_date: '',
+    arrival_time: template?.arrival_time?.slice(0, 5) ?? '18:30',
+    kickoff_time: template?.kickoff_time?.slice(0, 5) ?? '19:00',
+    end_time: template?.end_time?.slice(0, 5) ?? '20:30',
+    location_name: template?.location_name ?? league.default_location ?? '',
+    location_map_url: template?.location_map_url ?? '',
+    capacity: template?.capacity ?? league.default_capacity,
+    min_players: template?.min_players ?? league.default_min_players,
+    team_count: template?.team_count ?? league.default_team_count,
+    public_notes: '',
+  };
+
+  const policy: MatchPolicyDefaults = {
+    selection_mode: template?.selection_mode ?? league.default_selection_mode,
+    waitlist_mode: template?.waitlist_mode ?? league.default_waitlist_mode,
+    priority_window_hours: intervalToHours(template?.priority_window ?? null),
+    signup_closes_before_hours: intervalToHours(template?.signup_closes_before ?? null) || '2',
+    cancellation_cutoff_before_hours:
+      intervalToHours(template?.cancellation_cutoff_before ?? null) || '24',
+    roster_publish_before_hours: intervalToHours(template?.roster_publish_before ?? null),
+  };
 
   // `key` forces the uncontrolled inputs to remount with new defaults when the
   // template changes, which is what makes "picking a template refills the form"
@@ -63,206 +108,8 @@ export function CreateMatchForm({
       </Field>
 
       <div key={formKey} className="flex flex-col gap-4">
-        <Field label="Match title" htmlFor="title" error={fieldError('title')}>
-          <input
-            id="title"
-            name="title"
-            required
-            maxLength={160}
-            defaultValue={template?.name ?? ''}
-            className={inputClassName}
-            placeholder="Monday night 11v11"
-          />
-        </Field>
-
-        <Field label="Date" htmlFor="match_date" error={fieldError('match_date')}>
-          <input
-            id="match_date"
-            name="match_date"
-            type="date"
-            required
-            className={inputClassName}
-          />
-        </Field>
-
-        <div className="grid grid-cols-3 gap-3">
-          <Field label="Arrive" htmlFor="arrival_time" error={fieldError('arrival_time')}>
-            <input
-              id="arrival_time"
-              name="arrival_time"
-              type="time"
-              required
-              defaultValue={template?.arrival_time?.slice(0, 5) ?? '18:30'}
-              className={inputClassName}
-            />
-          </Field>
-          <Field label="Kickoff" htmlFor="kickoff_time" error={fieldError('kickoff_time')}>
-            <input
-              id="kickoff_time"
-              name="kickoff_time"
-              type="time"
-              required
-              defaultValue={template?.kickoff_time?.slice(0, 5) ?? '19:00'}
-              className={inputClassName}
-            />
-          </Field>
-          <Field label="Ends" htmlFor="end_time" error={fieldError('end_time')}>
-            <input
-              id="end_time"
-              name="end_time"
-              type="time"
-              required
-              defaultValue={template?.end_time?.slice(0, 5) ?? '20:30'}
-              className={inputClassName}
-            />
-          </Field>
-        </div>
-
-        <p className="-mt-2 text-xs text-muted">
-          Times are in {league.timezone}, the league&rsquo;s timezone.
-        </p>
-
-        <Field label="Location" htmlFor="location_name" error={fieldError('location_name')}>
-          <input
-            id="location_name"
-            name="location_name"
-            required
-            maxLength={160}
-            defaultValue={template?.location_name ?? league.default_location ?? ''}
-            className={inputClassName}
-          />
-        </Field>
-
-        <Field label="Map link" htmlFor="location_map_url" optional>
-          <input
-            id="location_map_url"
-            name="location_map_url"
-            type="url"
-            defaultValue={template?.location_map_url ?? ''}
-            className={inputClassName}
-          />
-        </Field>
-
-        <div className="grid grid-cols-3 gap-3">
-          <Field label="Capacity" htmlFor="capacity" error={fieldError('capacity')}>
-            <input
-              id="capacity"
-              name="capacity"
-              type="number"
-              min={2}
-              max={200}
-              required
-              defaultValue={template?.capacity ?? league.default_capacity}
-              className={inputClassName}
-            />
-          </Field>
-          <Field label="Minimum" htmlFor="min_players" error={fieldError('min_players')}>
-            <input
-              id="min_players"
-              name="min_players"
-              type="number"
-              min={0}
-              max={200}
-              required
-              defaultValue={template?.min_players ?? league.default_min_players}
-              className={inputClassName}
-            />
-          </Field>
-          <Field label="Teams" htmlFor="team_count" error={fieldError('team_count')}>
-            <input
-              id="team_count"
-              name="team_count"
-              type="number"
-              min={2}
-              max={20}
-              required
-              defaultValue={template?.team_count ?? league.default_team_count}
-              className={inputClassName}
-            />
-          </Field>
-        </div>
-
-        <Field label="How spots are filled" htmlFor="selection_mode">
-          <select
-            id="selection_mode"
-            name="selection_mode"
-            defaultValue={template?.selection_mode ?? league.default_selection_mode}
-            className={inputClassName}
-          >
-            <option value="first_come">First come — confirmed immediately</option>
-            <option value="admin_approval">Administrator chooses the roster</option>
-          </select>
-        </Field>
-
-        <Field label="How the waitlist moves" htmlFor="waitlist_mode">
-          <select
-            id="waitlist_mode"
-            name="waitlist_mode"
-            defaultValue={template?.waitlist_mode ?? league.default_waitlist_mode}
-            className={inputClassName}
-          >
-            <option value="automatic">Automatically promote the next player</option>
-            <option value="admin_controlled">Administrator promotes manually</option>
-          </select>
-        </Field>
-
-        <fieldset className="grid grid-cols-2 gap-3">
-          <legend className="mb-1 text-sm font-semibold">Deadlines, hours before kickoff</legend>
-          <Field label="Signup closes" htmlFor="signup_closes_before_hours">
-            <input
-              id="signup_closes_before_hours"
-              name="signup_closes_before_hours"
-              type="number"
-              min={0}
-              max={720}
-              required
-              defaultValue="2"
-              className={inputClassName}
-            />
-          </Field>
-          <Field label="Cancellation cutoff" htmlFor="cancellation_cutoff_before_hours">
-            <input
-              id="cancellation_cutoff_before_hours"
-              name="cancellation_cutoff_before_hours"
-              type="number"
-              min={0}
-              max={720}
-              required
-              defaultValue="24"
-              className={inputClassName}
-            />
-          </Field>
-          <Field label="Priority window" htmlFor="priority_window_hours" optional>
-            <input
-              id="priority_window_hours"
-              name="priority_window_hours"
-              type="number"
-              min={0}
-              max={720}
-              className={inputClassName}
-            />
-          </Field>
-          <Field label="Roster published" htmlFor="roster_publish_before_hours" optional>
-            <input
-              id="roster_publish_before_hours"
-              name="roster_publish_before_hours"
-              type="number"
-              min={0}
-              max={720}
-              className={inputClassName}
-            />
-          </Field>
-        </fieldset>
-
-        <Field label="Notes for members" htmlFor="public_notes" optional>
-          <textarea
-            id="public_notes"
-            name="public_notes"
-            rows={2}
-            maxLength={2000}
-            className={inputClassName}
-          />
-        </Field>
+        <MatchCoreFields defaults={core} timezone={league.timezone} fieldError={fieldError} />
+        <MatchPolicyFields defaults={policy} fieldError={fieldError} />
 
         <Field
           label="Private notes"

@@ -472,26 +472,83 @@ describe('match templates and matches', () => {
       const { zonedLocalTimeToInstant } = await import('@/lib/matches/match-timing');
 
       const cases = [
-        { date: '2026-01-15', time: '19:00' },
-        { date: '2026-07-15', time: '19:00' },
-        { date: '2026-03-07', time: '19:00' },
-        { date: '2026-03-09', time: '19:00' },
-        { date: '2026-03-08', time: '02:30' }, // does not exist
-        { date: '2026-10-31', time: '19:00' },
-        { date: '2026-11-01', time: '01:30' }, // happens twice
-        { date: '2026-11-02', time: '19:00' },
+        { zone: 'America/Los_Angeles', date: '2026-01-15', time: '19:00' },
+        { zone: 'America/Los_Angeles', date: '2026-07-15', time: '19:00' },
+        { zone: 'America/Los_Angeles', date: '2026-03-07', time: '19:00' },
+        // An ordinary evening ON each transition day. Both offsets exist
+        // somewhere in these days but only one is real at 19:00, and reading
+        // that hour back an hour out is what would move a match every time the
+        // edit form was saved.
+        { zone: 'America/Los_Angeles', date: '2026-03-08', time: '19:00' },
+        { zone: 'America/Los_Angeles', date: '2026-11-01', time: '19:00' },
+        { zone: 'America/Los_Angeles', date: '2026-03-09', time: '19:00' },
+        { zone: 'America/Los_Angeles', date: '2026-03-08', time: '02:30' }, // does not exist
+        { zone: 'America/Los_Angeles', date: '2026-10-31', time: '19:00' },
+        { zone: 'America/Los_Angeles', date: '2026-11-01', time: '01:30' }, // happens twice
+        { zone: 'America/Los_Angeles', date: '2026-11-02', time: '19:00' },
+        // The southern hemisphere transitions the other way, on other dates.
+        { zone: 'Pacific/Auckland', date: '2026-04-04', time: '19:00' },
+        { zone: 'Pacific/Auckland', date: '2026-04-05', time: '19:00' },
+        { zone: 'Pacific/Auckland', date: '2026-04-05', time: '02:30' }, // happens twice
+        { zone: 'Pacific/Auckland', date: '2026-09-27', time: '19:00' },
+        { zone: 'Pacific/Auckland', date: '2026-09-27', time: '02:30' }, // does not exist
+        { zone: 'Pacific/Auckland', date: '2026-09-28', time: '19:00' },
+        // A zone with a half-hour offset and no daylight saving at all.
+        { zone: 'Asia/Kolkata', date: '2026-03-08', time: '19:00' },
       ];
 
       for (const input of cases) {
         const { rows } = await db.pool.query<{ instant: Date }>(
-          `select (($1::date + $2::time) at time zone 'America/Los_Angeles') as instant`,
-          [input.date, input.time],
+          `select (($1::date + $2::time) at time zone $3) as instant`,
+          [input.date, input.time, input.zone],
         );
 
         const fromDatabase = rows[0]?.instant?.toISOString();
-        const fromHelper = zonedLocalTimeToInstant(input, 'America/Los_Angeles').toISOString();
+        const fromHelper = zonedLocalTimeToInstant(input, input.zone).toISOString();
 
-        expect(fromHelper, `${input.date} ${input.time}`).toBe(fromDatabase);
+        expect(fromHelper, `${input.zone} ${input.date} ${input.time}`).toBe(fromDatabase);
+      }
+    });
+
+    it('agrees with the TypeScript helper on every hour of a whole year', async () => {
+      // Hand-picked cases are what let the last disagreement through: they only
+      // covered the two hours that are genuinely ambiguous, not the ordinary
+      // evening on a transition day, and not a zone far enough east that the
+      // helper's probe window fell on the wrong side of the change.
+      //
+      // So this compares every date at four times of day, in zones chosen for
+      // how differently they behave, and lets PostgreSQL be the answer key.
+      const { zonedLocalTimeToInstant } = await import('@/lib/matches/match-timing');
+
+      const zones = [
+        'America/Los_Angeles', // northern, whole-hour DST
+        'Europe/London', // northern, transitions on different dates again
+        'Pacific/Auckland', // southern, UTC+12/+13 — the far-east case
+        'Australia/Lord_Howe', // half-hour DST shift
+        'Asia/Kolkata', // permanent half-hour offset, no DST at all
+        'UTC',
+      ];
+
+      for (const zone of zones) {
+        const { rows } = await db.pool.query<{ date: string; time: string; instant: Date }>(
+          `select d::date::text as date, t::text as time,
+                  ((d::date + t) at time zone $1) as instant
+             from generate_series('2026-01-01'::date, '2026-12-31'::date, interval '1 day') d
+             cross join unnest(array['02:30'::time, '09:00', '19:00', '23:30']) t`,
+          [zone],
+        );
+
+        expect(rows.length).toBe(365 * 4);
+
+        for (const row of rows) {
+          const fromHelper = zonedLocalTimeToInstant(
+            { date: row.date, time: row.time.slice(0, 5) },
+            zone,
+          );
+          expect(fromHelper.toISOString(), `${zone} ${row.date} ${row.time}`).toBe(
+            row.instant.toISOString(),
+          );
+        }
       }
     });
 

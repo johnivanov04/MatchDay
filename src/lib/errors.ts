@@ -30,6 +30,9 @@ export const DOMAIN_ERROR_CODES = [
   'INVITE_INVALID',
   'PROFILE_NOT_FOUND',
   'SLUG_TAKEN',
+  // Phase 3B additions, for the two ways an edit can be refused.
+  'MATCH_NOT_DRAFT',
+  'MATCH_REVISION_STALE',
 ] as const;
 
 export type DomainErrorCode = (typeof DOMAIN_ERROR_CODES)[number];
@@ -68,6 +71,11 @@ const USER_FACING_MESSAGES: Record<DomainErrorCode, string> = {
   INVITE_INVALID: 'That invitation link is not valid or has expired.',
   PROFILE_NOT_FOUND: 'No Matchday account uses that email address.',
   SLUG_TAKEN: 'That league address is already taken.',
+  MATCH_NOT_DRAFT: 'That match has been published, so it is edited a different way.',
+  // Actionable on purpose: the fix is to reload, and saying so avoids somebody
+  // resubmitting the same stale form repeatedly.
+  MATCH_REVISION_STALE:
+    'Somebody else changed this match while you were editing. Reload the page and try again.',
 };
 
 export class DomainError extends Error {

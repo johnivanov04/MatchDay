@@ -5,10 +5,14 @@ import { CancelMatchForm, PublishMatchButton } from '@/components/matches';
 import {
   dashboardPathWithNotice,
   DASHBOARD_NOTICES,
+  MATCH_NOTICES,
+  parseMatchNotice,
   requireLeagueMemberPage,
+  type MatchNotice,
 } from '@/lib/auth/page-guards';
 import { formatMatchDate, formatMatchTime } from '@/lib/matches/match-timing';
 import { getMatch, getMatchAdminNotes } from '@/lib/matches/matches';
+import { canEditMatch } from '@/lib/matches/match-permissions';
 import {
   deriveMatchParticipationState,
   participationStateLabel,
@@ -24,10 +28,19 @@ export const metadata: Metadata = { title: 'Match' };
  * the same redirect. Guessing identifiers reveals nothing, and a member removed
  * after a notification was sent cannot follow the old link.
  */
+/** Shown after a redirect from the edit form. Display only — nothing is authorized from it. */
+const NOTICE_MESSAGES: Record<MatchNotice, string> = {
+  [MATCH_NOTICES.saved]: 'Match saved.',
+  [MATCH_NOTICES.notesSaved]: 'Notes saved. Members were not notified.',
+  [MATCH_NOTICES.notEditable]: 'A canceled match cannot be edited.',
+};
+
 export default async function MatchDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ slug: string; matchId: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const { slug, matchId } = await params;
   const { league, isAdmin } = await requireLeagueMemberPage(slug);
@@ -37,8 +50,13 @@ export default async function MatchDetailPage({
     redirect(dashboardPathWithNotice(DASHBOARD_NOTICES.notLeagueMember));
   }
 
+  const notice = parseMatchNotice((await searchParams)['notice']);
   const adminNotes = isAdmin ? await getMatchAdminNotes(league.id, matchId) : null;
   const state = deriveMatchParticipationState(null);
+
+  // Shared with the edit route, so the button and the form cannot disagree
+  // about who may edit what.
+  const canEdit = canEditMatch(isAdmin, match.status);
 
   const kickoff = new Date(match.kickoff_at);
 
@@ -48,13 +66,32 @@ export default async function MatchDetailPage({
         <p className="text-xs uppercase tracking-wide text-muted">{league.name}</p>
         <h1 className="text-2xl font-bold">{match.title}</h1>
         <p className="text-sm text-muted">{formatMatchDate(kickoff, match.timezone)}</p>
-        <Link
-          href={`/leagues/${league.slug}/matches`}
-          className="mt-1 text-sm underline underline-offset-4"
-        >
-          All matches
-        </Link>
+        <div className="mt-1 flex flex-wrap items-center gap-4">
+          <Link
+            href={`/leagues/${league.slug}/matches`}
+            className="text-sm underline underline-offset-4"
+          >
+            All matches
+          </Link>
+          {canEdit ? (
+            <Link
+              href={`/leagues/${league.slug}/matches/${match.id}/edit`}
+              className="inline-flex min-h-9 items-center rounded-lg border border-[var(--border-subtle)] px-3 py-1.5 text-sm font-semibold"
+            >
+              Edit match
+            </Link>
+          ) : null}
+        </div>
       </header>
+
+      {notice === null ? null : (
+        <p
+          role="status"
+          className="rounded-lg border border-pitch-500/40 bg-pitch-50 px-3 py-2 text-sm text-pitch-900 dark:bg-pitch-900/40 dark:text-pitch-50"
+        >
+          {NOTICE_MESSAGES[notice]}
+        </p>
+      )}
 
       {match.status === 'canceled' ? (
         <p
