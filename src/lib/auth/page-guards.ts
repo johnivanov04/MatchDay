@@ -52,6 +52,43 @@ export function dashboardPathWithNotice(notice: DashboardNotice): string {
   return `${DASHBOARD_PATH}?notice=${notice}`;
 }
 
+/**
+ * Notices shown on a match detail page after a redirect.
+ *
+ * Kept separate from `DASHBOARD_NOTICES` rather than bent to fit it: those
+ * describe *losing* access and always land on the dashboard, whereas these
+ * describe an action that succeeded and land back on the match. Sharing one
+ * enum would make `dashboardPathWithNotice` lie about where it sends people.
+ *
+ * Display hints only. Nothing is authorized from them, and a fabricated value
+ * shows the wrong sentence to whoever fabricated it and nobody else.
+ */
+export const MATCH_NOTICES = {
+  saved: 'saved',
+  notesSaved: 'notes-saved',
+  notEditable: 'not-editable',
+} as const;
+
+export type MatchNotice = (typeof MATCH_NOTICES)[keyof typeof MATCH_NOTICES];
+
+export function matchPath(slug: string, matchId: string): string {
+  return `/leagues/${slug}/matches/${matchId}`;
+}
+
+export function matchPathWithNotice(
+  slug: string,
+  matchId: string,
+  notice: MatchNotice,
+): string {
+  return `${matchPath(slug, matchId)}?notice=${notice}`;
+}
+
+export function parseMatchNotice(value: unknown): MatchNotice | null {
+  return typeof value === 'string' && (Object.values(MATCH_NOTICES) as string[]).includes(value)
+    ? (value as MatchNotice)
+    : null;
+}
+
 export function parseDashboardNotice(value: unknown): DashboardNotice | null {
   return typeof value === 'string' &&
     (Object.values(DASHBOARD_NOTICES) as string[]).includes(value)

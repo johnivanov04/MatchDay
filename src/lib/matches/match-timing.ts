@@ -54,7 +54,16 @@ export interface LocalMatchTime {
   time: string;
 }
 
-const TWELVE_HOURS_MS = 12 * 60 * 60 * 1000;
+/**
+ * How far either side of the naive timestamp the zone's offset is probed.
+ *
+ * It has to exceed the largest offset any zone uses (+14:00, Kiritimati) plus a
+ * day, or the probe can land on the same side of a transition as the guess and
+ * never see the other offset at all — which is how a UTC+13 league ended up an
+ * hour out. Two days is comfortably past that, and daylight-saving transitions
+ * are months apart, so a window this wide still cannot span two of them.
+ */
+const PROBE_WINDOW_MS = 48 * 60 * 60 * 1000;
 
 /**
  * Resolves a local date and wall-clock time in `timeZone` to an absolute
@@ -63,15 +72,22 @@ const TWELVE_HOURS_MS = 12 * 60 * 60 * 1000;
  * A single-pass "subtract the current offset" conversion is wrong for every
  * match in the week around a daylight-saving transition, because the offset at
  * the guess differs from the offset at the answer. So both offsets in play are
- * probed — twelve hours either side, which brackets any transition — and the
- * two candidate instants are compared.
+ * probed — see `PROBE_WINDOW_MS` — giving two candidate instants.
  *
- * WHY THE LATER CANDIDATE WINS. Two local times per year are not a single
- * instant: the hour skipped when clocks go forward does not exist, and the hour
- * repeated when they go back happens twice. PostgreSQL's `AT TIME ZONE`
- * resolves both to standard time, and standard time is the later of the two
- * candidates in either hemisphere — pre-transition for a gap, post-transition
- * for an overlap. Taking the maximum reproduces that exactly.
+ * A candidate is only real if the zone was actually at the offset used to
+ * produce it. On a transition day both offsets exist somewhere in the day, but
+ * for any ordinary evening time exactly one candidate survives that check, and
+ * it is the answer. Testing it is what stops a 19:00 kickoff on the day the
+ * clocks change from being read back an hour out — which, through the edit
+ * form, would move the match every time it was saved.
+ *
+ * WHY THE LATER CANDIDATE WINS WHEN THE CHECK CANNOT DECIDE. Two local times
+ * per year are not a single instant: the hour skipped when clocks go forward
+ * does not exist, so neither candidate is real, and the hour repeated when they
+ * go back happens twice, so both are. PostgreSQL's `AT TIME ZONE` resolves both
+ * cases to standard time, and standard time is the later of the two candidates
+ * in either hemisphere — pre-transition for a gap, post-transition for an
+ * overlap. Taking the maximum reproduces that exactly.
  *
  * Matching the database matters more than any particular choice being "right":
  * the database is authoritative for stored match times, and a display helper
@@ -84,11 +100,18 @@ export function zonedLocalTimeToInstant(local: LocalMatchTime, timeZone: string)
     throw new Error(`Invalid local match time: ${local.date} ${local.time}`);
   }
 
-  const offsetBefore = timeZoneOffsetMs(new Date(naive - TWELVE_HOURS_MS), timeZone);
-  const offsetAfter = timeZoneOffsetMs(new Date(naive + TWELVE_HOURS_MS), timeZone);
+  const offsets = [
+    timeZoneOffsetMs(new Date(naive - PROBE_WINDOW_MS), timeZone),
+    timeZoneOffsetMs(new Date(naive + PROBE_WINDOW_MS), timeZone),
+  ];
 
   // Identical away from a transition, which is almost always.
-  return new Date(Math.max(naive - offsetBefore, naive - offsetAfter));
+  const candidates = offsets.map((offset) => naive - offset);
+  const real = candidates.filter(
+    (candidate) => naive - timeZoneOffsetMs(new Date(candidate), timeZone) === candidate,
+  );
+
+  return new Date(Math.max(...(real.length === 1 ? real : candidates)));
 }
 
 /** Renders an instant as the wall clock a member in `timeZone` would read. */

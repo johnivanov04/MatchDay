@@ -615,6 +615,29 @@ export interface Database {
       };
       publish_match: { Args: { p_match_id: string }; Returns: string };
       cancel_match: { Args: { p_match_id: string; p_reason?: string | null }; Returns: string };
+      update_draft_match: {
+        Args: {
+          p_match_id: string;
+          p_title: string;
+          p_match_date: string;
+          p_arrival_time: string;
+          p_kickoff_time: string;
+          p_end_time: string;
+          p_location_name: string;
+          p_capacity: number;
+          p_min_players: number;
+          p_selection_mode: SelectionMode;
+          p_waitlist_mode: WaitlistMode;
+          p_team_count?: number;
+          p_location_map_url?: string | null;
+          p_priority_window?: string | null;
+          p_signup_closes_before?: string;
+          p_cancellation_cutoff_before?: string;
+          p_roster_publish_before?: string | null;
+          p_public_notes?: string | null;
+        };
+        Returns: string;
+      };
       update_published_match: {
         Args: {
           p_match_id: string;
@@ -630,6 +653,8 @@ export interface Database {
           p_location_map_url?: string | null;
           p_public_notes?: string | null;
           p_change_note?: string | null;
+          /** Optimistic concurrency: the revision the form was rendered from. */
+          p_expected_revision?: number | null;
         };
         Returns: number;
       };

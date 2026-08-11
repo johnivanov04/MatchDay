@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { z } from 'zod';
 import { requireLeagueAdmin } from '@/lib/auth/authorization';
+import { MATCH_NOTICES, matchPathWithNotice } from '@/lib/auth/page-guards';
 import { requireSessionUser } from '@/lib/auth/session';
 import { actionFailure, actionSuccess, DomainError, type ActionResult } from '@/lib/errors';
 import { domainErrorFromDatabase } from '@/lib/errors-from-database';
@@ -12,10 +13,32 @@ import { createSupabaseServerClient } from '@/lib/supabase/server';
 import {
   createMatchSchema,
   hoursToInterval,
+  matchAdminNotesSchema,
   matchTemplateSchema,
+  updateDraftMatchSchema,
   updatePublishedMatchSchema,
 } from '@/lib/validation/match';
 import { toFieldErrors } from '@/lib/validation/profile';
+
+/**
+ * Pushes a fanout the database has already committed.
+ *
+ * Called only *after* the domain transaction, and outside every `try` that
+ * decides the action's result, because by this point the match is changed and
+ * the canonical notifications exist. Web Push is a best-effort copy of
+ * information the member already has waiting in the app, so a push that does
+ * not go out must never come back to the administrator as a failed edit.
+ *
+ * `dispatchPushForKeyPrefix` already swallows its own failures. This catch is
+ * what stops that guarantee being quietly lost the day it stops holding.
+ */
+async function pushCommittedFanout(prefix: string): Promise<void> {
+  try {
+    await dispatchPushForKeyPrefix(prefix);
+  } catch {
+    /* deliberately silent — see above */
+  }
+}
 
 function readTemplateForm(formData: FormData) {
   return {
@@ -185,6 +208,8 @@ export async function publishMatchAction(
   _previous: ActionResult<undefined> | null,
   formData: FormData,
 ): Promise<ActionResult<undefined>> {
+  let pushPrefix: string;
+
   try {
     const leagueId = z.uuid().parse(formData.get('league_id') ?? '');
     const matchId = z.uuid().parse(formData.get('match_id') ?? '');
@@ -197,19 +222,23 @@ export async function publishMatchAction(
       throw domainErrorFromDatabase(error);
     }
 
-    await dispatchPushForKeyPrefix(`match_published:${matchId}`);
-
-    revalidatePath('/', 'layout');
-    return actionSuccess();
+    pushPrefix = `match_published:${matchId}`;
   } catch (error: unknown) {
     return actionFailure(error);
   }
+
+  await pushCommittedFanout(pushPrefix);
+
+  revalidatePath('/', 'layout');
+  return actionSuccess();
 }
 
 export async function cancelMatchAction(
   _previous: ActionResult<undefined> | null,
   formData: FormData,
 ): Promise<ActionResult<undefined>> {
+  let pushPrefix: string;
+
   try {
     const leagueId = z.uuid().parse(formData.get('league_id') ?? '');
     const matchId = z.uuid().parse(formData.get('match_id') ?? '');
@@ -230,13 +259,87 @@ export async function cancelMatchAction(
       throw domainErrorFromDatabase(error);
     }
 
-    await dispatchPushForKeyPrefix(`match_canceled:${matchId}`);
-
-    revalidatePath('/', 'layout');
-    return actionSuccess();
+    pushPrefix = `match_canceled:${matchId}`;
   } catch (error: unknown) {
     return actionFailure(error);
   }
+
+  await pushCommittedFanout(pushPrefix);
+
+  revalidatePath('/', 'layout');
+  return actionSuccess();
+}
+
+/**
+ * Editing a draft.
+ *
+ * Goes through `update_draft_match()` rather than the `matches_update_draft_admin`
+ * UPDATE policy, so that resolving a local date and wall-clock time into an
+ * instant stays in the database next to `create_match()`. Doing it here would
+ * put a second daylight-saving implementation in the system.
+ *
+ * Notifies nobody: a draft has never been visible to a member, so there is no
+ * expectation to correct. The audit event comes from the existing trigger.
+ */
+export async function updateDraftMatchAction(
+  _previous: ActionResult<undefined> | null,
+  formData: FormData,
+): Promise<ActionResult<undefined>> {
+  let destination: string;
+
+  try {
+    const leagueId = z.uuid().parse(formData.get('league_id') ?? '');
+    const matchId = z.uuid().parse(formData.get('match_id') ?? '');
+    const slug = z.string().min(1).parse(formData.get('league_slug') ?? '');
+    await requireLeagueAdmin(leagueId);
+
+    const parsed = updateDraftMatchSchema.safeParse({
+      ...readTemplateForm(formData),
+      name: 'unused',
+      title: formData.get('title') ?? '',
+      match_date: formData.get('match_date') ?? '',
+      public_notes: formData.get('public_notes') ?? '',
+    });
+
+    if (!parsed.success) {
+      throw new DomainError('VALIDATION_FAILED', { fieldErrors: toFieldErrors(parsed.error) });
+    }
+
+    const supabase = await createSupabaseServerClient();
+    const { error } = await supabase.rpc('update_draft_match', {
+      p_match_id: matchId,
+      p_title: parsed.data.title,
+      p_match_date: parsed.data.match_date,
+      p_arrival_time: parsed.data.arrival_time,
+      p_kickoff_time: parsed.data.kickoff_time,
+      p_end_time: parsed.data.end_time,
+      p_location_name: parsed.data.location_name,
+      p_capacity: parsed.data.capacity,
+      p_min_players: parsed.data.min_players,
+      p_selection_mode: parsed.data.selection_mode,
+      p_waitlist_mode: parsed.data.waitlist_mode,
+      p_team_count: parsed.data.team_count,
+      p_location_map_url: parsed.data.location_map_url,
+      p_priority_window: hoursToInterval(parsed.data.priority_window_hours),
+      p_signup_closes_before: `${parsed.data.signup_closes_before_hours} hours`,
+      p_cancellation_cutoff_before: `${parsed.data.cancellation_cutoff_before_hours} hours`,
+      p_roster_publish_before: hoursToInterval(parsed.data.roster_publish_before_hours),
+      p_public_notes: parsed.data.public_notes,
+    });
+
+    if (error !== null) {
+      throw domainErrorFromDatabase(error);
+    }
+
+    destination = matchPathWithNotice(slug, matchId, MATCH_NOTICES.saved);
+  } catch (error: unknown) {
+    return actionFailure(error);
+  }
+
+  // Outside the try, because `redirect()` signals by throwing and
+  // `actionFailure` would otherwise swallow it into a generic failure.
+  revalidatePath('/', 'layout');
+  redirect(destination);
 }
 
 /**
@@ -245,15 +348,32 @@ export async function cancelMatchAction(
  * A direct UPDATE is refused by `matches_update_draft_admin`, so this is the
  * only way an open match changes. It bumps the revision, writes an audit event
  * and notifies members — all in one transaction.
+ *
+ * The revision the form was rendered from is submitted with it. If somebody
+ * else edited in the meantime the database refuses, rather than silently
+ * overwriting their change and telling members about a time that no longer
+ * applies.
  */
 export async function updatePublishedMatchAction(
   _previous: ActionResult<undefined> | null,
   formData: FormData,
 ): Promise<ActionResult<undefined>> {
+  let destination: string;
+  let pushPrefix: string;
+
   try {
     const leagueId = z.uuid().parse(formData.get('league_id') ?? '');
     const matchId = z.uuid().parse(formData.get('match_id') ?? '');
+    const slug = z.string().min(1).parse(formData.get('league_slug') ?? '');
     await requireLeagueAdmin(leagueId);
+
+    // Absent means "do not check" at the database. The edit form always sends
+    // it; only a hand-rolled request could omit it.
+    const rawRevision = formData.get('expected_revision');
+    const expectedRevision =
+      typeof rawRevision === 'string' && rawRevision !== ''
+        ? z.coerce.number().int().min(0).parse(rawRevision)
+        : null;
 
     const parsed = updatePublishedMatchSchema.safeParse({
       title: formData.get('title') ?? '',
@@ -289,6 +409,7 @@ export async function updatePublishedMatchAction(
       p_location_map_url: parsed.data.location_map_url,
       p_public_notes: parsed.data.public_notes,
       p_change_note: parsed.data.change_note,
+      p_expected_revision: expectedRevision,
     });
 
     if (error !== null) {
@@ -297,26 +418,49 @@ export async function updatePublishedMatchAction(
 
     // The revision is part of the notification key, so pushing the right batch
     // means asking for the revision the database just produced.
-    await dispatchPushForKeyPrefix(`match_changed:${matchId}:${String(data)}`);
-
-    revalidatePath('/', 'layout');
-    return actionSuccess();
+    pushPrefix = `match_changed:${matchId}:${String(data)}`;
+    destination = matchPathWithNotice(slug, matchId, MATCH_NOTICES.saved);
   } catch (error: unknown) {
     return actionFailure(error);
   }
+
+  await pushCommittedFanout(pushPrefix);
+
+  revalidatePath('/', 'layout');
+  redirect(destination);
 }
 
-/** Draft-only edit of administrator notes. */
+/**
+ * Administrator notes.
+ *
+ * Saved on their own, separately from the match, because they live in their own
+ * admin-only table — `match_admin_notes` — precisely so that a member reading
+ * the match row cannot read them. Row Level Security filters rows, not columns.
+ *
+ * Notifies nobody. Notes are the administrator's private working memory; a
+ * member being told that a note about them changed would be worse than useless.
+ * The audit trigger deliberately records only that notes changed, never their
+ * text, because audit rows are readable by every future administrator.
+ */
 export async function saveMatchAdminNotesAction(
   _previous: ActionResult<undefined> | null,
   formData: FormData,
 ): Promise<ActionResult<undefined>> {
+  let destination: string;
+
   try {
     const leagueId = z.uuid().parse(formData.get('league_id') ?? '');
     const matchId = z.uuid().parse(formData.get('match_id') ?? '');
-    await requireLeagueAdmin(leagueId);
+    const slug = z.string().min(1).parse(formData.get('league_slug') ?? '');
+    const { membership } = await requireLeagueAdmin(leagueId);
 
-    const notes = z.string().max(4000).parse(String(formData.get('notes') ?? '')).trim();
+    const parsedNotes = matchAdminNotesSchema.safeParse({
+      notes: String(formData.get('notes') ?? ''),
+    });
+    if (!parsedNotes.success) {
+      throw new DomainError('VALIDATION_FAILED', { fieldErrors: toFieldErrors(parsedNotes.error) });
+    }
+    const notes = parsedNotes.data.notes;
 
     const supabase = await createSupabaseServerClient();
 
@@ -327,20 +471,23 @@ export async function saveMatchAdminNotesAction(
             .delete()
             .eq('match_id', matchId)
             .eq('league_id', leagueId)
-        : await supabase
-            .from('match_admin_notes')
-            .upsert(
-              { match_id: matchId, league_id: leagueId, notes },
-              { onConflict: 'match_id' },
-            );
+        : await supabase.from('match_admin_notes').upsert(
+            // `updated_by` comes from the membership the guard just verified,
+            // never from the form. It is what makes the row say who wrote it,
+            // matching what `create_match()` records.
+            { match_id: matchId, league_id: leagueId, notes, updated_by: membership.user_id },
+            { onConflict: 'match_id' },
+          );
 
     if (error !== null) {
       throw domainErrorFromDatabase(error);
     }
 
-    revalidatePath('/', 'layout');
-    return actionSuccess();
+    destination = matchPathWithNotice(slug, matchId, MATCH_NOTICES.notesSaved);
   } catch (error: unknown) {
     return actionFailure(error);
   }
+
+  revalidatePath('/', 'layout');
+  redirect(destination);
 }
