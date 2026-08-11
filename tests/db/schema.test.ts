@@ -15,6 +15,9 @@ const ALL_PUBLIC_TABLES = [
   'league_membership_admin_notes',
   'audit_events',
   'user_app_state',
+  // Phase 4. Named explicitly as well as being caught by the "no table without
+  // RLS" sweep below, so a failure says which table lost its protection.
+  'match_signups',
 ] as const;
 
 describe('schema', () => {

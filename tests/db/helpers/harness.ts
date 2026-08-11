@@ -89,9 +89,18 @@ export interface SeedUser {
   readonly email: string;
 }
 
+export interface TestDatabaseConnection {
+  readonly host: string;
+  readonly port: number;
+  readonly user: string;
+  readonly password: string;
+}
+
 export interface TestDatabase {
   readonly name: string;
   readonly pool: Pool;
+  /** Kept so a test can open a connection of its own — see `connectAs`. */
+  readonly connection: TestDatabaseConnection;
   drop(): Promise<void>;
 }
 
@@ -133,6 +142,12 @@ export async function createTestDatabase(kind: 'schema' | 'seeded'): Promise<Tes
   return {
     name,
     pool,
+    connection: {
+      host: connection.host,
+      port: connection.port,
+      user: connection.user,
+      password: connection.password,
+    },
     async drop() {
       await pool.end();
       const cleanup = new Client({
@@ -260,6 +275,106 @@ export async function asServiceRoleCommitting<T>(
   fn: (client: PoolClient) => Promise<T>,
 ): Promise<T> {
   return inRole(db, 'service_role', null, fn, true);
+}
+
+export interface ExtraMember {
+  readonly user: SeedUser;
+  readonly membershipId: string;
+}
+
+/**
+ * Creates `count` extra active members of a league.
+ *
+ * The seed holds five people, which is not enough to fill a roster, build a
+ * waitlist deep enough to reorder, or race several joins at a capacity
+ * boundary. Written with the pool's own connection (no `set role`), so it
+ * bypasses RLS as fixture setup rather than as anything under test.
+ */
+let extraMemberSerial = 0;
+
+export async function createExtraMembers(
+  db: TestDatabase,
+  leagueId: string,
+  count: number,
+  prefix = 'extra',
+): Promise<ExtraMember[]> {
+  const members: ExtraMember[] = [];
+
+  for (let index = 1; index <= count; index += 1) {
+    // A process-wide serial rather than the loop index, so a test that calls
+    // this twice — "two already seated, eight arriving late" — does not mint
+    // the same identifiers again.
+    extraMemberSerial += 1;
+    const suffix = String(extraMemberSerial).padStart(4, '0');
+    const userId = `${'5'.repeat(8)}-5555-4555-8555-${'0'.repeat(8)}${suffix}`;
+    const membershipId = `${'4'.repeat(8)}-4444-4444-8444-${'0'.repeat(8)}${suffix}`;
+    const email = `${prefix}${String(index)}@matchday.test`;
+
+    await db.pool.query(
+      `insert into auth.users (instance_id, id, aud, role, email,
+                               email_confirmed_at, created_at, updated_at)
+       values ('00000000-0000-0000-0000-000000000000', $1, 'authenticated',
+               'authenticated', $2, now(), now(), now())`,
+      [userId, email],
+    );
+    await db.pool.query(
+      `insert into public.profiles (id, first_name, last_name, email_normalized)
+       values ($1, $2, 'Tester', $3)`,
+      [userId, `Player${String(index)}`, email],
+    );
+    await db.pool.query(
+      `insert into public.league_memberships (id, league_id, user_id, role, status)
+       values ($1, $2, $3, 'player', 'active')`,
+      [membershipId, leagueId, userId],
+    );
+
+    // Members in good standing: whatever the league currently requires, they
+    // have accepted. Tests that want a blocked member use the seeded
+    // `rmvfcPlayer`, who deliberately has not.
+    await db.pool.query(
+      `insert into public.guideline_acceptances (league_id, membership_id, guideline_version_id)
+       select $1, $2, v.id
+         from public.guideline_versions v
+        where v.id = public.current_required_guideline_version($1)
+       on conflict do nothing`,
+      [leagueId, membershipId],
+    );
+
+    members.push({ user: { id: userId, email }, membershipId });
+  }
+
+  return members;
+}
+
+/**
+ * A connection of its very own, for tests that need genuine parallelism.
+ *
+ * The shared pool caps at four connections and hands them back on release, so
+ * two "concurrent" statements through it can end up serialized on the same
+ * socket — which would make a concurrency test pass without ever testing
+ * concurrency. Each caller here gets a private connection that is theirs until
+ * they close it.
+ */
+export async function connectAs(db: TestDatabase, user: SeedUser): Promise<Client> {
+  const client = new Client({
+    host: db.connection.host,
+    port: db.connection.port,
+    user: db.connection.user,
+    password: db.connection.password,
+    database: db.name,
+  });
+  await client.connect();
+  await client.query('select set_config($1, $2, false)', [
+    'request.jwt.claims',
+    JSON.stringify({
+      sub: user.id,
+      email: user.email,
+      role: 'authenticated',
+      aud: 'authenticated',
+    }),
+  ]);
+  await client.query('set role authenticated');
+  return client;
 }
 
 export interface CapturedDatabaseError {

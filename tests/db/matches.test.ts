@@ -331,17 +331,49 @@ describe('match templates and matches', () => {
 
   describe('lifecycle transitions', () => {
     it('refuses a jump to an unimplemented state', async () => {
-      for (const target of ['roster_finalized', 'teams_published', 'completed']) {
+      // `roster_finalized` moved out of this list in Phase 4, which implements
+      // it. `teams_published` and `completed` stay: the enum names them so
+      // later phases add behaviour rather than schema, and the guard stops
+      // anything reaching a state no code understands.
+      for (const target of ['teams_published', 'completed']) {
         const error = await expectDatabaseError(() =>
           db.pool.query('update public.matches set status = $2 where id = $1', [
             SEED_MATCHES.rmvfcOpen,
             target,
           ]),
         );
-        // The enum names them so later phases add behaviour, not schema; the
-        // guard stops anything reaching a state no code understands.
         expect(error.message).toContain('MATCH_TRANSITION_INVALID');
       }
+    });
+
+    it('allows open → roster_finalized, and back for further changes', async () => {
+      await db.pool.query(`update public.matches set status = 'roster_finalized' where id = $1`, [
+        SEED_MATCHES.rmvfcOpen,
+      ]);
+      await db.pool.query(`update public.matches set status = 'open' where id = $1`, [
+        SEED_MATCHES.rmvfcOpen,
+      ]);
+
+      const { rows } = await db.pool.query<{ status: string }>(
+        'select status from public.matches where id = $1',
+        [SEED_MATCHES.rmvfcOpen],
+      );
+      // Reopening is how a late change is made before Phase 5 exists.
+      expect(rows[0]?.status).toBe('open');
+    });
+
+    it('refuses teams_published even from a finalized roster', async () => {
+      await db.pool.query(`update public.matches set status = 'roster_finalized' where id = $1`, [
+        SEED_MATCHES.rmvfcOpen,
+      ]);
+
+      const error = await expectDatabaseError(() =>
+        db.pool.query(`update public.matches set status = 'teams_published' where id = $1`, [
+          SEED_MATCHES.rmvfcOpen,
+        ]),
+      );
+      // Phase 6 adds this transition, not Phase 4.
+      expect(error.message).toContain('MATCH_TRANSITION_INVALID');
     });
 
     it('refuses reopening a canceled match', async () => {
