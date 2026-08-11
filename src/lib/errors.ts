@@ -33,6 +33,14 @@ export const DOMAIN_ERROR_CODES = [
   // Phase 3B additions, for the two ways an edit can be refused.
   'MATCH_NOT_DRAFT',
   'MATCH_REVISION_STALE',
+  // Phase 4. 02 §21 predates signup, so these extend the list rather than
+  // renaming anything in it.
+  'SIGNUP_MODE_MISMATCH',
+  'SIGNUP_DECISION_INVALID',
+  'SIGNUP_CANCELLATION_UNAVAILABLE',
+  // Raised by the two lifecycle guard triggers rather than by a function.
+  'MATCH_TRANSITION_INVALID',
+  'SIGNUP_TRANSITION_INVALID',
 ] as const;
 
 export type DomainErrorCode = (typeof DOMAIN_ERROR_CODES)[number];
@@ -76,6 +84,17 @@ const USER_FACING_MESSAGES: Record<DomainErrorCode, string> = {
   // resubmitting the same stale form repeatedly.
   MATCH_REVISION_STALE:
     'Somebody else changed this match while you were editing. Reload the page and try again.',
+  MATCH_TRANSITION_INVALID: 'That match cannot move to that state.',
+  SIGNUP_TRANSITION_INVALID: 'That signup change is not available yet.',
+  SIGNUP_MODE_MISMATCH: 'That is not how this match fills its roster. Reload the page.',
+  SIGNUP_DECISION_INVALID: 'That is not a decision you can record for this player.',
+  // Says plainly that the feature does not exist rather than implying the
+  // attempt failed. Cancelling a confirmed spot arrives with the rest of the
+  // cancellation workflow — the cutoff labelling, the administrator alert and
+  // the replacement — and doing the visible half early would leave a player
+  // believing they were released when nobody had been told.
+  SIGNUP_CANCELLATION_UNAVAILABLE:
+    'Cancelling a confirmed spot is not available yet. Please contact your league administrator.',
 };
 
 export class DomainError extends Error {

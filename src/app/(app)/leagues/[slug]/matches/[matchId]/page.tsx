@@ -10,12 +10,20 @@ import {
   requireLeagueMemberPage,
   type MatchNotice,
 } from '@/lib/auth/page-guards';
+import { SignupControls, SignupStatusBadge } from '@/components/signup';
 import { formatMatchDate, formatMatchTime } from '@/lib/matches/match-timing';
 import { getMatch, getMatchAdminNotes } from '@/lib/matches/matches';
 import { canEditMatch } from '@/lib/matches/match-permissions';
 import {
+  getConfirmedRoster,
+  getMySignup,
+  getSignupCounts,
+  getSignupEligibility,
+} from '@/lib/matches/signups';
+import {
   deriveMatchParticipationState,
   participationStateLabel,
+  remainingSpots,
 } from '@/lib/matches/threshold-state';
 
 export const metadata: Metadata = { title: 'Match' };
@@ -52,7 +60,27 @@ export default async function MatchDetailPage({
 
   const notice = parseMatchNotice((await searchParams)['notice']);
   const adminNotes = isAdmin ? await getMatchAdminNotes(league.id, matchId) : null;
-  const state = deriveMatchParticipationState(null);
+
+  // Phase 4 supplies the counts the Phase 3 helper was already built to accept.
+  // `null` still means "no signup data", which is now only true for a match the
+  // caller cannot see.
+  const [counts, mySignup, roster, eligibility] = await Promise.all([
+    getSignupCounts(matchId),
+    getMySignup(matchId),
+    getConfirmedRoster(matchId),
+    getSignupEligibility(matchId),
+  ]);
+
+  const state = deriveMatchParticipationState(
+    counts === null
+      ? null
+      : { confirmed: counts.confirmed, capacity: counts.capacity, minPlayers: counts.min_players },
+  );
+  const openSpots = remainingSpots(
+    counts === null
+      ? null
+      : { confirmed: counts.confirmed, capacity: counts.capacity, minPlayers: counts.min_players },
+  );
 
   // Shared with the edit route, so the button and the form cannot disagree
   // about who may edit what.
@@ -190,13 +218,49 @@ export default async function MatchDetailPage({
         )}
       </section>
 
+      <section className="surface-card flex flex-col gap-3 p-4">
+        <div>
+          <h2 className="text-base font-semibold">Signup</h2>
+          <p className="mt-1 text-sm text-muted">
+            {participationStateLabel(state)}
+            {counts === null ? '' : ` · ${counts.confirmed} of ${counts.capacity} confirmed`}
+            {openSpots === null || openSpots === 0 ? '' : ` · ${openSpots} open`}
+            {counts === null || counts.waitlisted === 0
+              ? ''
+              : ` · ${counts.waitlisted} waitlisted`}
+          </p>
+        </div>
+
+        <SignupStatusBadge outcome={mySignup} />
+
+        {match.status === 'canceled' ? null : (
+          <SignupControls
+            matchId={match.id}
+            selectionMode={match.selection_mode}
+            eligibility={eligibility}
+            outcome={mySignup}
+          />
+        )}
+      </section>
+
       <section className="surface-card p-4">
-        <h2 className="text-base font-semibold">Signup</h2>
-        <p className="mt-1 text-sm text-muted">{participationStateLabel(state)}.</p>
-        <p className="mt-1 text-sm text-muted">
-          Joining a match, waitlists and rosters arrive in the next phase. Nothing is being
-          recorded for this match yet.
-        </p>
+        <h2 className="text-base font-semibold">
+          Confirmed roster <span className="text-muted">({roster.length})</span>
+        </h2>
+        {roster.length === 0 ? (
+          <p className="mt-1 text-sm text-muted">Nobody is confirmed yet.</p>
+        ) : (
+          // Names only. The waitlist is deliberately absent: a member sees the
+          // size of the queue in the line above, never who is in it or where.
+          <ul className="mt-2 flex flex-col gap-1">
+            {roster.map((player) => (
+              <li key={player.membership_id} className="text-sm">
+                {player.first_name} {player.last_name}
+                {player.is_self ? <span className="ml-1.5 text-xs text-muted">(you)</span> : null}
+              </li>
+            ))}
+          </ul>
+        )}
       </section>
 
       {isAdmin ? (
@@ -209,6 +273,15 @@ export default async function MatchDetailPage({
               <p className="mt-1 whitespace-pre-wrap text-sm">{adminNotes.notes}</p>
               <p className="mt-1 text-xs text-muted">Members cannot see these.</p>
             </div>
+          )}
+
+          {match.status === 'draft' ? null : (
+            <Link
+              href={`/leagues/${league.slug}/matches/${match.id}/roster`}
+              className="inline-flex min-h-11 w-fit items-center rounded-lg border border-[var(--border-subtle)] px-3 py-2 text-sm font-semibold"
+            >
+              Manage roster
+            </Link>
           )}
 
           {match.status === 'draft' ? (
@@ -224,6 +297,9 @@ export default async function MatchDetailPage({
             {match.published_at === null
               ? ''
               : ` · published ${new Date(match.published_at).toLocaleDateString('en-GB')}`}
+            {match.roster_finalized_at === null
+              ? ' · roster not published'
+              : ` · roster revision ${match.roster_revision}`}
           </p>
         </section>
       ) : null}

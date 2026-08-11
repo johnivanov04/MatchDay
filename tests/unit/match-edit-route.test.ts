@@ -30,6 +30,10 @@ const mocks = vi.hoisted(() => {
     findMyLeagueBySlug: vi.fn(),
     getMatch: vi.fn(),
     getMatchAdminNotes: vi.fn(),
+    getSignupCounts: vi.fn(),
+    getMySignup: vi.fn(),
+    getConfirmedRoster: vi.fn(),
+    getSignupEligibility: vi.fn(),
   };
 });
 
@@ -58,6 +62,20 @@ vi.mock('@/components/edit-match', () => ({
 vi.mock('@/components/matches', () => ({
   CancelMatchForm: () => null,
   PublishMatchButton: () => null,
+}));
+
+// Phase 4 additions to the detail page. Stubbed for the same reason as the
+// forms: this file is about routing and authorization, and the signup
+// projections have their own suites against a real database.
+vi.mock('@/lib/matches/signups', () => ({
+  getSignupCounts: mocks.getSignupCounts,
+  getMySignup: mocks.getMySignup,
+  getConfirmedRoster: mocks.getConfirmedRoster,
+  getSignupEligibility: mocks.getSignupEligibility,
+}));
+vi.mock('@/components/signup', () => ({
+  SignupControls: () => null,
+  SignupStatusBadge: () => null,
 }));
 
 const { default: EditMatchPage } = await import(
@@ -191,6 +209,10 @@ function signInAs(role: 'league_admin' | 'player' | 'none', status?: 'pending' |
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.getMatchAdminNotes.mockResolvedValue(null);
+  mocks.getSignupCounts.mockResolvedValue(null);
+  mocks.getMySignup.mockResolvedValue(null);
+  mocks.getConfirmedRoster.mockResolvedValue([]);
+  mocks.getSignupEligibility.mockResolvedValue('MEMBERSHIP_REQUIRED');
 });
 
 describe('the edit route', () => {

@@ -129,9 +129,36 @@ Carried forward from Phase 3:
 - [ ] **Per-type notification preferences.** One enabled/disabled switch per
       device is the whole model, deliberately. Revisit only if members ask.
 
-## Phase 4–7
+## Phase 4 — complete
 
-- [ ] Signup, capacity transactions, ordered waitlist (Phase 4).
+Delivered: `match_signups` with composite-FK tenancy and a deferrable waitlist
+constraint, one central eligibility predicate, first-come and
+administrator-approved signup, transactional capacity claiming under a match-row
+lock, ordered waitlists with validated reordering, manual administrator
+additions, roster publication with its own revision counter, the member roster
+projection and the administrator workspace.
+
+Carried forward from Phase 4:
+
+- [ ] **`published_status` is a denormalised copy.** It records what each player
+      was last told so republication can find who actually moved. It is written
+      only by `finalize_roster()`; if a future path writes signups without going
+      through it, the "affected player" calculation silently degrades.
+- [ ] **Reordering submits the whole list.** Fine for a pickup waitlist; a
+      league with a hundred waitlisted players would want a move-one operation
+      with a position hint rather than an N-element array.
+- [ ] **No priority-window enforcement.** `priority_qualified` is recorded and
+      shown to the administrator as a flag, per 02 §11 — "Optional priority
+      rules create warnings, not universal automatic entitlement." Nothing acts
+      on it automatically, which is deliberate.
+- [ ] **First-come matches never need publication.** `finalize_roster()` accepts
+      them, but nothing requires it, because F-06 makes their roster
+      authoritative on join. Revisit if a league asks to freeze one.
+- [ ] **Open-spot visibility has no league setting.** F-08 mentions one; no
+      column exists, so open spots are shown to every active member.
+
+## Phase 5–7
+
 - [ ] Cancellation, promotion, reminders (Phase 5).
 - [ ] Team builder and publication (Phase 6).
 - [ ] Attendance, no-show warnings, PWA manifest, monitoring (Phase 7).

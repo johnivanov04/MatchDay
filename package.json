@@ -15,6 +15,7 @@
     "test": "vitest run",
     "test:unit": "vitest run --project unit",
     "test:db": "vitest run --project db",
+    "test:concurrency": "vitest run --project db tests/db/signup-concurrency.test.ts",
     "test:watch": "vitest",
     "db:reset": "supabase db reset",
     "db:migrate": "supabase migration up",

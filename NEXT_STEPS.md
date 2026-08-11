@@ -1,8 +1,8 @@
 # Next steps
 
-Phases 1, 2 and 3 are complete. This document covers what to verify by hand —
-including the parts that cannot be tested automatically — and what Phase 4
-should start with.
+Phases 1, 2, 3, 3B and 4 are complete. This document covers what to verify by
+hand — including the parts that cannot be tested automatically — and what Phase
+5 should start with.
 
 ---
 
@@ -10,7 +10,7 @@ should start with.
 
 ```bash
 npx supabase start        # if not already running
-npm run db:reset          # 29 migrations + seed
+npm run db:reset          # 35 migrations + seed
 npm run dev
 ```
 
@@ -96,6 +96,68 @@ a network call.
 18. Run `next dev --experimental-https` if your browser refuses to register the
     service worker over plain HTTP.
 
+### Signup, rosters and waitlists (Phase 4)
+
+Seeded matches: **Thursday 5v5** (Weeknight 5v5) is first-come, capacity 10.
+**Monday night 11v11** (RMVFC) is administrator-approval, capacity 22. To make a
+waitlist form without inventing twenty accounts, edit the match and set capacity
+to 2.
+
+**First-come**
+
+19. Sign in as `player.multi@matchday.test` → Weeknight 5v5 → *Thursday 5v5* →
+    **Join match**. Confirm the badge reads *You are playing* and that you
+    appear on the confirmed roster marked "(you)".
+20. Fill the remaining spot from another account, then join from a third.
+    Confirm the third sees *Waitlisted — position 1*.
+21. As the waitlisted player, confirm the page shows the confirmed roster in
+    full, the waitlist **size**, and no other player's position or name in a
+    queue.
+22. Press **Join match** again from each account. Nothing changes and no second
+    notification arrives.
+
+**Administrator approval**
+
+23. As `player.multi@matchday.test` → RMVFC → *Monday night 11v11* → **Request a
+    spot**. Confirm it says *Selection pending* and states explicitly that this
+    is **not** a confirmed spot.
+24. As `admin.rmvfc@matchday.test`, open the match → **Manage roster**. The
+    request appears under *Requested a spot* with its response time.
+25. **Confirm** that player. Move a second to the **waitlist**. Mark a third
+    **not selected**.
+26. With two or more waitlisted, use the ↑/↓ buttons and *Save this order*.
+    Confirm the numbering is 1..N with no gaps.
+27. **Add a member** — the picker lists memberships only, never email
+    addresses. Add one to the confirmed roster.
+28. Press **Publish roster**. Confirm each affected player receives exactly one
+    notification saying what happened to *them*.
+29. Press **Publish roster** again. Confirm no new notifications and the roster
+    revision does not move.
+30. Change one decision, publish again, and confirm only that player hears the
+    new outcome while the others get "the roster changed, your place is
+    unchanged".
+
+**Privacy**
+
+31. As a waitlisted player, confirm you cannot see the full waitlist, anybody
+    else's position, or the administrator workspace at
+    `/leagues/rmv-football-club/matches/<id>/roster` — it redirects to the
+    dashboard rather than erroring.
+32. As `admin.fives@matchday.test` (a different league's administrator), open
+    that same roster URL. It must redirect identically.
+
+**Boundaries**
+
+33. As `player.rmvfc@matchday.test`, who has not accepted the required RMVFC
+    guidelines, confirm the match page explains that and offers no signup
+    control.
+34. Edit a match so signup has already closed, then confirm a member sees
+    *Signup for this match has closed* rather than a button.
+35. Cancel a match and confirm it accepts no responses.
+36. As a **confirmed** player, confirm there is no *Cancel my spot* control —
+    only a note saying it is not available yet. That is Phase 5, and nothing
+    here fakes it.
+
 ### Confirm the boundaries directly
 
 ```bash
@@ -110,7 +172,7 @@ run `npm run test:db` for the authoritative answer.
 
 ---
 
-## 3. Review before Phase 4
+## 3. Review before Phase 5
 
 Worth a human read, in this order:
 
@@ -141,57 +203,40 @@ Judgement calls to confirm or overturn:
 
 ---
 
-## 4. Recommended first Phase 4 task
+## 4. Recommended first Phase 5 task
 
-**`match_signups` — the table, its constraints, and a transactional
-`join_match()` that claims capacity safely — before any roster or waitlist UI.**
+**`cancel_spot(match_id, reason?)` — the transaction that releases a confirmed
+spot, classifies the cancellation against the cutoff, and promotes at most one
+waitlisted player.**
 
-It is the right next task for three reasons:
+Phase 4 left a clean seam for it on purpose:
 
-- **Everything else in Phase 4 is a read of it.** Rosters, waitlist order,
-  promotion and the derived `needs_players`/`enough_players`/`full` labels are
-  all projections of signup rows. Building any of them first means building
-  them twice.
-- **It is the one place concurrency actually bites.** PRD §13 makes "no
-  confirmed spot is duplicated under concurrent requests" a success metric.
-  Capacity has to be claimed inside a transaction or a protected function —
-  `SELECT … FOR UPDATE` on the match row, or a unique partial index over
-  confirmed positions — and that decision shapes the whole phase.
-- **The two Phase 3 seams are already waiting for it.**
-  `has_accepted_required_guidelines(league_id)` is the eligibility gate, and
-  `deriveMatchParticipationState(counts)` already accepts counts and returns
-  `signup_not_open` only when passed `null`. Phase 4 supplies real counts and
-  the labels start working with no change to either.
+- `signup_status` already declares `canceled` and `withdrawn_late`, and
+  `match_signups_guard_status()` refuses both. Phase 5 relaxes that trigger; no
+  migration touches a populated table.
+- `canceled_at` and `cancellation_reason` already exist, constrained so they can
+  only ever be set together with a cancellation status.
+- `signup_consumes_capacity()` already excludes both, so a canceled player stops
+  occupying a slot the moment the status changes — no counting code moves.
+- `compact_waitlist()` already renumbers 1..N under the deferred constraint, so
+  promotion is "confirm the person at position 1, then compact".
+- Every capacity-touching function already takes `select ... for update` on the
+  match row first. Promotion must take the same lock, in the same place, or the
+  serialization guarantee is lost.
 
-Suggested shape:
+The one genuinely new decision is **automatic versus administrator-controlled
+promotion**. `matches.waitlist_mode` is stored and honoured nowhere in Phase 4
+except as configuration; F-09 requires automatic mode to promote inside the
+transaction that releases the spot, and administrator-controlled mode to notify
+with a recommendation and promote nothing. Both need the "a single opened spot
+cannot promote two players" test that PRD §13 makes a success metric — write it
+with real concurrent connections, as `tests/db/signup-concurrency.test.ts`
+already does.
 
-```sql
-create table public.match_signups (
-  id uuid primary key default gen_random_uuid(),
-  league_id uuid not null,
-  match_id uuid not null,
-  membership_id uuid not null,
-  status public.signup_status not null,      -- 02 §3 lists seven values
-  responded_at timestamptz not null default now(),
-  priority_qualified boolean,
-  waitlist_position integer,
-  ...
-  constraint match_signups_match_fk
-    foreign key (match_id, league_id) references public.matches (id, league_id),
-  constraint match_signups_membership_fk
-    foreign key (membership_id, league_id)
-    references public.league_memberships (id, league_id)
-);
--- unique (match_id, membership_id)          -- one signup per player per match
--- unique (match_id, waitlist_position) where status = 'waitlisted'
-```
+`mark_unavailable()` currently raises `SIGNUP_CANCELLATION_UNAVAILABLE` for a
+confirmed player. That refusal is the marker for where Phase 5 begins.
 
-with `join_match(match_id)` checking, in one transaction: active membership,
-`has_accepted_required_guidelines`, match status `open`, signup deadline, and
-then capacity — confirming or waitlisting accordingly. Tests should include a
-genuine concurrency case: several sessions racing for the final spot, asserting
-exactly one confirmation.
-
-**Then**, in order: administrator-approved selection and the roster workspace,
-ordered waitlists, and roster publication — reusing the notification fanout
-Phase 3 already provides.
+**Then**, in order: on-time versus late classification and the administrator
+alert, the cancellation receipt and promotion notifications, and reminder
+scheduling — reusing the notification fanout Phase 3 provides and the
+`reminder_offsets` metadata already stored on templates.

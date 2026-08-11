@@ -187,7 +187,16 @@ export type NotificationType =
   | 'match_changed'
   | 'match_canceled'
   | 'guideline_version_published'
-  | 'guideline_acceptance_required';
+  | 'guideline_acceptance_required'
+  // Phase 4. The cancellation receipt, late-cancellation alert and waitlist
+  // promotion that 02 §14 also lists belong to the Phase 5 workflow that can
+  // send them.
+  | 'signup_confirmed'
+  | 'signup_pending'
+  | 'waitlisted'
+  | 'not_selected'
+  | 'roster_published'
+  | 'roster_changed';
 
 export type PushDeliveryStatus =
   | 'pending'
@@ -273,6 +282,9 @@ export type MatchRow = {
   status: MatchLifecycleStatus;
   public_notes: string | null;
   revision: number;
+  /** Phase 4. Distinct from `revision`, which tracks edits to the match itself. */
+  roster_revision: number;
+  roster_finalized_at: string | null;
   created_by: string | null;
   published_at: string | null;
   canceled_at: string | null;
@@ -289,6 +301,106 @@ export type MatchAdminNoteRow = {
   created_at: string;
   updated_at: string;
 };
+
+// ── Phase 4 ────────────────────────────────────────────────────────────────
+
+/**
+ * All seven values from 02 §3. `canceled` and `withdrawn_late` exist so Phase 5
+ * needs no migration on a populated table; a database trigger refuses to write
+ * either until that phase implements the behaviour behind them.
+ */
+export type SignupStatus =
+  | 'interested'
+  | 'confirmed'
+  | 'waitlisted'
+  | 'not_selected'
+  | 'not_available'
+  | 'canceled'
+  | 'withdrawn_late';
+
+/** Only `confirmed` occupies a capacity slot — see signup_consumes_capacity(). */
+export const CAPACITY_CONSUMING_STATUSES: readonly SignupStatus[] = ['confirmed'];
+
+export type MatchSignupRow = {
+  id: string;
+  league_id: string;
+  match_id: string;
+  membership_id: string;
+  status: SignupStatus;
+  responded_at: string;
+  priority_qualified: boolean | null;
+  waitlist_position: number | null;
+  canceled_at: string | null;
+  cancellation_reason: string | null;
+  selected_by: string | null;
+  selected_at: string | null;
+  override_reason: string | null;
+  published_status: SignupStatus | null;
+  created_at: string;
+  updated_at: string;
+};
+
+/** What every signup RPC returns: the caller's own outcome, and nobody else's. */
+export type SignupOutcome = {
+  status: SignupStatus;
+  waitlist_position: number | null;
+};
+
+/** A confirmed player as a member is allowed to see them: a name, and nothing else. */
+export type ConfirmedRosterEntry = {
+  membership_id: string;
+  first_name: string;
+  last_name: string;
+  is_self: boolean;
+};
+
+export type MatchSignupCounts = {
+  confirmed: number;
+  waitlisted: number;
+  interested: number;
+  capacity: number;
+  min_players: number;
+};
+
+/**
+ * One row of the administrator roster workspace.
+ *
+ * `gender` and `goalkeeper_willing` arrive as `null` unless the league enables
+ * those fields. There is deliberately no phone, no attendance count, no
+ * no-show warning and no skill rating: Phase 7 owns attendance and none of that
+ * data exists, so the workspace omits it rather than showing a fabricated zero.
+ */
+export type RosterAdminEntry = {
+  signup_id: string;
+  membership_id: string;
+  first_name: string;
+  last_name: string;
+  status: SignupStatus;
+  responded_at: string;
+  waitlist_position: number | null;
+  priority_qualified: boolean | null;
+  preferred_positions: string[];
+  goalkeeper_willing: boolean | null;
+  gender: string | null;
+  membership_status: MembershipStatus;
+  selected_at: string | null;
+  override_reason: string | null;
+};
+
+export type AddableMember = {
+  membership_id: string;
+  first_name: string;
+  last_name: string;
+};
+
+/** Codes `match_signup_eligibility()` can return. */
+export type SignupEligibility =
+  | 'ELIGIBLE'
+  | 'AUTH_REQUIRED'
+  | 'MEMBERSHIP_REQUIRED'
+  | 'GUIDELINES_NOT_ACCEPTED'
+  | 'MATCH_NOT_OPEN'
+  | 'SIGNUP_CLOSED';
 
 export type NotificationRow = {
   id: string;
@@ -463,6 +575,16 @@ export interface Database {
         Update: Partial<Pick<MatchAdminNoteRow, 'notes' | 'updated_by'>>;
         Relationships: [];
       };
+      match_signups: {
+        Row: MatchSignupRow;
+        // Read-only from the API. Every write goes through a transactional RPC
+        // that takes the match lock, enforces capacity and keeps waitlist
+        // positions contiguous; a direct insert or update could do none of
+        // those, so the type refuses to describe one.
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
       notifications: {
         Row: NotificationRow;
         Insert: never;
@@ -615,6 +737,59 @@ export interface Database {
       };
       publish_match: { Args: { p_match_id: string }; Returns: string };
       cancel_match: { Args: { p_match_id: string; p_reason?: string | null }; Returns: string };
+
+      // ── Phase 4 ──────────────────────────────────────────────────────────
+      // Every one of these takes only a match id (plus, for administrator
+      // decisions, the target membership). No actor, league, role or
+      // eligibility flag is a parameter — all of that is derived from
+      // auth.uid() inside the function.
+      match_signup_eligibility: {
+        Args: { p_match_id: string };
+        Returns: SignupEligibility;
+      };
+      join_match: { Args: { p_match_id: string }; Returns: SignupOutcome };
+      request_spot: { Args: { p_match_id: string }; Returns: SignupOutcome };
+      mark_unavailable: { Args: { p_match_id: string }; Returns: SignupOutcome };
+      my_match_signup: { Args: { p_match_id: string }; Returns: SignupOutcome | null };
+      match_confirmed_roster: {
+        Args: { p_match_id: string };
+        Returns: ConfirmedRosterEntry[];
+      };
+      match_signup_counts: {
+        Args: { p_match_id: string };
+        Returns: MatchSignupCounts[];
+      };
+      match_roster_admin: {
+        Args: { p_match_id: string };
+        Returns: RosterAdminEntry[];
+      };
+      match_addable_members: {
+        Args: { p_match_id: string };
+        Returns: AddableMember[];
+      };
+      set_signup_decision: {
+        Args: {
+          p_match_id: string;
+          p_membership_id: string;
+          p_status: SignupStatus;
+          p_reason?: string | null;
+        };
+        Returns: SignupOutcome;
+      };
+      reorder_waitlist: {
+        Args: { p_match_id: string; p_membership_ids: string[] };
+        Returns: number;
+      };
+      add_member_to_match: {
+        Args: {
+          p_match_id: string;
+          p_membership_id: string;
+          p_status: SignupStatus;
+          p_override_reason?: string | null;
+        };
+        Returns: SignupOutcome;
+      };
+      finalize_roster: { Args: { p_match_id: string }; Returns: number };
       update_draft_match: {
         Args: {
           p_match_id: string;
