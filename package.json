@@ -15,8 +15,13 @@
     "test": "vitest run",
     "test:unit": "vitest run --project unit",
     "test:db": "vitest run --project db",
-    "test:concurrency": "vitest run --project db tests/db/signup-concurrency.test.ts",
+    "test:concurrency": "vitest run --project db concurrency",
     "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "test:e2e:fresh": "npm run db:reset && playwright test",
+    "test:e2e:headed": "playwright test --headed",
+    "test:e2e:ui": "playwright test --ui",
+    "reminders:run": "node scripts/run-due-reminders.mjs",
     "db:reset": "supabase db reset",
     "db:migrate": "supabase migration up",
     "db:start": "supabase start",
@@ -34,6 +39,7 @@
     "zod": "4.4.3"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@tailwindcss/postcss": "4.3.3",
     "@types/node": "24.10.1",
     "@types/pg": "8.20.3",

@@ -1,8 +1,8 @@
 # Next steps
 
-Phases 1, 2, 3, 3B and 4 are complete. This document covers what to verify by
+Phases 1, 2, 3, 3B, 4 and 5 are complete. This document covers what to verify by
 hand — including the parts that cannot be tested automatically — and what Phase
-5 should start with.
+6 should start with.
 
 ---
 
@@ -10,7 +10,7 @@ hand — including the parts that cannot be tested automatically — and what Ph
 
 ```bash
 npx supabase start        # if not already running
-npm run db:reset          # 35 migrations + seed
+npm run db:reset          # 40 migrations + seed
 npm run dev
 ```
 
@@ -34,6 +34,39 @@ VAPID_SUBJECT=mailto:you@example.com
 Without them the app runs normally and push simply reports itself as not
 configured — the in-app inbox is unaffected, which is the whole point of the
 layering.
+
+---
+
+## 1b. End-to-end tests
+
+```bash
+npm run test:e2e:fresh     # resets the database, then runs the whole suite
+npm run test:e2e           # attach to an already-clean stack
+npm run test:e2e:headed    # watch it happen, for debugging
+npm run test:e2e:ui        # Playwright's interactive runner
+```
+
+93 tests across six spec files cover Phases 1–5 through a real browser, against
+the real Supabase stack: real Row Level Security, real server actions, real
+database functions. Nothing is mocked and the application contains no test-only
+route — the suite mints a genuine Supabase session through the Auth API and
+installs the cookie, exactly as a magic link would.
+
+**Run the suite from a freshly reset stack.** GoTrue opens a PostgreSQL
+connection per request and does not pool, and the application validates the
+session on every render, so across several full runs on one container it
+exhausts the Docker bridge's ephemeral ports and starts answering 5xx. From a
+clean stack the suite passes 93/93; on the second consecutive run without a
+reset roughly ten tests fail on that. It is local stack capacity, not an
+application fault, and CI is unaffected because each job starts its own stack.
+`npm run test:e2e:fresh` is the reliable local command.
+
+For a faster inner loop, start the server once and let Playwright attach to it:
+
+```bash
+npm run build && npx next start --port 3100
+npm run test:e2e -- e2e/specs/phase4-signup.spec.ts
+```
 
 ---
 
@@ -158,6 +191,95 @@ to 2.
     only a note saying it is not available yet. That is Phase 5, and nothing
     here fakes it.
 
+### Cancellation, promotion and reminders (Phase 5)
+
+Set up: edit **Thursday 5v5** (Weeknight 5v5, first-come, *automatic*
+promotion) and set capacity to 2. RMVFC's **Monday night 11v11** is
+*administrator-controlled*, which is the other half of these checks.
+
+**On-time cancellation**
+
+37. Sign in as a confirmed player → open the match. The signup panel shows the
+    cancellation cutoff.
+38. Press **Cancel my spot**. Before confirming, the panel says cancelling now
+    is **on time** and names the cutoff.
+39. Confirm. Status becomes *Cancelled*, the confirmed count drops, and a
+    cancellation receipt appears in the inbox.
+
+**Late cancellation**
+
+40. As the administrator, edit the match so the cancellation cutoff has already
+    passed (set the cutoff hours to 0 and the kickoff to today).
+41. As a confirmed player, press **Cancel my spot**. The panel warns in amber
+    that this is a **late cancellation** and that the administrator will be told.
+42. Confirm. The player sees *Withdrew late*. Check the wording says nothing
+    about a no-show — that is Phase 7's judgement, not this one's.
+43. Sign in as the administrator and confirm a *Late withdrawal* notification
+    arrived, and that it does **not** contain the reason the player typed.
+
+**Automatic promotion**
+
+44. Put two players on the waitlist behind a full first-come match.
+45. Have a confirmed player cancel.
+46. Waitlist #1 is now confirmed; the old #2 is now #1. The confirmed count is
+    unchanged and still within capacity.
+47. Sign in as the promoted player and confirm the *You are in* notification.
+
+**Administrator-controlled replacement**
+
+48. On the RMVFC match, have a confirmed player cancel.
+49. Confirm **nobody** was promoted automatically.
+50. As the administrator, open **Manage roster**. The *Open spots* panel shows
+    the vacancy and a recommended player.
+51. Press **Promote to the roster**. The candidate is confirmed and the waitlist
+    compacts.
+52. Choose somebody other than the recommendation and confirm a reason is
+    required before the form will submit.
+
+**Waitlist withdrawal**
+
+53. As waitlist #2, press **Leave the waitlist**. The panel shows your own
+    position first.
+54. Confirm: no capacity changes, nobody is promoted, and the remaining
+    positions renumber with no gap.
+
+**Notification centre**
+
+55. On **Notifications**, use *Mark as read* / *Mark as unread* and watch the
+    header count follow.
+56. **Archive** a notification: it leaves the list and the unread count, and its
+    read state is unchanged.
+57. Sign in as another account and confirm you cannot see or mutate the first
+    account's notifications.
+
+**Reminders**
+
+58. Give a match a reminder offset and publish it:
+
+    ```sql
+    update public.matches
+       set reminder_offsets = array[interval '2 hours']
+     where id = '<match id>';
+    select public.materialize_match_reminders('<match id>');
+    update public.match_reminders set due_at = now() - interval '1 minute'
+     where match_id = '<match id>';
+    ```
+
+59. Run the generator and confirm exactly one reminder per confirmed player:
+
+    ```bash
+    npm run reminders:run
+    ```
+
+60. Run it again. It reports `Claimed 0` and no duplicate notification appears.
+
+> **Production note.** `npm run reminders:run` and `POST /api/cron/reminders`
+> are the operation, not a schedule. **Nothing in this repository runs them on a
+> cadence.** Production must call the route every few minutes with
+> `Authorization: Bearer $CRON_SECRET` — a Vercel Cron entry or a Supabase
+> `pg_cron` job invoking `generate_due_reminders()` both work. Until that is
+> configured, reminders never go out.
+
 ### Confirm the boundaries directly
 
 ```bash
@@ -203,40 +325,33 @@ Judgement calls to confirm or overturn:
 
 ---
 
-## 4. Recommended first Phase 5 task
+## 4. Recommended first Phase 6 task
 
-**`cancel_spot(match_id, reason?)` — the transaction that releases a confirmed
-spot, classifies the cancellation against the cutoff, and promotes at most one
-waitlisted player.**
+**`match_teams` and `match_team_assignments` — the tables, their constraints,
+and an `assign_player_to_team()` that cannot place somebody twice — before any
+team-builder UI.**
 
-Phase 4 left a clean seam for it on purpose:
+The seams Phase 5 leaves for it:
 
-- `signup_status` already declares `canceled` and `withdrawn_late`, and
-  `match_signups_guard_status()` refuses both. Phase 5 relaxes that trigger; no
-  migration touches a populated table.
-- `canceled_at` and `cancellation_reason` already exist, constrained so they can
-  only ever be set together with a cancellation status.
-- `signup_consumes_capacity()` already excludes both, so a canceled player stops
-  occupying a slot the moment the status changes — no counting code moves.
-- `compact_waitlist()` already renumbers 1..N under the deferred constraint, so
-  promotion is "confirm the person at position 1, then compact".
-- Every capacity-touching function already takes `select ... for update` on the
-  match row first. Promotion must take the same lock, in the same place, or the
-  serialization guarantee is lost.
+- `match_lifecycle_status` already declares `teams_published`, and
+  `matches_guard_status_transition()` already allowlists
+  `open → roster_finalized` while refusing `roster_finalized → teams_published`
+  with a comment saying Phase 6 adds it. Extend the trigger, not the enum.
+- 02 §17 names a **team revision** as distinct from the roster revision, exactly
+  as `roster_revision` is distinct from `revision`. Add a third counter rather
+  than overloading either; `advance_roster_revision_if_published()` is the
+  pattern to copy.
+- Only confirmed players may be assigned, and `signup_consumes_capacity()`
+  already defines who those are. A cancellation that releases a spot after teams
+  are published will need to drop that player's assignment — the one genuinely
+  new interaction between Phase 5 and Phase 6, and worth designing before the
+  UI.
+- `notification_type` needs a `teams_published` value, in its own migration for
+  the usual enum reason.
+- `leagues.position_labels`, `gender_field_enabled` and `goalkeeper_field_enabled`
+  already gate what the builder may display, and `match_roster_admin()` already
+  honours them.
 
-The one genuinely new decision is **automatic versus administrator-controlled
-promotion**. `matches.waitlist_mode` is stored and honoured nowhere in Phase 4
-except as configuration; F-09 requires automatic mode to promote inside the
-transaction that releases the spot, and administrator-controlled mode to notify
-with a recommendation and promote nothing. Both need the "a single opened spot
-cannot promote two players" test that PRD §13 makes a success metric — write it
-with real concurrent connections, as `tests/db/signup-concurrency.test.ts`
-already does.
-
-`mark_unavailable()` currently raises `SIGNUP_CANCELLATION_UNAVAILABLE` for a
-confirmed player. That refusal is the marker for where Phase 5 begins.
-
-**Then**, in order: on-time versus late classification and the administrator
-alert, the cancellation receipt and promotion notifications, and reminder
-scheduling — reusing the notification fanout Phase 3 provides and the
-`reminder_offsets` metadata already stored on templates.
+Randomization is count-only (04 §3) and must not claim balance. Draft teams stay
+invisible to players until publication, which is the same `published_at`-style
+visibility rule `matches_select_member` already demonstrates.

@@ -196,7 +196,14 @@ export type NotificationType =
   | 'waitlisted'
   | 'not_selected'
   | 'roster_published'
-  | 'roster_changed';
+  | 'roster_changed'
+  // Phase 5, completing 02 §14. `roster_changed` above is reused rather than
+  // duplicated: a cancellation that changes a published roster is that event.
+  | 'cancellation_receipt'
+  | 'late_cancellation'
+  | 'waitlist_promotion'
+  | 'replacement_needed'
+  | 'reminder';
 
 export type PushDeliveryStatus =
   | 'pending'
@@ -360,6 +367,13 @@ export type MatchSignupCounts = {
   interested: number;
   capacity: number;
   min_players: number;
+  cancellation_cutoff_at: string;
+  /**
+   * Whether cancelling right now would be late, decided by the database clock
+   * — the same one `cancel_spot()` classifies with. Presentation only: it is
+   * never submitted back and never trusted.
+   */
+  cancellation_is_late: boolean;
 };
 
 /**
@@ -391,6 +405,33 @@ export type AddableMember = {
   membership_id: string;
   first_name: string;
   last_name: string;
+};
+
+// ── Phase 5 ────────────────────────────────────────────────────────────────
+
+/**
+ * What the administrator needs to fill an open spot.
+ *
+ * `recommended_membership_id` is the first *still-eligible* waitlisted player,
+ * re-derived on read rather than stored, so it cannot go stale between the
+ * cancellation that opened the spot and the administrator acting on it.
+ */
+export type ReplacementState = {
+  open_spots: number;
+  waitlisted: number;
+  recommended_membership_id: string | null;
+  waitlist_mode: WaitlistMode;
+};
+
+export type MatchReminderRow = {
+  id: string;
+  league_id: string;
+  match_id: string;
+  offset_before: string;
+  due_at: string;
+  generated_at: string | null;
+  notified_count: number | null;
+  created_at: string;
 };
 
 /** Codes `match_signup_eligibility()` can return. */
@@ -790,6 +831,34 @@ export interface Database {
         Returns: SignupOutcome;
       };
       finalize_roster: { Args: { p_match_id: string }; Returns: number };
+
+      // ── Phase 5 ──────────────────────────────────────────────────────────
+      cancel_spot: {
+        Args: { p_match_id: string; p_reason?: string | null };
+        Returns: SignupOutcome;
+      };
+      promote_waitlisted_player: {
+        Args: {
+          p_match_id: string;
+          p_membership_id?: string | null;
+          p_reason?: string | null;
+        };
+        Returns: SignupOutcome;
+      };
+      match_replacement_state: {
+        Args: { p_match_id: string };
+        Returns: ReplacementState[];
+      };
+      mark_notification_unread: { Args: { p_notification_id: string }; Returns: string };
+      archive_notification: { Args: { p_notification_id: string }; Returns: string };
+      unarchive_notification: { Args: { p_notification_id: string }; Returns: string };
+      // Worker-only: granted to service_role and refused to any other role by
+      // an explicit `auth.role()` check inside the function. Returns the
+      // occurrences it claimed, so the caller can push exactly those batches.
+      generate_due_reminders: {
+        Args: { p_limit?: number };
+        Returns: Array<{ reminder_id: string; notified: number }>;
+      };
       update_draft_match: {
         Args: {
           p_match_id: string;

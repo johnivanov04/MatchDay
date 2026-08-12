@@ -42,13 +42,15 @@ async function pushCommittedFanout(prefix: string): Promise<void> {
   }
 }
 
-/** Shared shape for the three player responses, which differ only in the RPC. */
+/** Shared shape for the player responses, which differ only in the RPC. */
 async function playerSignupAction(
-  rpc: 'join_match' | 'request_spot' | 'mark_unavailable',
+  rpc: 'join_match' | 'request_spot' | 'mark_unavailable' | 'cancel_spot',
   formData: FormData,
+  extra: Record<string, unknown> = {},
 ): Promise<ActionResult<SignupOutcome>> {
   let outcome: SignupOutcome;
   let pushPrefix: string | null = null;
+  let cancellationMatchId: string | null = null;
 
   try {
     const matchId = matchIdSchema.parse(formData.get('match_id') ?? '');
@@ -56,7 +58,7 @@ async function playerSignupAction(
     // No membership id, no league id, no eligibility flag. The only thing this
     // action knows is which match, and the database decides the rest.
     const supabase = await createSupabaseServerClient();
-    const { data, error } = await supabase.rpc(rpc, { p_match_id: matchId });
+    const { data, error } = await supabase.rpc(rpc, { p_match_id: matchId, ...extra });
 
     if (error !== null) {
       throw domainErrorFromDatabase(error);
@@ -67,12 +69,18 @@ async function playerSignupAction(
 
     outcome = data;
 
-    // Only the two outcomes that create a notification are worth pushing.
+    // Only the outcomes that create a push-eligible notification are worth a
+    // dispatch. A cancellation's own receipt is not push-eligible — the person
+    // just did it — but the promotion and the administrator alerts it can
+    // trigger are, and they share the match in their key prefix.
     if (rpc === 'join_match') {
       pushPrefix =
         outcome.status === 'confirmed'
           ? `signup_confirmed:${matchId}`
           : `waitlisted:${matchId}`;
+    } else if (rpc === 'cancel_spot') {
+      pushPrefix = `waitlist_promotion:${matchId}`;
+      cancellationMatchId = matchId;
     }
   } catch (error: unknown) {
     return actionFailure(error);
@@ -80,6 +88,14 @@ async function playerSignupAction(
 
   if (pushPrefix !== null) {
     await pushCommittedFanout(pushPrefix);
+  }
+
+  // A cancellation can also have alerted the administrator — a late withdrawal,
+  // or a spot that administrator-controlled mode left open. Both are committed
+  // already; these dispatches only deliver copies.
+  if (cancellationMatchId !== null) {
+    await pushCommittedFanout(`late_cancellation:${cancellationMatchId}`);
+    await pushCommittedFanout(`replacement_needed:${cancellationMatchId}`);
   }
 
   revalidatePath('/', 'layout');
@@ -115,6 +131,82 @@ export async function markUnavailableAction(
   formData: FormData,
 ): Promise<ActionResult<SignupOutcome>> {
   return playerSignupAction('mark_unavailable', formData);
+}
+
+/**
+ * "Cancel my spot", and withdrawal from the waitlist.
+ *
+ * Distinct from `markUnavailableAction`: this releases something the match was
+ * relying on. The database classifies it on time or late from the match's own
+ * cutoff and its own clock — no boolean, timestamp or classification travels
+ * from the browser, so a crafted request cannot argue it was early.
+ */
+export async function cancelSpotAction(
+  _previous: ActionResult<SignupOutcome> | null,
+  formData: FormData,
+): Promise<ActionResult<SignupOutcome>> {
+  const rawReason = formData.get('reason');
+  const reason =
+    typeof rawReason === 'string' && rawReason.trim() !== ''
+      ? z.string().max(500).parse(rawReason.trim())
+      : null;
+
+  return playerSignupAction('cancel_spot', formData, { p_reason: reason });
+}
+
+/**
+ * Administrator promotion, for administrator-controlled leagues.
+ *
+ * With no membership id the database promotes its own recommendation, which is
+ * the ordinary case. Naming somebody else is allowed but requires a reason —
+ * F-09 says the administrator "may promote a different eligible player with an
+ * audit note", so the note is a condition rather than decoration.
+ */
+export async function promoteWaitlistedPlayerAction(
+  _previous: ActionResult<SignupOutcome> | null,
+  formData: FormData,
+): Promise<ActionResult<SignupOutcome>> {
+  let matchId: string;
+  let outcome: SignupOutcome;
+
+  try {
+    const leagueId = z.uuid().parse(formData.get('league_id') ?? '');
+    matchId = matchIdSchema.parse(formData.get('match_id') ?? '');
+
+    const rawMembership = formData.get('membership_id');
+    const membershipId =
+      typeof rawMembership === 'string' && rawMembership !== ''
+        ? z.uuid().parse(rawMembership)
+        : null;
+
+    const rawReason = formData.get('reason');
+    const reason =
+      typeof rawReason === 'string' && rawReason.trim() !== ''
+        ? z.string().max(500).parse(rawReason.trim())
+        : null;
+
+    await requireLeagueAdmin(leagueId);
+
+    const supabase = await createSupabaseServerClient();
+    const { data, error } = await supabase.rpc('promote_waitlisted_player', {
+      p_match_id: matchId,
+      p_membership_id: membershipId,
+      p_reason: reason,
+    });
+
+    if (error !== null) {
+      throw domainErrorFromDatabase(error, { SIGNUP_DECISION_INVALID: 'reason' });
+    }
+
+    outcome = data ?? { status: 'confirmed', waitlist_position: null };
+  } catch (error: unknown) {
+    return actionFailure(error);
+  }
+
+  await pushCommittedFanout(`waitlist_promotion:${matchId}`);
+
+  revalidatePath('/', 'layout');
+  return actionSuccess(outcome);
 }
 
 // ── Administrator decisions ────────────────────────────────────────────────

@@ -377,6 +377,28 @@ export async function connectAs(db: TestDatabase, user: SeedUser): Promise<Clien
   return client;
 }
 
+/**
+ * A private connection acting as the delivery/reminder worker.
+ *
+ * Deliberately presents **no** JWT claims, which is what a server-side
+ * connection using the service-role key looks like to `auth.role()` — and what
+ * the worker functions' `coalesce(auth.role(), 'service_role')` check expects.
+ * Reusing `connectAs` and switching role would leave an `authenticated` claim
+ * behind and be refused.
+ */
+export async function connectAsWorker(db: TestDatabase): Promise<Client> {
+  const client = new Client({
+    host: db.connection.host,
+    port: db.connection.port,
+    user: db.connection.user,
+    password: db.connection.password,
+    database: db.name,
+  });
+  await client.connect();
+  await client.query('set role service_role');
+  return client;
+}
+
 export interface CapturedDatabaseError {
   code: string;
   message: string;

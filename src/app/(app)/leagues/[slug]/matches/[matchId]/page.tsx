@@ -239,6 +239,14 @@ export default async function MatchDetailPage({
             selectionMode={match.selection_mode}
             eligibility={eligibility}
             outcome={mySignup}
+            // Rendered in the league's own zone, like every other time on this
+            // page. Whether cancelling now is late comes from the database, so
+            // the warning and the stored classification cannot disagree.
+            cancellationCutoffLabel={formatMatchTime(
+              new Date(match.cancellation_cutoff_at),
+              match.timezone,
+            )}
+            cancellationIsLate={counts?.cancellation_is_late ?? false}
           />
         )}
       </section>

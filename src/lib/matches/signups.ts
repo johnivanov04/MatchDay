@@ -3,6 +3,7 @@ import type {
   AddableMember,
   ConfirmedRosterEntry,
   MatchSignupCounts,
+  ReplacementState,
   RosterAdminEntry,
   SignupEligibility,
   SignupOutcome,
@@ -88,6 +89,26 @@ export async function getRosterForAdmin(matchId: string): Promise<RosterAdminEnt
   const { data, error } = await supabase.rpc('match_roster_admin', { p_match_id: matchId });
 
   return error !== null || data === null ? [] : data;
+}
+
+/**
+ * Open spots and who to offer them to. `null` for anyone but the administrator.
+ *
+ * The recommendation is re-derived on every read rather than stored when the
+ * spot opened, so it cannot name somebody who has since been suspended or let
+ * their guideline acceptance lapse.
+ */
+export async function getReplacementState(matchId: string): Promise<ReplacementState | null> {
+  const supabase = await createSupabaseServerClient();
+  const { data, error } = await supabase.rpc('match_replacement_state', {
+    p_match_id: matchId,
+  });
+
+  if (error !== null || data === null || data.length === 0) {
+    return null;
+  }
+
+  return data[0] ?? null;
 }
 
 /** Active members who have not already been placed on this roster or waitlist. */

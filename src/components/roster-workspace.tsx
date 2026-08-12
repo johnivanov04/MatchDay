@@ -5,10 +5,16 @@ import { FormError, inputClassName, SubmitButton } from '@/components/ui/field';
 import {
   addMemberToMatchAction,
   finalizeRosterAction,
+  promoteWaitlistedPlayerAction,
   reorderWaitlistAction,
   setSignupDecisionAction,
 } from '@/server/actions/signups';
-import type { AddableMember, RosterAdminEntry, SignupStatus } from '@/types/database';
+import type {
+  AddableMember,
+  ReplacementState,
+  RosterAdminEntry,
+  SignupStatus,
+} from '@/types/database';
 
 /**
  * The administrator's roster workspace.
@@ -329,6 +335,113 @@ function ManualAdd({
   );
 }
 
+/**
+ * The open-spot panel, for administrator-controlled leagues.
+ *
+ * Automatic leagues never see this: their vacancy was filled inside the
+ * transaction that created it, which is the whole point of that mode. Showing a
+ * "promote" control there would offer an action with nothing to act on.
+ *
+ * The recommendation is the first *still-eligible* waitlisted player, re-derived
+ * on every read rather than stored, so it cannot recommend somebody who has
+ * since been suspended or let their guideline acceptance lapse. Promoting
+ * anybody else needs a reason — F-09 makes the audit note a condition of
+ * overriding the order, not a nicety — and that reason is administrator-only:
+ * it never reaches the promoted player's notification or a push payload.
+ */
+function ReplacementPanel({
+  leagueId,
+  matchId,
+  replacement,
+  waitlisted,
+}: {
+  leagueId: string;
+  matchId: string;
+  replacement: ReplacementState;
+  waitlisted: RosterAdminEntry[];
+}) {
+  const [state, submit, pending] = useActionState(promoteWaitlistedPlayerAction, null);
+  const [targetId, setTargetId] = useState('');
+
+  if (replacement.waitlist_mode === 'automatic') {
+    return null;
+  }
+
+  const recommended = waitlisted.find(
+    (entry) => entry.membership_id === replacement.recommended_membership_id,
+  );
+  const overriding = targetId !== '' && targetId !== replacement.recommended_membership_id;
+
+  return (
+    <section className="surface-card flex flex-col gap-3 p-4">
+      <h3 className="text-sm font-semibold">
+        Open spots <span className="text-muted">({replacement.open_spots})</span>
+      </h3>
+
+      <FormError message={state?.ok === false ? state.message : undefined} />
+      {state?.ok === true ? (
+        <p role="status" className="text-sm font-medium text-pitch-600">
+          Player promoted.
+        </p>
+      ) : null}
+
+      {replacement.open_spots === 0 ? (
+        <p className="text-sm text-muted">The roster is full.</p>
+      ) : waitlisted.length === 0 ? (
+        <p className="text-sm text-muted">
+          {replacement.open_spots} spot{replacement.open_spots === 1 ? '' : 's'} open, and
+          nobody is waiting.
+        </p>
+      ) : (
+        <form action={submit} className="flex flex-col gap-3">
+          <input type="hidden" name="league_id" value={leagueId} />
+          <input type="hidden" name="match_id" value={matchId} />
+
+          <p className="text-sm">
+            {recommended === undefined
+              ? 'Nobody on the waitlist is currently eligible.'
+              : `Recommended: ${fullName(recommended)} (position ${String(
+                  recommended.waitlist_position ?? 0,
+                )}).`}
+          </p>
+
+          <select
+            name="membership_id"
+            value={targetId}
+            onChange={(event) => setTargetId(event.target.value)}
+            className={inputClassName}
+            aria-label="Player to promote"
+          >
+            <option value="">
+              {recommended === undefined
+                ? 'Choose a player'
+                : `Recommended — ${fullName(recommended)}`}
+            </option>
+            {waitlisted.map((entry) => (
+              <option key={entry.membership_id} value={entry.membership_id}>
+                {String(entry.waitlist_position ?? 0)}. {fullName(entry)}
+              </option>
+            ))}
+          </select>
+
+          {overriding ? (
+            <input
+              name="reason"
+              required
+              maxLength={500}
+              placeholder="Why this player instead of the recommendation?"
+              className={inputClassName}
+              aria-label="Override reason"
+            />
+          ) : null}
+
+          <SubmitButton pending={pending}>Promote to the roster</SubmitButton>
+        </form>
+      )}
+    </section>
+  );
+}
+
 function PublishRoster({
   leagueId,
   matchId,
@@ -370,6 +483,7 @@ export function RosterWorkspace({
   capacity,
   rosterRevision,
   finalizedAt,
+  replacement,
 }: {
   leagueId: string;
   matchId: string;
@@ -378,6 +492,7 @@ export function RosterWorkspace({
   capacity: number;
   rosterRevision: number;
   finalizedAt: string | null;
+  replacement: ReplacementState | null;
 }) {
   const of = (status: SignupStatus) => entries.filter((entry) => entry.status === status);
   const confirmed = of('confirmed');
@@ -413,6 +528,14 @@ export function RosterWorkspace({
         empty="The waitlist is empty."
       />
       <WaitlistOrder entries={waitlisted} leagueId={leagueId} matchId={matchId} />
+      {replacement === null ? null : (
+        <ReplacementPanel
+          leagueId={leagueId}
+          matchId={matchId}
+          replacement={replacement}
+          waitlisted={waitlisted}
+        />
+      )}
       <Group
         title="Not selected"
         entries={of('not_selected')}
@@ -426,6 +549,13 @@ export function RosterWorkspace({
         leagueId={leagueId}
         matchId={matchId}
         empty="Nobody has said they cannot play."
+      />
+      <Group
+        title="Cancelled"
+        entries={[...of('canceled'), ...of('withdrawn_late')]}
+        leagueId={leagueId}
+        matchId={matchId}
+        empty="Nobody has cancelled."
       />
 
       <ManualAdd leagueId={leagueId} matchId={matchId} members={addableMembers} />

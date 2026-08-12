@@ -49,9 +49,19 @@ const config = [
   },
   {
     // Server-side modules and tests are allowed to reach the privileged client.
-    files: ['src/lib/**/*.ts', 'src/server/**/*.ts', 'tests/**/*.ts'],
+    files: ['src/lib/**/*.ts', 'src/server/**/*.ts', 'tests/**/*.ts', 'e2e/**/*.ts'],
     rules: {
       'no-restricted-imports': 'off',
+    },
+  },
+  {
+    // The end-to-end suite is Node code, not React. Playwright's fixture API
+    // hands each fixture a callback conventionally named `use`, which the
+    // React-hooks rule mistakes for the `use` hook and rejects for being
+    // called outside a component. There is no React here to have a rule about.
+    files: ['e2e/**/*.ts'],
+    rules: {
+      'react-hooks/rules-of-hooks': 'off',
     },
   },
 ];
