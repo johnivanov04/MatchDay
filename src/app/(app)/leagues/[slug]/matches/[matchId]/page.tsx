@@ -20,6 +20,7 @@ import {
   getSignupCounts,
   getSignupEligibility,
 } from '@/lib/matches/signups';
+import { getPublishedTeams, groupPublishedTeams } from '@/lib/matches/teams';
 import {
   deriveMatchParticipationState,
   participationStateLabel,
@@ -64,12 +65,18 @@ export default async function MatchDetailPage({
   // Phase 4 supplies the counts the Phase 3 helper was already built to accept.
   // `null` still means "no signup data", which is now only true for a match the
   // caller cannot see.
-  const [counts, mySignup, roster, eligibility] = await Promise.all([
+  const [counts, mySignup, roster, eligibility, teamEntries] = await Promise.all([
     getSignupCounts(matchId),
     getMySignup(matchId),
     getConfirmedRoster(matchId),
     getSignupEligibility(matchId),
+    // Empty unless teams have been published *and* the caller is currently
+    // confirmed. The projection enforces both, so this page never has to.
+    getPublishedTeams(matchId),
   ]);
+
+  const publishedTeams = groupPublishedTeams(teamEntries);
+  const isConfirmed = mySignup?.status === 'confirmed';
 
   const state = deriveMatchParticipationState(
     counts === null
@@ -271,6 +278,68 @@ export default async function MatchDetailPage({
         )}
       </section>
 
+      {/*
+        Teams. Nothing appears until the administrator publishes, and then only
+        for a confirmed player — a waitlisted, not-selected or cancelled member
+        sees this section as absent rather than empty, because the projection
+        returns them nothing at all.
+      */}
+      {isConfirmed && match.status !== 'canceled' ? (
+        <section className="surface-card flex flex-col gap-3 p-4">
+          <h2 className="text-base font-semibold">Teams</h2>
+
+          {publishedTeams.length === 0 ? (
+            <p className="text-sm text-muted">
+              Teams have not been published yet. You will be told when they are.
+            </p>
+          ) : (
+            <>
+              {publishedTeams.some((team) =>
+                team.players.some((player) => player.is_self),
+              ) ? null : (
+                <p className="text-sm text-amber-700 dark:text-amber-300">
+                  You have not been assigned to a team yet.
+                </p>
+              )}
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                {publishedTeams.map((team) => {
+                  const mine = team.players.some((player) => player.is_self);
+                  return (
+                    <div
+                      key={team.displayOrder}
+                      className={`rounded-lg border p-3 ${
+                        mine
+                          ? 'border-pitch-500/50 bg-pitch-50 dark:bg-pitch-900/40'
+                          : 'border-[var(--border-subtle)]'
+                      }`}
+                    >
+                      <p className="text-sm font-semibold">
+                        {team.name}
+                        {mine ? <span className="ml-1.5 text-xs">(your team)</span> : null}
+                      </p>
+                      {team.label === null ? null : (
+                        <p className="text-xs text-muted">{team.label}</p>
+                      )}
+                      <ul className="mt-1.5 flex flex-col gap-0.5">
+                        {team.players.map((player) => (
+                          <li key={player.membership_id} className="text-sm">
+                            {player.first_name} {player.last_name}
+                            {player.is_self ? (
+                              <span className="ml-1.5 text-xs text-muted">(you)</span>
+                            ) : null}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </section>
+      ) : null}
+
       {isAdmin ? (
         <section className="surface-card flex flex-col gap-4 p-4">
           <h2 className="text-base font-semibold">Administrator</h2>
@@ -284,12 +353,20 @@ export default async function MatchDetailPage({
           )}
 
           {match.status === 'draft' ? null : (
-            <Link
-              href={`/leagues/${league.slug}/matches/${match.id}/roster`}
-              className="inline-flex min-h-11 w-fit items-center rounded-lg border border-[var(--border-subtle)] px-3 py-2 text-sm font-semibold"
-            >
-              Manage roster
-            </Link>
+            <div className="flex flex-wrap gap-2">
+              <Link
+                href={`/leagues/${league.slug}/matches/${match.id}/roster`}
+                className="inline-flex min-h-11 w-fit items-center rounded-lg border border-[var(--border-subtle)] px-3 py-2 text-sm font-semibold"
+              >
+                Manage roster
+              </Link>
+              <Link
+                href={`/leagues/${league.slug}/matches/${match.id}/teams`}
+                className="inline-flex min-h-11 w-fit items-center rounded-lg border border-[var(--border-subtle)] px-3 py-2 text-sm font-semibold"
+              >
+                Manage teams
+              </Link>
+            </div>
           )}
 
           {match.status === 'draft' ? (
@@ -308,6 +385,9 @@ export default async function MatchDetailPage({
             {match.roster_finalized_at === null
               ? ' · roster not published'
               : ` · roster revision ${match.roster_revision}`}
+            {match.teams_published_at === null
+              ? ' · teams not published'
+              : ` · team revision ${match.team_revision}`}
           </p>
         </section>
       ) : null}
