@@ -277,6 +277,124 @@ describe('cancellation and promotion', () => {
       expect(rows[0]?.count).toBe('2');
     });
 
+    // Regression — a cancellation used to be permanent. `canceled_at` survived
+    // every route back into the match and tripped
+    // `match_signups_cancellation_fields_reserved`, so a player who changed
+    // their mind was locked out of that match for good and an administrator
+    // could not put them back either. See 20260817080500.
+    describe('getting back into a match after cancelling', () => {
+      it('lets a player rejoin when a spot is free', async () => {
+        const members = await seatAndQueue(3, 3);
+        await cancel(members[0]!.user, SEED_MATCHES.fivesOpen, 'Work ran over');
+
+        const outcome = await join(members[0]!.user, SEED_MATCHES.fivesOpen);
+
+        expect(outcome?.status).toBe('confirmed');
+        expect(await confirmedCount(SEED_MATCHES.fivesOpen)).toBe(3);
+      });
+
+      it('clears the cancellation fields when they come back', async () => {
+        const members = await seatAndQueue(3, 3);
+        await cancel(members[0]!.user, SEED_MATCHES.fivesOpen, 'Work ran over');
+        await join(members[0]!.user, SEED_MATCHES.fivesOpen);
+
+        const row = await signupOf(SEED_MATCHES.fivesOpen, members[0]!.membershipId);
+        expect(row?.canceled_at).toBeNull();
+        expect(row?.cancellation_reason).toBeNull();
+      });
+
+      it('puts them on the waitlist if the match refilled behind them', async () => {
+        const members = await seatAndQueue(2, 3);
+        await cancel(members[0]!.user, SEED_MATCHES.fivesOpen);
+
+        const outcome = await join(members[0]!.user, SEED_MATCHES.fivesOpen);
+
+        expect(outcome?.status).toBe('waitlisted');
+      });
+
+      it('lets an administrator add them back', async () => {
+        const members = await seatAndQueue(3, 3);
+        await cancel(members[0]!.user, SEED_MATCHES.fivesOpen, 'Injured');
+
+        await asUserCommitting(db, SEED_USERS.fivesAdmin, (client) =>
+          client.query(`select public.add_member_to_match($1, $2, 'confirmed')`, [
+            SEED_MATCHES.fivesOpen,
+            members[0]!.membershipId,
+          ]),
+        );
+
+        const row = await signupOf(SEED_MATCHES.fivesOpen, members[0]!.membershipId);
+        expect(row?.status).toBe('confirmed');
+        expect(row?.cancellation_reason).toBeNull();
+      });
+
+      it('lets an administrator promote them from the waitlist', async () => {
+        await db.pool.query(
+          `update public.matches set waitlist_mode = 'admin_controlled' where id = $1`,
+          [SEED_MATCHES.fivesOpen],
+        );
+        const members = await seatAndQueue(2, 3);
+        // The waitlisted player leaves the queue, then is re-added behind it.
+        await cancel(members[2]!.user, SEED_MATCHES.fivesOpen);
+        await join(members[2]!.user, SEED_MATCHES.fivesOpen);
+        await cancel(members[0]!.user, SEED_MATCHES.fivesOpen);
+
+        await asUserCommitting(db, SEED_USERS.fivesAdmin, (client) =>
+          client.query('select public.promote_waitlisted_player($1, $2)', [
+            SEED_MATCHES.fivesOpen,
+            members[2]!.membershipId,
+          ]),
+        );
+
+        const row = await signupOf(SEED_MATCHES.fivesOpen, members[2]!.membershipId);
+        expect(row?.status).toBe('confirmed');
+      });
+
+      it('lets an administrator confirm them in an admin-approval match', async () => {
+        await db.pool.query(
+          `update public.matches
+              set selection_mode = 'admin_approval', capacity = 4, min_players = 1
+            where id = $1`,
+          [SEED_MATCHES.fivesOpen],
+        );
+        const [member] = await createExtraMembers(db, SEED_LEAGUES.weeknightFives, 1);
+
+        await asUserCommitting(db, member!.user, (client) =>
+          client.query('select public.request_spot($1)', [SEED_MATCHES.fivesOpen]),
+        );
+        await asUserCommitting(db, SEED_USERS.fivesAdmin, (client) =>
+          client.query(`select public.set_signup_decision($1, $2, 'confirmed')`, [
+            SEED_MATCHES.fivesOpen,
+            member!.membershipId,
+          ]),
+        );
+        await cancel(member!.user, SEED_MATCHES.fivesOpen);
+
+        await asUserCommitting(db, SEED_USERS.fivesAdmin, (client) =>
+          client.query(`select public.set_signup_decision($1, $2, 'confirmed')`, [
+            SEED_MATCHES.fivesOpen,
+            member!.membershipId,
+          ]),
+        );
+
+        const row = await signupOf(SEED_MATCHES.fivesOpen, member!.membershipId);
+        expect(row?.status).toBe('confirmed');
+        expect(row?.canceled_at).toBeNull();
+      });
+
+      it('still leaves the cancellation in the audit trail', async () => {
+        const members = await seatAndQueue(3, 3);
+        await cancel(members[0]!.user, SEED_MATCHES.fivesOpen, 'Work ran over');
+        await join(members[0]!.user, SEED_MATCHES.fivesOpen);
+
+        const { rows } = await db.pool.query<{ count: string }>(
+          `select count(*)::text as count from public.audit_events
+            where action = 'signup.canceled'`,
+        );
+        expect(Number(rows[0]!.count)).toBeGreaterThan(0);
+      });
+    });
+
     it('refuses to cancel a signup that holds nothing', async () => {
       await asUserCommitting(db, SEED_USERS.multiLeaguePlayer, (client) =>
         client.query('select * from public.mark_unavailable($1)', [SEED_MATCHES.fivesOpen]),

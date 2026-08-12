@@ -354,9 +354,33 @@ support, loses nothing.
 Payloads carry a title, a short body, a validated local path and a notification
 id — nothing else, because a payload renders on a lock screen.
 
+## Attendance, and the rule underneath it
+
+After a match ends, the administrator records one of five outcomes for everybody
+who was ever confirmed — including anybody who later withdrew, since they still
+need an outcome. Corrections are expected: each bumps a revision, tells the
+player again, and leaves the previous value in `audit_events` permanently.
+
+**A no-show never disciplines anybody automatically.** Not after two, and not
+after twenty. Recording one stores the fact and tells the player; it does not
+suspend, remove, block signup, lower priority, change a team assignment or feed
+a hidden score. There is no such score anywhere, and a test sweeps
+`information_schema` to keep it that way. What the product does instead is show
+the administrator the counts beside a name while they choose a roster — no
+badge, no colour, no tier, no threshold, because defining one would be the
+product deciding something no approved document decides.
+
+## Running it for real
+
+- [`docs/operations/production.md`](docs/operations/production.md) — environment,
+  migrations, the health check, the scheduler reminders need, Web Push, and what
+  the logs may never contain.
+- [`docs/operations/pilot.md`](docs/operations/pilot.md) — setting the pilot
+  league up, the rehearsal match, and what to watch.
+
 ## Not built yet
 
-Match signup, rosters, waitlists, waitlist promotion, player cancellation,
-reminder scheduling, team building, attendance, billing, email or SMS
-notifications and native apps are all out of scope through Phase 3. See
+Payments, skill ratings, rankings, standings, tournaments, SMS, routine email
+beyond the sign-in link, weather integration, guest sponsorship, native apps and
+automated data-retention are all out of scope for the MVP. See
 [`TODO.md`](TODO.md) and [`NEXT_STEPS.md`](NEXT_STEPS.md).

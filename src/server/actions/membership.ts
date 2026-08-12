@@ -13,7 +13,9 @@ import {
   decisionNoteSchema,
   joinRequestMessageSchema,
   memberEmailSchema,
+  membershipStatusReasonSchema,
   membershipStatusSchema,
+  suspendedUntilSchema,
 } from '@/lib/validation/league';
 
 /**
@@ -155,12 +157,18 @@ export async function addMemberByEmailAction(
 }
 
 /**
- * Changes a member's status (activate, suspend, remove).
+ * Changes a member's status (reactivate, suspend, remove).
  *
- * Goes through the Phase 1 UPDATE policy rather than a new function, because
- * the policy already constrains it correctly and the audit trigger records the
- * change regardless of path. The deferred single-administrator constraint stops
- * an administrator removing themselves and leaving the league headless.
+ * PHASE 7 MOVED THIS ONTO AN RPC. It used to be a direct UPDATE through the
+ * Phase 1 policy, which recorded the change but did nothing else — the member
+ * kept every spot they held in every future match, so a suspended player stayed
+ * on the roster, stayed in the published teams and still consumed capacity.
+ * `set_membership_status()` owns the whole transaction: the reason, the sole-
+ * administrator refusal, and the cascade that releases those places, closes the
+ * waitlist gap, promotes a replacement and republishes the teams.
+ *
+ * The reason and the suspension end date reach the database; neither is ever
+ * placed in a notification, a push payload or an application log.
  */
 export async function updateMembershipStatusAction(
   _previous: ActionResult<undefined> | null,
@@ -172,19 +180,29 @@ export async function updateMembershipStatusAction(
 
     const membershipId = z.uuid().parse(formData.get('membership_id') ?? '');
     const status = membershipStatusSchema.parse(formData.get('status') ?? '');
+    const reason = membershipStatusReasonSchema.parse(formData.get('reason') ?? '');
+    const suspendedUntil = suspendedUntilSchema.parse(formData.get('suspended_until') ?? '');
+
+    // Asked for here so the administrator sees which field is wrong rather than
+    // a whole-form message. The database refuses it again — this is a courtesy,
+    // not the rule.
+    if (status !== 'active' && reason === null) {
+      throw new DomainError('VALIDATION_FAILED', {
+        fieldErrors: { reason: 'Give a reason. Only administrators can see it.' },
+      });
+    }
 
     const supabase = await createSupabaseServerClient();
-    // `eq('league_id', leagueId)` narrows to the tenant just authorized; RLS
-    // would refuse a cross-tenant row anyway, but the query should not depend
-    // on that to be correct.
-    const { error } = await supabase
-      .from('league_memberships')
-      .update({ status })
-      .eq('id', membershipId)
-      .eq('league_id', leagueId);
+    const { error } = await supabase.rpc('set_membership_status', {
+      p_membership_id: membershipId,
+      p_status: status,
+      p_reason: reason,
+      // Only meaningful for a suspension, and the database clears it otherwise.
+      p_suspended_until: status === 'suspended' ? suspendedUntil : null,
+    });
 
     if (error !== null) {
-      throw domainErrorFromDatabase(error);
+      throw domainErrorFromDatabase(error, { VALIDATION_FAILED: 'reason' });
     }
 
     revalidatePath('/', 'layout');

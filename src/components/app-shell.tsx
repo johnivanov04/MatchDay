@@ -26,14 +26,21 @@ export function AppShell({
   return (
     <div className="mx-auto flex min-h-dvh w-full max-w-2xl flex-col">
       <header className="flex flex-col gap-3 border-b border-[var(--border-subtle)] px-5 py-4">
-        <div className="flex items-center justify-between gap-3">
+        {/*
+          `flex-wrap` and a truncating name, because this row is on every screen
+          and was the one thing making the whole document scroll sideways at
+          320px: "Matchday · Inbox 3 · Christopher · Sign out" does not fit on
+          an iPhone SE, and a header that overflows takes every page with it.
+          Wrapping costs a line on the narrowest phones and nothing above them.
+        */}
+        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
           <Link href="/dashboard" className="text-base font-bold">
             Matchday
           </Link>
-          <div className="flex items-center gap-3">
+          <div className="flex min-w-0 flex-1 items-center justify-end gap-3">
             <Link
               href="/notifications"
-              className="flex items-center gap-1.5 text-sm font-medium underline underline-offset-4"
+              className="flex shrink-0 items-center gap-1.5 text-sm font-medium underline underline-offset-4"
               aria-label={
                 unreadNotifications === 0
                   ? 'Notifications'
@@ -47,13 +54,18 @@ export function AppShell({
                 </span>
               ) : null}
             </Link>
-            <Link href="/profile" className="text-sm font-medium underline underline-offset-4">
+            {/* The one element here with no length limit, so it is the one that
+                gives way. The full name is still on the profile page. */}
+            <Link
+              href="/profile"
+              className="min-w-0 truncate text-sm font-medium underline underline-offset-4"
+            >
               {displayName}
             </Link>
-            <form action="/auth/sign-out" method="post">
+            <form action="/auth/sign-out" method="post" className="shrink-0">
               <button
                 type="submit"
-                className="min-h-9 rounded-lg border border-[var(--border-subtle)] px-3 py-1.5 text-sm"
+                className="min-h-11 rounded-lg border border-[var(--border-subtle)] px-3 py-1.5 text-sm"
               >
                 Sign out
               </button>

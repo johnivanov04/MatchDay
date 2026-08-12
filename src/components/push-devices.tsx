@@ -195,7 +195,7 @@ export function DeviceRow({ device }: { device: PushSubscriptionRow }) {
           <button
             type="submit"
             disabled={toggling}
-            className="min-h-10 rounded-lg border border-[var(--border-subtle)] px-3 py-1.5 text-sm disabled:opacity-60"
+            className="min-h-11 rounded-lg border border-[var(--border-subtle)] px-3 py-1.5 text-sm disabled:opacity-60"
           >
             {device.enabled ? 'Turn off' : 'Turn on'}
           </button>
@@ -206,7 +206,7 @@ export function DeviceRow({ device }: { device: PushSubscriptionRow }) {
           <button
             type="submit"
             disabled={removing}
-            className="min-h-10 rounded-lg border border-[var(--border-subtle)] px-3 py-1.5 text-sm disabled:opacity-60"
+            className="min-h-11 rounded-lg border border-[var(--border-subtle)] px-3 py-1.5 text-sm disabled:opacity-60"
           >
             Remove
           </button>

@@ -37,6 +37,7 @@ no database function knows push exists; delivery reads canonical notifications
 after the fact.
 
 See [`docs/decisions/0001-notifications-in-app-center-plus-web-push.md`](../decisions/0001-notifications-in-app-center-plus-web-push.md)
+and [`docs/decisions/0002-same-match-re-entry-after-cancellation.md`](../decisions/0002-same-match-re-entry-after-cancellation.md)
 and the dated entry in `06_DECISION_LOG.md`.
 
 ## Source material

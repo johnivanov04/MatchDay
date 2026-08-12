@@ -53,6 +53,29 @@
     outline-offset: 2px;
   }
 
+  /*
+   * Long unbreakable strings wrap instead of widening the page.
+   *
+   * The product is full of them and none is under its control: an email
+   * address, an IANA timezone like America/Argentina/ComodRivadavia, a league
+   * slug, a pitch name somebody typed. At 320px any one of them made the whole
+   * document scroll sideways — the member list overflowed by six pixels
+   * because of one test account's address, which is the kind of defect nobody
+   * finds by looking and everybody feels using.
+   *
+   * `anywhere` rather than `break-word`: it lets the browser break mid-word
+   * only when there is no other option, and unlike `break-all` it leaves
+   * ordinary prose breaking at spaces.
+   */
+  p,
+  dd,
+  li,
+  h1,
+  h2,
+  h3 {
+    overflow-wrap: anywhere;
+  }
+
   @media (prefers-reduced-motion: reduce) {
     *,
     *::before,

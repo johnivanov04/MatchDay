@@ -55,7 +55,26 @@ async function withTransientRetry(
   describe: string,
   attempt: () => Promise<Response>,
 ): Promise<Response> {
+  // FIVE ATTEMPTS, ~1.5s OF TOTAL PATIENCE. Deliberately modest.
+  //
+  // Phase 7 briefly raised this to eight attempts and ~25s while the suite ran
+  // three workers deep and GoTrue was saturating. That was treating a symptom:
+  // a retry budget large enough to ride out the pressure is also large enough
+  // to hide a genuinely slow path, and it made every real failure take half a
+  // minute to surface. The pressure itself is gone now that the suite runs one
+  // worker (see `playwright.config.ts`), so this is back to absorbing an
+  // ordinary container hiccup and nothing more.
+  //
+  // TWO PROPERTIES THAT MUST NOT CHANGE:
+  //
+  //   * it retries **5xx only** — a 4xx (bad key, unknown user, malformed
+  //     request) returns on the first attempt, so a genuine authorization
+  //     defect fails fast and loudly;
+  //   * it wraps **only the two GoTrue admin endpoints** below. It never sees
+  //     an application response, so no amount of retrying here can mask a 500
+  //     from Matchday itself.
   const MAX_ATTEMPTS = 5;
+  const MAX_BACKOFF_MS = 800;
   let lastStatus = 0;
 
   for (let tries = 0; tries < MAX_ATTEMPTS; tries += 1) {
@@ -69,7 +88,9 @@ async function withTransientRetry(
     }
 
     lastStatus = response?.status ?? 0;
-    await new Promise((resolve) => setTimeout(resolve, 100 * 2 ** tries));
+    await new Promise((resolve) => {
+      setTimeout(resolve, Math.min(100 * 2 ** tries, MAX_BACKOFF_MS));
+    });
   }
 
   throw new Error(

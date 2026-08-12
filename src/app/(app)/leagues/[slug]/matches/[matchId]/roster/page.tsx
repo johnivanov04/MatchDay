@@ -8,6 +8,7 @@ import {
   matchPath,
   requireLeagueAdminPage,
 } from '@/lib/auth/page-guards';
+import { getAttendanceSummaries } from '@/lib/matches/attendance';
 import { getMatch } from '@/lib/matches/matches';
 import {
   getAddableMembers,
@@ -52,6 +53,14 @@ export default async function MatchRosterPage({
     getReplacementState(matchId),
   ]);
 
+  // No-show context for exactly the people on this screen, and nobody else.
+  // Fetched after the roster because the membership ids come from it; the
+  // database refuses the whole call for anyone but this league's administrator.
+  const summaries = await getAttendanceSummaries(
+    league.id,
+    entries.map((entry) => entry.membership_id),
+  );
+
   const confirmed = entries.filter((entry) => entry.status === 'confirmed').length;
   const state = deriveMatchParticipationState({
     confirmed,
@@ -84,6 +93,7 @@ export default async function MatchRosterPage({
           leagueId={league.id}
           matchId={match.id}
           entries={entries}
+          attendanceSummaries={Object.fromEntries(summaries)}
           addableMembers={addableMembers}
           capacity={match.capacity}
           rosterRevision={match.roster_revision}

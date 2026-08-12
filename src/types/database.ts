@@ -80,6 +80,13 @@ export type LeagueMembershipRow = {
   role: LeagueRole;
   status: MembershipStatus;
   suspended_until: string | null;
+  /**
+   * Why the administrator last changed this member's status.
+   *
+   * Administrator-only, like `league_membership_admin_notes`: never shown to
+   * other players, never placed in a notification, a push payload or a log.
+   */
+  status_reason: string | null;
   joined_at: string | null;
   status_changed_at: string;
   created_at: string;
@@ -207,7 +214,11 @@ export type NotificationType =
   // Phase 6. Two types rather than one, matching how roster_published and
   // roster_changed already split first publication from a later change.
   | 'teams_published'
-  | 'teams_changed';
+  | 'teams_changed'
+  // Phase 7, completing 02 §14. One type, not two: a correction is the same
+  // fact about the same match arriving again, and the revision in the
+  // idempotency key is what distinguishes it from the first recording.
+  | 'attendance_recorded';
 
 export type PushDeliveryStatus =
   | 'pending'
@@ -476,6 +487,73 @@ export type PublishedTeamEntry = {
   first_name: string;
   last_name: string;
   is_self: boolean;
+};
+
+// ── Phase 7 ────────────────────────────────────────────────────────────────
+
+/** The five outcomes from 02 §16. */
+export type AttendanceOutcome =
+  | 'attended'
+  | 'excused_absence'
+  | 'canceled_on_time'
+  | 'canceled_late'
+  | 'no_show';
+
+/**
+ * One row of the administrator's attendance workspace.
+ *
+ * Everybody who was ever confirmed for the match, including those who later
+ * withdrew — they need `canceled_on_time` or `canceled_late` recorded, and
+ * `signup_status` is what lets the administrator see which.
+ *
+ * `suggested` is derived from how the player left and is presentation only: it
+ * is never submitted back and never trusted. It is never `no_show`, because a
+ * late withdrawal is a withdrawal after the cutoff and nothing more.
+ *
+ * `note` is administrator-only. It reaches this type because the workspace is
+ * administrator-only; it is absent from every player-facing type below.
+ */
+export type AttendanceWorkspaceEntry = {
+  membership_id: string;
+  first_name: string;
+  last_name: string;
+  signup_status: SignupStatus;
+  canceled_at: string | null;
+  outcome: AttendanceOutcome | null;
+  suggested: AttendanceOutcome | null;
+  note: string | null;
+  revision: number | null;
+  recorded_at: string | null;
+};
+
+/** A player's own outcome for one match. No note, and no way to ask about anybody else. */
+export type MyAttendance = {
+  outcome: AttendanceOutcome;
+  recorded_at: string;
+};
+
+/** A player's own attendance across one league. */
+export type MyAttendanceEntry = {
+  match_id: string;
+  match_title: string;
+  kickoff_at: string;
+  outcome: AttendanceOutcome;
+};
+
+/**
+ * No-show context for one member, for the roster workspace.
+ *
+ * Counts and a date. There is deliberately no threshold, tier, colour, score or
+ * ranking: 04 §1 settled that the product shows warnings and the administrator
+ * decides, and no approved document defines a number at which somebody becomes
+ * a problem.
+ */
+export type MembershipAttendanceSummary = {
+  membership_id: string;
+  recorded_count: number;
+  attended_count: number;
+  no_show_count: number;
+  last_no_show_at: string | null;
 };
 
 export type MatchReminderRow = {
@@ -937,6 +1015,38 @@ export interface Database {
       };
       match_team_builder: { Args: { p_match_id: string }; Returns: TeamBuilderPlayer[] };
       match_draft_teams: { Args: { p_match_id: string }; Returns: DraftTeam[] };
+
+      record_attendance: {
+        Args: {
+          p_match_id: string;
+          p_membership_id: string;
+          p_outcome: AttendanceOutcome;
+          p_note?: string | null;
+          p_expected_revision?: number | null;
+        };
+        Returns: number;
+      };
+      complete_match: { Args: { p_match_id: string }; Returns: string };
+      match_accepts_attendance: { Args: { p_match_id: string }; Returns: boolean };
+      match_attendance_workspace: {
+        Args: { p_match_id: string };
+        Returns: AttendanceWorkspaceEntry[];
+      };
+      my_attendance: { Args: { p_match_id: string }; Returns: MyAttendance[] };
+      my_attendance_history: { Args: { p_league_id: string }; Returns: MyAttendanceEntry[] };
+      membership_attendance_summary: {
+        Args: { p_league_id: string; p_membership_ids: string[] };
+        Returns: MembershipAttendanceSummary[];
+      };
+      set_membership_status: {
+        Args: {
+          p_membership_id: string;
+          p_status: MembershipStatus;
+          p_reason?: string | null;
+          p_suspended_until?: string | null;
+        };
+        Returns: string;
+      };
 
       generate_due_reminders: {
         Args: { p_limit?: number };

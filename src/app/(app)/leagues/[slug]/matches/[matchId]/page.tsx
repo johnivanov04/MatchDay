@@ -20,6 +20,8 @@ import {
   getSignupCounts,
   getSignupEligibility,
 } from '@/lib/matches/signups';
+import { getMyAttendance } from '@/lib/matches/attendance';
+import { ATTENDANCE_OUTCOME_LABELS } from '@/lib/matches/attendance-display';
 import { getPublishedTeams, groupPublishedTeams } from '@/lib/matches/teams';
 import {
   deriveMatchParticipationState,
@@ -65,7 +67,7 @@ export default async function MatchDetailPage({
   // Phase 4 supplies the counts the Phase 3 helper was already built to accept.
   // `null` still means "no signup data", which is now only true for a match the
   // caller cannot see.
-  const [counts, mySignup, roster, eligibility, teamEntries] = await Promise.all([
+  const [counts, mySignup, roster, eligibility, teamEntries, myAttendance] = await Promise.all([
     getSignupCounts(matchId),
     getMySignup(matchId),
     getConfirmedRoster(matchId),
@@ -73,6 +75,10 @@ export default async function MatchDetailPage({
     // Empty unless teams have been published *and* the caller is currently
     // confirmed. The projection enforces both, so this page never has to.
     getPublishedTeams(matchId),
+    // The caller's own outcome, or null. There is no parameter for whose
+    // attendance to read, and the note is absent from the projection, so
+    // neither can reach this page for anybody.
+    getMyAttendance(matchId),
   ]);
 
   const publishedTeams = groupPublishedTeams(teamEntries);
@@ -111,7 +117,7 @@ export default async function MatchDetailPage({
           {canEdit ? (
             <Link
               href={`/leagues/${league.slug}/matches/${match.id}/edit`}
-              className="inline-flex min-h-9 items-center rounded-lg border border-[var(--border-subtle)] px-3 py-1.5 text-sm font-semibold"
+              className="inline-flex min-h-11 items-center rounded-lg border border-[var(--border-subtle)] px-3 py-1.5 text-sm font-semibold"
             >
               Edit match
             </Link>
@@ -258,6 +264,29 @@ export default async function MatchDetailPage({
         )}
       </section>
 
+      {/*
+        The caller's own attendance, once an administrator has recorded it.
+        Their outcome and nothing else: no note, no comparison with anybody
+        else, and no count of how often this has happened. 7F asks that a player
+        can see what was recorded about them, which is a matter of it being
+        visible rather than of it being emphasised.
+      */}
+      {myAttendance === null ? null : (
+        <section className="surface-card p-4">
+          <h2 className="text-base font-semibold">Your attendance</h2>
+          <p className="mt-1 text-sm">{ATTENDANCE_OUTCOME_LABELS[myAttendance.outcome]}</p>
+          <p className="mt-1 text-xs text-muted">
+            Recorded by your league administrator on{' '}
+            {new Date(myAttendance.recorded_at).toLocaleDateString('en-GB', {
+              day: '2-digit',
+              month: 'short',
+              year: 'numeric',
+            })}
+            . If this looks wrong, speak to them and they can correct it.
+          </p>
+        </section>
+      )}
+
       <section className="surface-card p-4">
         <h2 className="text-base font-semibold">
           Confirmed roster <span className="text-muted">({roster.length})</span>
@@ -365,6 +394,17 @@ export default async function MatchDetailPage({
                 className="inline-flex min-h-11 w-fit items-center rounded-lg border border-[var(--border-subtle)] px-3 py-2 text-sm font-semibold"
               >
                 Manage teams
+              </Link>
+              {/* Offered from the moment a match is published rather than only
+                  after it ends: the register is where an administrator goes
+                  after the final whistle, and a link that appears out of
+                  nowhere is harder to find than one that has always been
+                  there. The page itself explains that it is not open yet. */}
+              <Link
+                href={`/leagues/${league.slug}/matches/${match.id}/attendance`}
+                className="inline-flex min-h-11 w-fit items-center rounded-lg border border-[var(--border-subtle)] px-3 py-2 text-sm font-semibold"
+              >
+                Attendance
               </Link>
             </div>
           )}

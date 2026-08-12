@@ -40,26 +40,22 @@ layering.
 ## 1b. End-to-end tests
 
 ```bash
-npm run test:e2e:fresh     # resets the database, then runs the whole suite
+npm run test:e2e:fresh     # THE canonical command: resets the database, runs all 149
 npm run test:e2e           # attach to an already-clean stack
+npm run test:e2e:parallel  # three workers — one file at a time only, see §3
 npm run test:e2e:headed    # watch it happen, for debugging
 npm run test:e2e:ui        # Playwright's interactive runner
 ```
 
-93 tests across six spec files cover Phases 1–5 through a real browser, against
-the real Supabase stack: real Row Level Security, real server actions, real
-database functions. Nothing is mocked and the application contains no test-only
-route — the suite mints a genuine Supabase session through the Auth API and
-installs the cookie, exactly as a magic link would.
+**149 tests across twelve spec files** cover Phases 1–7 through a real browser,
+against the real Supabase stack: real Row Level Security, real server actions,
+real database functions. Nothing is mocked and the application contains no
+test-only route — the suite mints a genuine Supabase session through the Auth
+API and installs the cookie, exactly as a magic link would.
 
-**Run the suite from a freshly reset stack.** GoTrue opens a PostgreSQL
-connection per request and does not pool, and the application validates the
-session on every render, so across several full runs on one container it
-exhausts the Docker bridge's ephemeral ports and starts answering 5xx. From a
-clean stack the suite passes 93/93; on the second consecutive run without a
-reset roughly ten tests fail on that. It is local stack capacity, not an
-application fault, and CI is unaffected because each job starts its own stack.
-`npm run test:e2e:fresh` is the reliable local command.
+`npm run test:e2e:fresh` finishes **149/149** in about two and a half minutes.
+It runs one Playwright worker, deliberately; §3 explains why, and why that was
+verified as a stack limit rather than assumed to be one.
 
 For a faster inner loop, start the server once and let Playwright attach to it:
 
@@ -280,6 +276,80 @@ promotion) and set capacity to 2. RMVFC's **Monday night 11v11** is
 > `pg_cron` job invoking `generate_due_reminders()` both work. Until that is
 > configured, reminders never go out.
 
+### Attendance, completion and membership status (Phase 7)
+
+Attendance opens only once a match has ended, so give yourself a finished match:
+
+```sql
+-- Shift a seated match into the past. Every timestamp moves together, so the
+-- ordering constraints still hold and any earlier cancellation keeps its
+-- on-time / late classification.
+update public.matches
+   set match_date = match_date - interval '2 days',
+       arrival_at = arrival_at - interval '2 days',
+       kickoff_at = kickoff_at - interval '2 days',
+       end_at = end_at - interval '2 days',
+       signup_closes_at = signup_closes_at - interval '2 days',
+       cancellation_cutoff_at = cancellation_cutoff_at - interval '2 days'
+ where id = '<match id>';
+```
+
+1. **The register.** Match → *Attendance*. Everybody who was ever confirmed is
+   listed, including anybody who withdrew. Somebody who was only ever on the
+   waitlist is not — their signup status is `canceled` exactly like a confirmed
+   player who cancelled, which is why the population is defined by
+   `match_signups.confirmed_at` and not by status.
+2. **The outcomes offered depend on how the player left.** A player who withdrew
+   is not offered *Attended* or *Did not attend*; one who never withdrew is not
+   offered either cancellation outcome. The database refuses both independently
+   of the interface.
+3. **Corrections.** Change an outcome and press *Update*. The row shows
+   "corrected 1×", the player gets a second notification, and the previous value
+   is in `audit_events` forever:
+
+   ```sql
+   select action, before_data ->> 'outcome' as was, after_data ->> 'outcome' as now
+     from public.audit_events where entity_type = 'attendance' order by created_at;
+   ```
+
+   `had_note` appears there instead of the note itself — the note is
+   administrator-only and never leaves the table.
+4. **Completion** requires an outcome for everybody. With one missing, *Complete
+   match* refuses and says how many are outstanding. Corrections still work
+   afterwards.
+5. **The player's view.** Sign in as that player: the match page shows their own
+   outcome and the league's match list shows their history. Neither carries the
+   note, and neither can be asked about anybody else — `my_attendance()` takes
+   no membership parameter.
+6. **No-show context.** Record a no-show, then open the roster of a *future*
+   match that player has joined. The count appears beside their name as a
+   sentence. Confirm what did **not** happen: they are still `confirmed`, still
+   `active`, and still in their original waitlist position.
+7. **Membership status.** *Members* → suspend somebody with a reason. Their
+   spots in future matches are released as `not_selected` (never `canceled`, and
+   with no receipt sent), the waitlist closes up, and published teams get a new
+   revision without them. A match already played is untouched. Try to suspend
+   yourself as the sole administrator — it is refused with
+   `ADMIN_TRANSFER_INVALID`.
+
+> **Push note.** Attendance notifications are deliberately **not** push-eligible.
+> They appear in the inbox and nowhere else — a payload renders on a lock screen,
+> and "You are recorded as not having attended" does not belong there.
+
+### The polish surfaces
+
+- **Loading** — throttle the network in devtools and navigate; a skeleton
+  appears with a `role="status"` announcement rather than a blank page.
+- **Error** — the boundary shows a reference digest and a *Try again*, never the
+  thrown message.
+- **Not found** — visit any nonsense path. Note that an *unauthorized* league or
+  match is **not** a 404: it redirects to the dashboard, so that "does not
+  exist" and "is not yours" are indistinguishable.
+- **Health** — `curl -i http://localhost:3000/api/health`. It reports status and
+  database reachability and deliberately nothing else.
+
+---
+
 ### Confirm the boundaries directly
 
 ```bash
@@ -294,64 +364,88 @@ run `npm run test:db` for the authoritative answer.
 
 ---
 
-## 3. Review before Phase 5
+## 3. The end-to-end suite
 
-Worth a human read, in this order:
+`npm run test:e2e:fresh` resets the database and runs all **149 specs**. It
+finishes **149/149**, reproducibly — verified over three consecutive fresh runs
+at ~2.4 minutes each.
 
-1. `supabase/migrations/20260805030900_revoke_public_function_execute.sql` — a
-   real vulnerability found by the Phase 3 suite. Phase 2's
-   `ALTER DEFAULT PRIVILEGES … REVOKE EXECUTE … FROM PUBLIC` recorded nothing,
-   so every Phase 3 function shipped PUBLIC-executable.
-2. `supabase/migrations/20260805030100_guideline_functions.sql` — the
-   eligibility predicate Phase 4 will depend on, and why it answers only about
-   the caller.
-3. `supabase/migrations/20260805030300_match_functions.sql` — why the timezone
-   conversion lives in the database.
-4. `src/lib/push/dispatch.ts` — why push failures are swallowed.
+### Why it runs one worker
 
-Judgement calls to confirm or overturn:
+`playwright.config.ts` pins `workers: 1`. Not because the specs interfere —
+`fullyParallel` is still true and every spec builds its own league, members and
+matches — but because the local Supabase container cannot keep up with more.
 
-- **The acting administrator is excluded from `match_published` fanout.** They
-  just published it. Reversing this is a one-line change in
-  `20260805030700_notification_integration.sql`.
-- **"Currently required" is the single newest published, unarchived, effective
-  version.** Requiring every historical version would make a late joiner
-  permanently ineligible.
-- **Administrator notes live in `match_admin_notes`, not on the match row**,
-  for the same reason as `league_membership_admin_notes`: RLS filters rows, not
-  columns, and members must read the match.
-- **`match_lifecycle_status` declares all six states** while a trigger permits
-  only the three Phase 3 implements. Phase 4 extends the trigger, not the enum.
+GoTrue runs without connection pooling and the application validates the session
+on every render, so each extra worker multiplies both token minting and
+per-render validation until the Docker bridge runs out of ephemeral ports. The
+symptoms did not look related to each other, which is what made this worth
+pinning down rather than retrying away:
+
+- `admin/generate_link` answering 500, so a sign-in fails outright;
+- a render arriving at 11s against an assertion's 10s budget, so a correct page
+  "does not contain" text that is on its way;
+- a whole test exceeding its timeout waiting for that page.
+
+Three workers cost about twenty failures a run, two cost about four, one costs
+none. **It was verified as infrastructure rather than assumed to be**: across a
+failing run the Next.js server logged no 5xx of its own, and
+`withTransientRetry` in `e2e/support/auth.ts` wraps only the two GoTrue admin
+endpoints — it cannot see, let alone retry, an application response. An
+application 500 still fails a test immediately, as it should.
+
+The retry budget was deliberately wound back down afterwards (five attempts,
+~1.5s, 5xx only). A budget wide enough to paper over the pressure is also wide
+enough to hide a genuinely slow path.
+
+`npm run test:e2e:parallel` runs three workers for a quick loop on a single
+file. It is not the canonical command and will produce exactly the failures
+described above if pointed at the whole suite.
+
+CI runs `npm run test:e2e`, which takes the same one-worker configuration.
 
 ---
 
-## 4. Recommended first Phase 6 task
+## 4. Running it for real
 
-**`match_teams` and `match_team_assignments` — the tables, their constraints,
-and an `assign_player_to_team()` that cannot place somebody twice — before any
-team-builder UI.**
+Two documents, written for an operator rather than a developer:
 
-The seams Phase 5 leaves for it:
+- [`docs/operations/production.md`](docs/operations/production.md) — environment
+  variables and which ones are secret, migrations, `/api/health`, the scheduler
+  reminders require, Web Push and the iOS home-screen constraint, what the logs
+  may never contain, and what this MVP does not have.
+- [`docs/operations/pilot.md`](docs/operations/pilot.md) — the RMVFC league
+  settings that match 01 §7, the rehearsal match, recording attendance, and the
+  no-automatic-discipline rule the pilot must not break.
 
-- `match_lifecycle_status` already declares `teams_published`, and
-  `matches_guard_status_transition()` already allowlists
-  `open → roster_finalized` while refusing `roster_finalized → teams_published`
-  with a comment saying Phase 6 adds it. Extend the trigger, not the enum.
-- 02 §17 names a **team revision** as distinct from the roster revision, exactly
-  as `roster_revision` is distinct from `revision`. Add a third counter rather
-  than overloading either; `advance_roster_revision_if_published()` is the
-  pattern to copy.
-- Only confirmed players may be assigned, and `signup_consumes_capacity()`
-  already defines who those are. A cancellation that releases a spot after teams
-  are published will need to drop that player's assignment — the one genuinely
-  new interaction between Phase 5 and Phase 6, and worth designing before the
-  UI.
-- `notification_type` needs a `teams_published` value, in its own migration for
-  the usual enum reason.
-- `leagues.position_labels`, `gender_field_enabled` and `goalkeeper_field_enabled`
-  already gate what the builder may display, and `match_roster_admin()` already
-  honours them.
+---
 
-Randomization is count-only (04 §3) and must not claim balance. Draft teams stay
-invisible to players until publication, which is the same `published_at`-style
-visibility rule `matches_select_member` already demonstrates.
+## 5. If there is a Phase 8
+
+The MVP is complete at Phase 7. Nothing below is required, and none of it should
+be started without a decision written down first.
+
+**What the pilot will most likely push on.** The administrator will be asked
+whether the no-show *warning* was enough or whether they wanted the product to
+decide (see `docs/operations/pilot.md` §8). If the answer is "decide for me",
+that is a product decision about disciplinary policy — thresholds, appeals, who
+is accountable for the outcome — and not a code change. 04 §1 currently settles
+it the other way, deliberately.
+
+**Genuine gaps a real deployment will hit**, in rough order of how soon:
+
+- **No data-retention or deletion path.** Removing a member's data is a manual
+  database operation today. A real deployment in most jurisdictions needs an
+  answer to this.
+- **`teams_published` is a lifecycle state nothing can reach.** Phase 6 settled
+  that team publication is metadata; the enum value is a name without a state.
+  Either implement it or remove it, rather than leaving it looking implemented.
+- **A single administrator per league** (01 §8) makes every league one lost
+  password away from being unmanageable. The deferred single-active-admin
+  constraint is what a second role would have to work around.
+- **Historical rows have no `confirmed_at`.** Anybody confirmed and cancelled
+  *before* Phase 7 cannot appear in that match's register — the information was
+  never recorded. Only matters if there is production data predating the
+  migration.
+- **Push has no batching.** The fan-out is a loop over subscriptions; it is fine
+  for a 22-player league and would not be for a thousand.

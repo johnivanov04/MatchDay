@@ -331,19 +331,28 @@ describe('match templates and matches', () => {
 
   describe('lifecycle transitions', () => {
     it('refuses a jump to an unimplemented state', async () => {
-      // `roster_finalized` moved out of this list in Phase 4, which implements
-      // it. `teams_published` and `completed` stay: the enum names them so
-      // later phases add behaviour rather than schema, and the guard stops
-      // anything reaching a state no code understands.
-      for (const target of ['teams_published', 'completed']) {
-        const error = await expectDatabaseError(() =>
-          db.pool.query('update public.matches set status = $2 where id = $1', [
-            SEED_MATCHES.rmvfcOpen,
-            target,
-          ]),
-        );
-        expect(error.message).toContain('MATCH_TRANSITION_INVALID');
-      }
+      // `roster_finalized` moved out of this list in Phase 4 and `completed` in
+      // Phase 7, both of which implement them. `teams_published` stays: Phase 6
+      // settled that team publication is metadata rather than a lifecycle
+      // state, so the enum names a state no code understands and the guard
+      // stops anything reaching it.
+      const error = await expectDatabaseError(() =>
+        db.pool.query(`update public.matches set status = 'teams_published' where id = $1`, [
+          SEED_MATCHES.rmvfcOpen,
+        ]),
+      );
+      expect(error.message).toContain('MATCH_TRANSITION_INVALID');
+    });
+
+    it('refuses a raw write into completed, which only complete_match() may reach', async () => {
+      // The transition itself is legal from Phase 7 on, so what refuses this is
+      // the consistency constraint: a completed match records when and by whom.
+      const error = await expectDatabaseError(() =>
+        db.pool.query(`update public.matches set status = 'completed' where id = $1`, [
+          SEED_MATCHES.rmvfcOpen,
+        ]),
+      );
+      expect(error.message).toContain('matches_completed_consistent');
     });
 
     it('allows open → roster_finalized, and back for further changes', async () => {

@@ -1,4 +1,4 @@
-import { expect, expectNoServerError, expectRedirectedTo, test } from '../support/fixtures';
+import { expect, expectNoServerError, expectRedirectedTo, test, settledUrl } from '../support/fixtures';
 
 /**
  * Phase 1 — authentication, profile and the multi-league foundation.
@@ -169,11 +169,8 @@ test('an unknown league slug answers exactly as one the caller may not see', asy
 
   const page = await asUser(member.email);
 
-  await page.goto('/leagues/definitely-not-a-real-league/matches');
-  const unknownUrl = page.url();
-
-  await page.goto(`/leagues/${other.slug}/matches`);
-  const forbiddenUrl = page.url();
+  const unknownUrl = await settledUrl(page, '/leagues/definitely-not-a-real-league/matches');
+  const forbiddenUrl = await settledUrl(page, `/leagues/${other.slug}/matches`);
 
   // Identical, so a guessed slug cannot confirm a private league exists.
   expect(unknownUrl).toBe(forbiddenUrl);
