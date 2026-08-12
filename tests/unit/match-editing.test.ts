@@ -48,6 +48,8 @@ function matchAt(
     revision: 0,
     roster_revision: 0,
     roster_finalized_at: null,
+    team_revision: 0,
+    teams_published_at: null,
     created_by: null,
     published_at: '2026-08-01T00:00:00.000Z',
     canceled_at: null,

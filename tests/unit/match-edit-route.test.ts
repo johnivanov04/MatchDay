@@ -34,6 +34,7 @@ const mocks = vi.hoisted(() => {
     getMySignup: vi.fn(),
     getConfirmedRoster: vi.fn(),
     getSignupEligibility: vi.fn(),
+    getPublishedTeams: vi.fn(),
   };
 });
 
@@ -76,6 +77,14 @@ vi.mock('@/lib/matches/signups', () => ({
 vi.mock('@/components/signup', () => ({
   SignupControls: () => null,
   SignupStatusBadge: () => null,
+}));
+// Phase 6 addition to the detail page. `groupPublishedTeams` is a pure helper
+// with its own coverage, so only the read is stubbed.
+vi.mock('@/lib/matches/teams', () => ({
+  getPublishedTeams: mocks.getPublishedTeams,
+  // The grouping helper is pure and has its own coverage; the page only needs
+  // it to return something shaped correctly for an empty read.
+  groupPublishedTeams: () => [],
 }));
 
 const { default: EditMatchPage } = await import(
@@ -213,6 +222,7 @@ beforeEach(() => {
   mocks.getMySignup.mockResolvedValue(null);
   mocks.getConfirmedRoster.mockResolvedValue([]);
   mocks.getSignupEligibility.mockResolvedValue('MEMBERSHIP_REQUIRED');
+  mocks.getPublishedTeams.mockResolvedValue([]);
 });
 
 describe('the edit route', () => {

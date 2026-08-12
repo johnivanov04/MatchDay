@@ -280,21 +280,34 @@ export class TestDataFactory {
        )
        select
          $1, l.id, $2,
-         ((now() + make_interval(hours => $3)) at time zone l.timezone)::date,
+         slot.match_date,
          l.timezone,
-         now() + make_interval(hours => $3) - interval '30 minutes',
-         now() + make_interval(hours => $3),
-         now() + make_interval(hours => $3) + interval '90 minutes',
+         (slot.match_date + time '18:30') at time zone l.timezone,
+         (slot.match_date + time '19:00') at time zone l.timezone,
+         (slot.match_date + time '20:30') at time zone l.timezone,
          'E2E Pitch',
          $4, $5, $6::public.selection_mode, $7::public.waitlist_mode, 2,
-         now() + make_interval(hours => $3) - make_interval(hours => $8),
-         now() + make_interval(hours => $3) - make_interval(hours => $9),
+         ((slot.match_date + time '19:00') at time zone l.timezone)
+           - make_interval(hours => $8),
+         ((slot.match_date + time '19:00') at time zone l.timezone)
+           - make_interval(hours => $9),
          $10::public.match_lifecycle_status,
          l.created_by,
          -- Cast once and compare as text: the same parameter cannot be
          -- deduced as an enum in one place and a string in another.
          case when $10::text = 'draft' then null else now() end
-       from public.leagues l where l.id = $11`,
+       from public.leagues l
+       cross join lateral (
+         -- A FIXED LOCAL TIME OF DAY, on a date kickoffInHours away.
+         --
+         -- now() plus an interval would put kickoff at whatever hour the suite
+         -- happens to run, and an evening run pushed the 90-minute end time
+         -- past local midnight, where end_time > kickoff_time is false as a
+         -- wall clock and the edit form rightly refuses to save. That made
+         -- three Phase 3B tests fail by time of day rather than by behaviour.
+         select (((now() + make_interval(hours => $3)) at time zone l.timezone)::date) as match_date
+       ) slot
+       where l.id = $11`,
       [
         id,
         title,

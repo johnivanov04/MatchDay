@@ -203,7 +203,11 @@ export type NotificationType =
   | 'late_cancellation'
   | 'waitlist_promotion'
   | 'replacement_needed'
-  | 'reminder';
+  | 'reminder'
+  // Phase 6. Two types rather than one, matching how roster_published and
+  // roster_changed already split first publication from a later change.
+  | 'teams_published'
+  | 'teams_changed';
 
 export type PushDeliveryStatus =
   | 'pending'
@@ -292,6 +296,9 @@ export type MatchRow = {
   /** Phase 4. Distinct from `revision`, which tracks edits to the match itself. */
   roster_revision: number;
   roster_finalized_at: string | null;
+  /** Phase 6. 0 means teams have never been published. Distinct from roster_revision. */
+  team_revision: number;
+  teams_published_at: string | null;
   created_by: string | null;
   published_at: string | null;
   canceled_at: string | null;
@@ -421,6 +428,54 @@ export type ReplacementState = {
   waitlisted: number;
   recommended_membership_id: string | null;
   waitlist_mode: WaitlistMode;
+};
+
+// ── Phase 6 ────────────────────────────────────────────────────────────────
+
+/** A draft team, as the administrator's builder sees it. */
+export type DraftTeam = {
+  team_id: string;
+  name: string;
+  label: string | null;
+  display_order: number;
+  player_count: number;
+};
+
+/**
+ * One confirmed player in the team builder.
+ *
+ * `team_id` is null when they still need assigning — the state publication
+ * refuses to proceed from. Gender and goalkeeper willingness arrive as `null`
+ * unless the league enables those fields, and there is deliberately no rating,
+ * score or attendance context: the MVP has no skill field and nothing infers
+ * one.
+ */
+export type TeamBuilderPlayer = {
+  membership_id: string;
+  first_name: string;
+  last_name: string;
+  team_id: string | null;
+  team_name: string | null;
+  display_order: number | null;
+  preferred_positions: string[];
+  goalkeeper_willing: boolean | null;
+  gender: string | null;
+};
+
+/**
+ * One published team placement, as a confirmed player sees it.
+ *
+ * Names only. There is no column here through which a position, goalkeeper
+ * flag, gender or phone number could travel.
+ */
+export type PublishedTeamEntry = {
+  team_name: string;
+  team_label: string | null;
+  display_order: number;
+  membership_id: string;
+  first_name: string;
+  last_name: string;
+  is_self: boolean;
 };
 
 export type MatchReminderRow = {
@@ -855,6 +910,34 @@ export interface Database {
       // Worker-only: granted to service_role and refused to any other role by
       // an explicit `auth.role()` check inside the function. Returns the
       // occurrences it claimed, so the caller can push exactly those batches.
+      // ── Phase 6 ──────────────────────────────────────────────────────────
+      ensure_match_teams: { Args: { p_match_id: string }; Returns: number };
+      create_match_team: {
+        Args: { p_match_id: string; p_name?: string | null; p_label?: string | null };
+        Returns: string;
+      };
+      rename_match_team: {
+        Args: { p_team_id: string; p_name: string; p_label?: string | null };
+        Returns: string;
+      };
+      delete_match_team: { Args: { p_team_id: string }; Returns: number };
+      assign_player_to_team: {
+        Args: { p_team_id: string; p_membership_id: string };
+        Returns: string;
+      };
+      unassign_player_from_team: {
+        Args: { p_match_id: string; p_membership_id: string };
+        Returns: boolean;
+      };
+      randomize_match_teams: { Args: { p_match_id: string }; Returns: number };
+      publish_match_teams: { Args: { p_match_id: string }; Returns: number };
+      match_published_teams: {
+        Args: { p_match_id: string };
+        Returns: PublishedTeamEntry[];
+      };
+      match_team_builder: { Args: { p_match_id: string }; Returns: TeamBuilderPlayer[] };
+      match_draft_teams: { Args: { p_match_id: string }; Returns: DraftTeam[] };
+
       generate_due_reminders: {
         Args: { p_limit?: number };
         Returns: Array<{ reminder_id: string; notified: number }>;
