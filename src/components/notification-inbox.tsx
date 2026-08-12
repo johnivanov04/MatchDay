@@ -3,26 +3,47 @@
 import Link from 'next/link';
 import { useActionState } from 'react';
 import {
+  archiveNotificationAction,
   markAllNotificationsReadAction,
   markNotificationReadAction,
+  markNotificationUnreadAction,
+  unarchiveNotificationAction,
 } from '@/server/actions/notifications';
 import type { NotificationRow } from '@/types/database';
 
 /**
  * The inbox.
  *
- * Deliberately plain: newest first, unread marked, one action. The v0.2 roadmap
- * puts manual unread/archive controls and retention in a later phase, and the
- * schema already carries `read_at` and `archived_at` so adding them is a
- * feature rather than a migration. Building filtering now would be guessing at
- * a design nobody has asked for yet.
+ * Newest first, unread marked, with the three mutations 02 §14 asks for.
+ *
+ * Archiving takes a row out of this list and out of the unread badge — the
+ * reads have always filtered `archived_at is null`, so Phase 5 completes a
+ * behaviour rather than inventing one. It deliberately leaves `read_at` alone:
+ * "I am done with this" is not the claim "I read this", and overwriting the
+ * timestamp would destroy the only record of whether they ever did. Nothing is
+ * deleted, so an archived notification remains in the history.
+ *
+ * There is no separate archive view. Retention and browsing history are a
+ * design nobody has asked for yet; `unarchive` exists so an accidental press is
+ * recoverable through the archived list a later phase may add.
  *
  * Every row links to a deep link the target page re-authorizes. Following one
  * after losing a membership lands on a redirect, not on member-only content.
  */
 export function NotificationRowItem({ notification }: { notification: NotificationRow }) {
-  const [state, submit, pending] = useActionState(markNotificationReadAction, null);
+  const [readState, markRead, markingRead] = useActionState(markNotificationReadAction, null);
+  const [unreadState, markUnread, markingUnread] = useActionState(
+    markNotificationUnreadAction,
+    null,
+  );
+  const [archiveState, archive, archiving] = useActionState(archiveNotificationAction, null);
+  const [restoreState, restore, restoring] = useActionState(unarchiveNotificationAction, null);
+
   const unread = notification.read_at === null;
+  const archived = notification.archived_at !== null;
+  const state = [readState, unreadState, archiveState, restoreState].find(
+    (candidate) => candidate?.ok === false,
+  );
 
   return (
     <li
@@ -61,18 +82,31 @@ export function NotificationRowItem({ notification }: { notification: Notificati
           Open
         </Link>
 
-        {unread ? (
-          <form action={submit} className="inline">
-            <input type="hidden" name="notification_id" value={notification.id} />
-            <button
-              type="submit"
-              disabled={pending}
-              className="text-sm underline underline-offset-4 disabled:opacity-60"
-            >
-              {pending ? 'Marking…' : 'Mark as read'}
-            </button>
-          </form>
-        ) : null}
+        <form action={unread ? markRead : markUnread} className="inline">
+          <input type="hidden" name="notification_id" value={notification.id} />
+          <button
+            type="submit"
+            disabled={markingRead || markingUnread}
+            className="text-sm underline underline-offset-4 disabled:opacity-60"
+          >
+            {markingRead || markingUnread
+              ? 'Working…'
+              : unread
+                ? 'Mark as read'
+                : 'Mark as unread'}
+          </button>
+        </form>
+
+        <form action={archived ? restore : archive} className="inline">
+          <input type="hidden" name="notification_id" value={notification.id} />
+          <button
+            type="submit"
+            disabled={archiving || restoring}
+            className="text-sm underline underline-offset-4 disabled:opacity-60"
+          >
+            {archiving || restoring ? 'Working…' : archived ? 'Restore' : 'Archive'}
+          </button>
+        </form>
       </div>
 
       {state?.ok === false ? (

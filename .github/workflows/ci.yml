@@ -50,5 +50,80 @@ jobs:
       - name: Test (unit, integration, RLS and tenancy)
         run: npm test
 
+      # Deliberately a separate, named step even though `npm test` already
+      # includes these files. Capacity and promotion correctness under genuine
+      # parallel connections is the hardest guarantee in the product, and a
+      # dedicated gate makes it obvious in the job summary when it is the thing
+      # that broke — rather than one line inside a 1000-test run.
+      #
+      # The pattern matches every `*concurrency*.test.ts` under tests/db, so a
+      # suite added later is picked up without editing this file. Vitest exits
+      # non-zero when a filter matches nothing, so the command cannot quietly
+      # degrade into testing less than it claims.
+      - name: Concurrency tests
+        run: npm run test:concurrency
+
       - name: Production build
         run: npm run build
+
+  e2e:
+    name: End-to-end (Playwright)
+    runs-on: ubuntu-latest
+    # Slower than `verify` because it boots the whole Supabase stack in Docker
+    # and builds the application before a single test runs.
+    timeout-minutes: 35
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # The GitHub runner ships Docker, which is all `supabase start` needs.
+      # This brings up PostgreSQL, GoTrue and PostgREST — the real stack the
+      # E2E suite authenticates against, rather than a mock of it.
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Start Supabase
+        run: supabase start
+
+      - name: Apply migrations and seed
+        run: supabase db reset --no-seed=false
+
+      # Captured once and passed on, so the specs never shell out to the CLI
+      # from inside a worker and no key is ever written to a file.
+      - name: Export Supabase credentials
+        run: |
+          {
+            echo "E2E_SUPABASE_URL=$(supabase status -o json | jq -r '.API_URL')"
+            echo "E2E_DATABASE_URL=$(supabase status -o json | jq -r '.DB_URL')"
+            echo "E2E_SUPABASE_ANON_KEY=$(supabase status -o json | jq -r '.ANON_KEY')"
+            echo "E2E_SUPABASE_SERVICE_ROLE_KEY=$(supabase status -o json | jq -r '.SERVICE_ROLE_KEY')"
+          } >> "$GITHUB_ENV"
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Run end-to-end tests
+        env:
+          # The application reads the public pair; the suite reads the E2E_*
+          # pair above. Both point at the stack this job just started.
+          NEXT_PUBLIC_SUPABASE_URL: ${{ env.E2E_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ env.E2E_SUPABASE_ANON_KEY }}
+          NEXT_PUBLIC_SITE_URL: http://127.0.0.1:3100
+        run: npm run test:e2e
+
+      - name: Upload the Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7

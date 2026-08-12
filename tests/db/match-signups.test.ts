@@ -190,13 +190,16 @@ describe('match signups', () => {
       expect(error.code).toBe(PG_ERROR.checkViolation);
     });
 
-    it('keeps the Phase 5 cancellation statuses unreachable', async () => {
+    it('refuses a cancellation status that does not record when it happened', async () => {
+      // Phase 4 refused these statuses outright. Phase 5 implements the
+      // behaviour behind them, so the guard narrowed from "never" to "only in a
+      // valid shape": a half-applied cancellation would free a capacity slot
+      // while looking like it never happened.
       for (const status of ['canceled', 'withdrawn_late']) {
         const error = await expectDatabaseError(() =>
           db.pool.query(
-            `insert into public.match_signups
-               (league_id, match_id, membership_id, status, canceled_at)
-             values ($1, $2, $3, $4, now())`,
+            `insert into public.match_signups (league_id, match_id, membership_id, status)
+             values ($1, $2, $3, $4)`,
             [
               SEED_LEAGUES.weeknightFives,
               SEED_MATCHES.fivesOpen,
@@ -205,10 +208,24 @@ describe('match signups', () => {
             ],
           ),
         );
-        // Writing one would free a capacity slot with none of the cancellation
-        // behaviour — no receipt, no promotion, no late classification.
         expect(error.message).toContain('SIGNUP_TRANSITION_INVALID');
       }
+    });
+
+    it('refuses a canceled signup that still holds a waitlist place', async () => {
+      const error = await expectDatabaseError(() =>
+        db.pool.query(
+          `insert into public.match_signups
+             (league_id, match_id, membership_id, status, canceled_at, waitlist_position)
+           values ($1, $2, $3, 'canceled', now(), 1)`,
+          [
+            SEED_LEAGUES.weeknightFives,
+            SEED_MATCHES.fivesOpen,
+            SEED_MEMBERSHIPS.fivesMultiLeaguePlayer,
+          ],
+        ),
+      );
+      expect(error.code).toBe(PG_ERROR.checkViolation);
     });
 
     it('counts only confirmed players against capacity', async () => {

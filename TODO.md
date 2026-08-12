@@ -157,9 +157,38 @@ Carried forward from Phase 4:
 - [ ] **Open-spot visibility has no league setting.** F-08 mentions one; no
       column exists, so open spots are shown to every active member.
 
-## Phase 5–7
+## Phase 5 — complete
 
-- [ ] Cancellation, promotion, reminders (Phase 5).
+Delivered: `cancel_spot()` with database-side on-time/late classification,
+transactional capacity release, automatic waitlist promotion, the
+administrator-controlled replacement workflow, cancellation receipts and
+late-cancellation alerts, durable reminders with a claim-based generator, and
+the remaining notification-centre mutations.
+
+Carried forward from Phase 5:
+
+- [ ] **No scheduler is configured.** `POST /api/cron/reminders` and
+      `npm run reminders:run` both exist; nothing calls either on a cadence.
+      Until an operator wires up Vercel Cron or `pg_cron`, reminders do not go
+      out. This is the single most important operational gap in the product.
+- [ ] **The two deadlines round opposite ways.** Cancelling *at*
+      `cancellation_cutoff_at` is on time (`now() > cutoff` is late), while
+      signup treats `now() >= signup_closes_at` as closed. Both are tested and
+      deliberate, but a product decision should settle whether they agree.
+- [ ] **Reminders go to confirmed players only.** A "respond before signup
+      closes" nudge for members who have not answered is an obvious second
+      reminder kind and needs a recipient rule of its own.
+- [ ] **`reminder_offsets` has no interface.** It is copied from the template to
+      the match, but `saveMatchTemplateAction` still writes `[]`, so an
+      administrator cannot configure reminders without SQL.
+- [ ] **A promoted player who then cancels cannot be re-promoted.** The
+      `waitlist_promotion:<match>:<membership>` key is one per player per match,
+      so a second promotion of the same person would not notify.
+- [ ] **`replacement_needed` is not re-sent** if the administrator ignores it.
+      One vacancy, one alert; there is no escalation or reminder of the alert.
+
+## Phase 6–7
+
 - [ ] Team builder and publication (Phase 6).
 - [ ] Attendance, no-show warnings, PWA manifest, monitoring (Phase 7).
 

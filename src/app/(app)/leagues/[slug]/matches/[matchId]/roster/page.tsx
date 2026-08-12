@@ -9,7 +9,11 @@ import {
   requireLeagueAdminPage,
 } from '@/lib/auth/page-guards';
 import { getMatch } from '@/lib/matches/matches';
-import { getAddableMembers, getRosterForAdmin } from '@/lib/matches/signups';
+import {
+  getAddableMembers,
+  getReplacementState,
+  getRosterForAdmin,
+} from '@/lib/matches/signups';
 import {
   deriveMatchParticipationState,
   participationStateLabel,
@@ -42,9 +46,10 @@ export default async function MatchRosterPage({
     redirect(dashboardPathWithNotice(DASHBOARD_NOTICES.notLeagueAdmin));
   }
 
-  const [entries, addableMembers] = await Promise.all([
+  const [entries, addableMembers, replacement] = await Promise.all([
     getRosterForAdmin(matchId),
     getAddableMembers(matchId),
+    getReplacementState(matchId),
   ]);
 
   const confirmed = entries.filter((entry) => entry.status === 'confirmed').length;
@@ -83,6 +88,7 @@ export default async function MatchRosterPage({
           capacity={match.capacity}
           rosterRevision={match.roster_revision}
           finalizedAt={match.roster_finalized_at}
+          replacement={replacement}
         />
       )}
     </>

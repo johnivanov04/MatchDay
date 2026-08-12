@@ -1,8 +1,9 @@
 'use client';
 
-import { useActionState } from 'react';
-import { FormError, SubmitButton } from '@/components/ui/field';
+import { useActionState, useState } from 'react';
+import { FormError, inputClassName, SubmitButton } from '@/components/ui/field';
 import {
+  cancelSpotAction,
   joinMatchAction,
   markUnavailableAction,
   requestSpotAction,
@@ -58,6 +59,17 @@ export function SignupStatusBadge({ outcome }: { outcome: SignupOutcome | null }
         return ['Not selected', 'You were not picked for this match.', 'neutral'];
       case 'not_available':
         return ['You said you cannot play', 'You are not on the roster for this match.', 'neutral'];
+      case 'canceled':
+        return ['Cancelled', 'You cancelled and are no longer on the roster.', 'neutral'];
+      case 'withdrawn_late':
+        // Deliberately not "no-show". A late withdrawal is a cancellation after
+        // the cutoff; whether somebody failed to turn up is an attendance
+        // judgement nobody has made, and labelling it here would pre-judge it.
+        return [
+          'Withdrew late',
+          'You cancelled after the cutoff, so your league administrator was told.',
+          'amber',
+        ];
       default:
         return ['Recorded', 'Your response has been recorded.', 'neutral'];
     }
@@ -78,16 +90,123 @@ export function SignupStatusBadge({ outcome }: { outcome: SignupOutcome | null }
   );
 }
 
+/**
+ * Cancelling a spot, or leaving the waitlist.
+ *
+ * Two steps on purpose. Releasing a confirmed spot after the cutoff is recorded
+ * as a late withdrawal and tells the administrator, so the consequence is shown
+ * *before* the irreversible press rather than reported afterwards.
+ *
+ * `isLate` here is presentation only. The classification that gets stored is
+ * decided by the database from the match's own cutoff and its own clock — this
+ * component could not lie about it if it tried, because no boolean, timestamp
+ * or classification is submitted.
+ */
+function CancelSpotControl({
+  matchId,
+  holdsSpot,
+  waitlistPosition,
+  cutoffLabel,
+  isLate,
+}: {
+  matchId: string;
+  holdsSpot: boolean;
+  waitlistPosition: number | null;
+  cutoffLabel: string;
+  isLate: boolean;
+}) {
+  const [state, submit, pending] = useActionState(cancelSpotAction, null);
+  const [confirming, setConfirming] = useState(false);
+
+  if (!confirming) {
+    return (
+      <div className="flex flex-col gap-2">
+        <FormError message={state?.ok === false ? state.message : undefined} />
+        <button
+          type="button"
+          onClick={() => setConfirming(true)}
+          className="inline-flex min-h-11 w-fit items-center justify-center rounded-lg border border-[var(--border-subtle)] px-4 py-2.5 text-sm font-semibold"
+        >
+          {holdsSpot ? 'Cancel my spot' : 'Leave the waitlist'}
+        </button>
+        {holdsSpot ? (
+          <p className="text-xs text-muted">Cancellation cutoff: {cutoffLabel}.</p>
+        ) : null}
+      </div>
+    );
+  }
+
+  return (
+    <form action={submit} className="flex flex-col gap-3 rounded-lg border border-[var(--border-subtle)] p-3">
+      <input type="hidden" name="match_id" value={matchId} />
+
+      <FormError message={state?.ok === false ? state.message : undefined} />
+
+      {holdsSpot ? (
+        isLate ? (
+          <p
+            role="status"
+            className="rounded-lg border border-amber-400/50 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-950/40 dark:text-amber-100"
+          >
+            <strong>This is a late cancellation.</strong> The cutoff was {cutoffLabel}. Your
+            league administrator will be told. This is not recorded as a no-show.
+          </p>
+        ) : (
+          <p role="status" className="text-sm">
+            Cancelling now is <strong>on time</strong> — the cutoff is {cutoffLabel}. Your spot
+            will be offered to somebody else.
+          </p>
+        )
+      ) : (
+        <p role="status" className="text-sm">
+          You are number {waitlistPosition ?? 0} on the waitlist. Leaving gives up that place.
+        </p>
+      )}
+
+      <label htmlFor="cancel-reason" className="flex flex-col gap-1.5 text-sm font-medium">
+        Reason
+        <span className="text-xs font-normal text-muted">
+          Optional, and shown only to your league administrator.
+        </span>
+        <input
+          id="cancel-reason"
+          name="reason"
+          maxLength={500}
+          className={inputClassName}
+          placeholder="Injured, working late…"
+        />
+      </label>
+
+      <div className="flex flex-wrap gap-2">
+        <SubmitButton pending={pending}>
+          {holdsSpot ? 'Yes, cancel my spot' : 'Yes, leave the waitlist'}
+        </SubmitButton>
+        <button
+          type="button"
+          onClick={() => setConfirming(false)}
+          className="inline-flex min-h-11 items-center justify-center rounded-lg border border-[var(--border-subtle)] px-4 py-2.5 text-sm font-semibold"
+        >
+          Keep my place
+        </button>
+      </div>
+    </form>
+  );
+}
+
 export function SignupControls({
   matchId,
   selectionMode,
   eligibility,
   outcome,
+  cancellationCutoffLabel,
+  cancellationIsLate,
 }: {
   matchId: string;
   selectionMode: SelectionMode;
   eligibility: SignupEligibility;
   outcome: SignupOutcome | null;
+  cancellationCutoffLabel: string;
+  cancellationIsLate: boolean;
 }) {
   const [joinState, join, joining] = useActionState(joinMatchAction, null);
   const [requestState, request, requesting] = useActionState(requestSpotAction, null);
@@ -107,6 +226,7 @@ export function SignupControls({
 
   const status = outcome?.status ?? null;
   const holdsSpot = status === 'confirmed';
+  const holdsWaitlistPlace = status === 'waitlisted';
   const alreadyResponded = status === 'confirmed' || status === 'waitlisted' || status === 'interested';
 
   return (
@@ -122,17 +242,19 @@ export function SignupControls({
         </form>
       )}
 
-      {holdsSpot ? (
-        // A confirmed player would normally see "Cancel my spot". Releasing a
-        // spot means classifying the cancellation against the cutoff, alerting
-        // the administrator and offering the place to somebody else — none of
-        // which exists yet. So this states the position plainly instead of
-        // offering a control that would appear to work and quietly do half the
-        // job.
-        <p className="rounded-lg border border-[var(--border-subtle)] px-3 py-2 text-xs text-muted">
-          Need to drop out? Cancelling your own spot is not available yet — please contact your
-          league administrator.
-        </p>
+      {/*
+        Cancelling is for somebody holding a place — a spot or a queue position.
+        "Can't play" stays the answer for everybody else: it releases nothing,
+        so it needs no cutoff, no confirmation and no administrator alert.
+      */}
+      {holdsSpot || holdsWaitlistPlace ? (
+        <CancelSpotControl
+          matchId={matchId}
+          holdsSpot={holdsSpot}
+          waitlistPosition={outcome?.waitlist_position ?? null}
+          cutoffLabel={cancellationCutoffLabel}
+          isLate={cancellationIsLate}
+        />
       ) : (
         <form action={markUnavailable}>
           <input type="hidden" name="match_id" value={matchId} />
