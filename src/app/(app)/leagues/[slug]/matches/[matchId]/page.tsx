@@ -331,22 +331,40 @@ export default async function MatchDetailPage({
                 </p>
               )}
 
-              <div className="grid gap-3 sm:grid-cols-2">
+              {/*
+                A list of groups, not a grid of anonymous divs.
+
+                Each team is a `group` with its own accessible name, so a screen
+                reader announces "Team 1 (your team), group" on entry and can
+                jump between teams — where before it read one undifferentiated
+                run of names and the reader had no way to tell where one team
+                ended and the next began. The heading carries the same name
+                visually.
+
+                It is also the only stable handle a test has on "the player's
+                own team". Locating by text alone matches the card *and* every
+                ancestor that contains it, and which of those a `.first()`
+                resolves to depends on how much of the page has streamed in.
+              */}
+              <ul className="grid list-none gap-3 sm:grid-cols-2">
                 {publishedTeams.map((team) => {
                   const mine = team.players.some((player) => player.is_self);
+                  const accessibleName = mine ? `${team.name} (your team)` : team.name;
                   return (
-                    <div
+                    <li
                       key={team.displayOrder}
+                      role="group"
+                      aria-label={accessibleName}
                       className={`rounded-lg border p-3 ${
                         mine
                           ? 'border-pitch-500/50 bg-pitch-50 dark:bg-pitch-900/40'
                           : 'border-[var(--border-subtle)]'
                       }`}
                     >
-                      <p className="text-sm font-semibold">
+                      <h3 className="text-sm font-semibold">
                         {team.name}
                         {mine ? <span className="ml-1.5 text-xs">(your team)</span> : null}
-                      </p>
+                      </h3>
                       {team.label === null ? null : (
                         <p className="text-xs text-muted">{team.label}</p>
                       )}
@@ -360,10 +378,10 @@ export default async function MatchDetailPage({
                           </li>
                         ))}
                       </ul>
-                    </div>
+                    </li>
                   );
                 })}
-              </div>
+              </ul>
             </>
           )}
         </section>

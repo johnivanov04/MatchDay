@@ -44,6 +44,13 @@ test.describe('accessibility', () => {
 
     const page = await asUser(league.admin.email);
     await page.goto('/dashboard');
+    // Let the router's link prefetching finish first. Clicking while a prefetch
+    // for the same route is still in flight makes the router await *that*
+    // request rather than issuing the navigation fetch this test holds — so
+    // nothing is held, the page renders straight away, and the loading state
+    // never appears. Synchronising on the network going quiet is a real
+    // condition, not a sleep.
+    await page.waitForLoadState('networkidle');
     await expectNoViolations(page);
   });
 
@@ -289,19 +296,85 @@ test.describe('accessibility beyond what axe can check', () => {
     await expect(row.locator('[role="alert"]')).toContainText(/Give a reason/i);
   });
 
-  test('the loading state announces itself', async ({ factory, asUser }) => {
+  test('the loading state announces itself, and is announced politely', async ({
+    factory,
+    asUser,
+  }) => {
     const league = await factory.createLeague();
+    const match = await factory.createMatch(league);
 
     const page = await asUser(league.admin.email);
-    // Throttled so the skeleton is on screen long enough to inspect rather
-    // than being replaced before the assertion runs.
-    await page.route('**/leagues/**', async (route) => {
-      await new Promise((resolve) => setTimeout(resolve, 1_200));
+    await page.goto('/dashboard');
+
+    // HELD OPEN, NOT SLOWED DOWN.
+    //
+    // The first version of this test delayed the *document* request by 1.2s and
+    // then looked for the skeleton. That delays the moment the loading state
+    // starts, not how long it lasts: the browser spends the delay showing the
+    // previous page, and the skeleton still only survives for however long the
+    // server happens to take — a window wide enough to catch on a laptop and
+    // not on CI, where it failed.
+    //
+    // Instead this holds the React Server Component payload that a client-side
+    // navigation fetches, so the loading state lasts exactly as long as the
+    // test needs rather than however long the server happens to take.
+    //
+    // WAITING FOR THE NETWORK TO GO QUIET FIRST IS LOAD-BEARING, not tidiness.
+    // The App Router prefetches every nav link when the dashboard paints, and
+    // that prefetch is what fetches the `loading.tsx` boundary. With it cached,
+    // clicking shows the loading state and commits the URL immediately, then
+    // fetches the rest — which is the state this test inspects. Click before it
+    // lands and the router has no boundary to show: it simply stays on the
+    // dashboard until the payload arrives, and there is no loading state to
+    // find. That is the actual reason the intermediate attempts here failed.
+    await page.waitForLoadState('networkidle');
+
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+
+    await page.route('**/leagues/**', async (route, request) => {
+      const headers = request.headers();
+      // Only the RSC fetch that a *click* makes.
+      //
+      // The App Router prefetches every nav link as soon as the dashboard
+      // paints — a dozen requests, all carrying `rsc: 1`. Holding those as well
+      // deadlocks the router before the click even happens, which is how the
+      // first attempt at this managed to find no loading state at all.
+      // `next-router-prefetch` is what separates speculative work from the
+      // navigation the user actually asked for.
+      const isNavigationPayload =
+        headers['rsc'] === '1' && headers['next-router-prefetch'] === undefined;
+
+      if (isNavigationPayload) {
+        await held;
+      }
       await route.continue();
     });
 
-    const navigation = page.goto(`/leagues/${league.slug}/matches`);
-    await expect(page.getByRole('status')).toContainText('Loading');
-    await navigation;
+    await page.getByRole('link', { name: 'Matches', exact: true }).click();
+
+    // WHILE loading is genuinely in progress:
+    const status = page.getByRole('status');
+    await expect(status).toBeVisible();
+    await expect(status).toContainText('Loading');
+
+    // `role="status"` implies aria-live="polite" — announced when the reader
+    // finishes its sentence rather than interrupting, which is right for "this
+    // is on its way" and wrong for an error. Asserted explicitly because the
+    // implicit value is easy to override by accident.
+    await expect(status).toHaveAttribute('role', 'status');
+    expect(await status.getAttribute('aria-live')).not.toBe('assertive');
+
+    // The skeleton itself is hidden from the reader — the live region above is
+    // what speaks, and announcing a dozen grey rectangles as well is noise.
+    await expect(page.locator('[aria-hidden="true"]').first()).toBeAttached();
+
+    // Let it finish, and confirm we really did arrive.
+    release();
+    await expect(page.getByRole('heading', { name: 'Matches', exact: true })).toBeVisible();
+    await expect(page.getByText(match.title)).toBeVisible();
+    await expect(status).toHaveCount(0);
   });
 });

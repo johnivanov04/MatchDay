@@ -307,10 +307,21 @@ test.describe('publication', () => {
 
     const playerPage = await asUser(players[0]!.email);
     await playerPage.goto(`/leagues/${league.slug}/matches/${match.id}`);
-    const publishedTeam = await playerPage
-      .locator('div', { hasText: '(your team)' })
-      .first()
-      .innerText();
+
+    // What the player was told at revision 1: their own team, and exactly who
+    // is on it.
+    //
+    // Located by the team's accessible name rather than by text alone. A text
+    // match finds the card *and* every ancestor containing it, and which one a
+    // `.first()` resolves to depends on how much of the page has streamed —
+    // which is how this assertion used to compare seven hundred characters of
+    // whole-page text and fail on CI for reasons unrelated to teams.
+    const myTeam = playerPage.getByRole('group', { name: /\(your team\)$/ });
+    await expect(myTeam).toBeVisible();
+
+    const publishedTeamName = await myTeam.getByRole('heading').innerText();
+    const publishedTeammates = await myTeam.getByRole('listitem').allInnerTexts();
+    expect(publishedTeammates.length).toBeGreaterThan(0);
 
     // The administrator moves everybody onto one team in the draft.
     const teams = await factory.query<{ id: string }>(
@@ -327,11 +338,17 @@ test.describe('publication', () => {
     // The player still sees revision 1. The publication boundary is the
     // communication boundary.
     await playerPage.reload();
-    const afterEdit = await playerPage
-      .locator('div', { hasText: '(your team)' })
-      .first()
-      .innerText();
-    expect(afterEdit).toBe(publishedTeam);
+    await expect(myTeam).toBeVisible();
+
+    expect(await myTeam.getByRole('heading').innerText()).toBe(publishedTeamName);
+    expect(await myTeam.getByRole('listitem').allInnerTexts()).toEqual(publishedTeammates);
+
+    // And the draft state — everybody on one team — is nowhere in sight. This
+    // is the assertion that would actually catch a leak: the published view
+    // still has two teams, and the player's is not the whole squad.
+    await expect(playerPage.getByRole('group', { name: /team/i })).toHaveCount(2);
+    expect(publishedTeammates.length).toBeLessThan(players.length);
+
     expect(await teamRevision(factory, match.id)).toBe(1);
 
     const adminPage = await asUser(league.admin.email);
