@@ -36,8 +36,12 @@ each one. The rules that matter:
 - **`VAPID_PRIVATE_KEY` signs pushes to every subscribed device.** Server-only,
   deliberately unprefixed.
 - **`CRON_SECRET` is required for reminders to work at all.** Without it
-  `/api/cron/reminders` answers 404 to everybody, so an unprotected trigger
-  cannot flush a league's reminders early.
+  `/api/cron/reminders` answers 404 to everybody — including Vercel Cron, so
+  the declared schedule silently does nothing.
+- **`NEXT_PUBLIC_SUPPORT_EMAIL` is optional but strongly recommended before a
+  pilot.** Unset, the footer and both error boundaries render nothing, and a
+  player who cannot sign in has no route to a human. It is published on purpose
+  and is not a secret.
 
 Set them in the host's own encrypted store, not in a file in the repository.
 
@@ -119,15 +123,70 @@ The SQL route creates the canonical in-app notifications — which is the record
 that matters — but **not** the Web Push fan-out, which lives in the application.
 Prefer the HTTP route where the platform allows it.
 
-Verify it by hand:
+### What is in the repository, and what is not
 
-```bash
-curl -X POST https://<host>/api/cron/reminders \
-  -H "Authorization: Bearer $CRON_SECRET"
-# {"claimed":0,"notified":0,"skipped":false}
+`vercel.json` declares the cron entry:
+
+```json
+{ "crons": [{ "path": "/api/cron/reminders", "schedule": "*/10 * * * *" }] }
 ```
 
-`skipped: true` means no service-role key is configured and nothing ran.
+Vercel Cron issues **GET** and injects `Authorization: Bearer $CRON_SECRET`
+automatically, which is why the route answers both verbs over the same secret
+check. **The entry does nothing until `CRON_SECRET` is set on the project** —
+without it the route answers 404 to everybody, including Vercel.
+
+**Still external, and nobody can do it from this repository:**
+
+1. Set `CRON_SECRET` in the Vercel project (Production, and Preview if you want
+   it there).
+2. Deploy — cron entries are registered at deploy time, not at merge time.
+3. Confirm the job appears under **Project → Settings → Cron Jobs** and shows a
+   successful invocation.
+
+**Plan limits matter here.** On Hobby, cron jobs run at most **once a day** and
+you may have two. A ten-minute cadence needs Pro or above. If you are on Hobby,
+either upgrade or use the `pg_cron` route below — a once-a-day reminder is
+useless for a match reminder.
+
+### Why ten minutes
+
+A reminder becomes due at `kickoff − offset` and is delivered by the first pass
+after that moment, so the cadence is the worst-case lateness. Ten minutes is
+comfortably inside a useful margin for offsets measured in hours, and it is 144
+invocations a day rather than 1,440. Going faster buys precision nobody needs;
+going much slower makes a "2 hours before" reminder arrive at 1h35m.
+
+### The alternative, if the platform cannot send a header
+
+```sql
+select cron.schedule(
+  'matchday-reminders', '*/10 * * * *',
+  $$ select public.generate_due_reminders(100); $$
+);
+```
+
+This creates the canonical in-app notifications — the record that matters — but
+**not** the Web Push fan-out, which lives in the application. Prefer the HTTP
+route wherever possible.
+
+### Verify it by hand
+
+```bash
+curl -i -X POST https://<host>/api/cron/reminders \
+  -H "Authorization: Bearer $CRON_SECRET"
+```
+
+| HTTP | Body `status` | Meaning |
+|---|---|---|
+| 200 | `idle` | Ran, nothing was due. The healthy common case |
+| 200 | `worked` | Ran and claimed `claimed` occurrences |
+| 500 | `failed` | **The generator errored.** `errorCode` correlates with the log |
+| 503 | `skipped` | No service-role key configured; nothing ran and nothing will |
+| 404 | — | Wrong secret, or `CRON_SECRET` not set at all |
+
+The status code carries the outcome deliberately, so a platform cron dashboard
+or uptime check registers a failure without anybody having to read the body.
 
 ---
 
@@ -185,6 +244,10 @@ indexes. There is no agent and no vendor.
 |---|---|---|
 | `action.refused` | info | A Server Action returned a domain error. Usually the product working — somebody tried to join a full match. Watch the aggregate, not the line |
 | `action.failed` | error | Something threw that nobody anticipated. **This is the one to alert on** |
+| `reminder.run` | info | A reminder pass completed, with `claimed` / `notified` / `push_failures`. Emitted on empty passes too, so its **absence** is the signal |
+| `reminder.failed` | error | The generator errored; nothing was claimed. **Alert on this** |
+| `reminder.skipped` | warn | No service-role key configured, so nothing ran |
+| `reminder.push_incomplete` | warn | Notifications committed, push fan-out threw for at least one occurrence |
 
 Both come from `actionFailure()`, so every Server Action is covered without each
 one having to remember to log.
@@ -204,12 +267,138 @@ a constraint name, a column value or another tenant's identifier. Identifiers
 are logged and are what make a log useful; looking a row up is an authorized act
 with its own audit trail.
 
-Alert suggestions: any `action.failed`; `/api/health` non-200 twice in a row;
-`claimed: 0` from the reminder route for longer than a match cycle.
+Suggested alerts, in priority order:
+
+1. any `reminder.failed` — the reminder pipeline is broken;
+2. **no `reminder.run` line for three cadence intervals** — the scheduler has
+   stopped, which is the silent failure worth the most attention. Absence, not
+   a value, is the signal;
+3. any `action.failed`;
+4. `/api/health` non-200 twice in a row;
+5. any non-2xx from the cron endpoint, which the platform's own cron dashboard
+   reports without extra wiring.
 
 ---
 
-## 8. Backups and the audit trail
+## 8. Troubleshooting notification delivery
+
+The order to work in. Each step rules out a layer, and the first two are far
+more often the problem than push itself.
+
+### Step 1 — is the scheduler running at all?
+
+```
+event="reminder.run"        every cadence interval, healthy
+event="reminder.failed"     the generator errored — see step 2
+event="reminder.skipped"    no service-role key; nothing has ever run
+```
+
+**Silence is the finding.** `reminder.run` is emitted on every successful pass
+including empty ones, precisely so its absence means something. No line for an
+hour on a ten-minute cadence means the scheduler is not invoking the endpoint —
+check the platform's cron dashboard and that `CRON_SECRET` is set, not the
+application.
+
+Confirm from outside with the `curl` in §5.
+
+### Step 2 — did a run fail?
+
+```
+{"level":"error","event":"reminder.failed","error_code":"42501"}
+```
+
+`error_code` is the PostgreSQL SQLSTATE. The message is deliberately not logged
+— it can carry a constraint name or another league's identifier.
+
+| Code | Usually means | Action |
+|---|---|---|
+| `42501` | Insufficient privilege | The service-role key is wrong or rotated |
+| `57014` | Statement timeout | Database under load; check Supabase metrics |
+| `08*` | Connection failure | Database unreachable; check the project is not paused |
+
+Reminders are **not lost** by a failed run: nothing was claimed, so the next
+pass finds the same rows pending. Repeated failures are the emergency, not one.
+
+### Step 3 — were the notifications created?
+
+The in-app inbox is the source of truth. If a row exists here, the product did
+its job and any remaining problem is delivery only.
+
+```sql
+select n.type, count(*), max(n.created_at) as latest
+from public.notifications n
+where n.match_id = '<match_id>'
+group by n.type;
+```
+
+### Step 4 — did push go out?
+
+```sql
+select a.status,
+       a.last_error_category,
+       count(*)          as attempts,
+       max(a.last_attempted_at) as latest
+from public.push_delivery_attempts a
+join public.notifications n on n.id = a.notification_id
+where n.created_at > now() - interval '24 hours'
+group by a.status, a.last_error_category
+order by attempts desc;
+```
+
+**Retryable vs terminal**, from `status`:
+
+| `status` | Retryable | Meaning and action |
+|---|---|---|
+| `pending` | — | Created, not yet attempted. Normal for seconds, not minutes |
+| `sent` | — | Delivered to the push service. Nothing further to do |
+| `temporary_failure` | **yes** | Service 5xx, rate limit, network, timeout. Self-corrects; investigate only if it persists across cadences |
+| `permanent_failure` | **no** | Rejected and will never succeed. Almost always **VAPID credentials** — wrong key pair, or `VAPID_SUBJECT` not a `mailto:`. Fix the configuration; no amount of retrying helps |
+| `invalidated` | **no** | The browser discarded the subscription (404/410). The row is retired automatically. The player must re-enable notifications on that device |
+
+`last_error_category` refines it: `gone` / `not_found` are the invalidated pair,
+`unauthorized` means credentials, `rate_limited` and `server_error` are the
+push service's own problems, `payload_too_large` would be a defect in this
+product and has never been observed.
+
+A single subscription failing is ordinary — people clear site data and change
+phones. **A spike of `permanent_failure` across many subscriptions at once is
+almost certainly a configuration change**, not a hundred simultaneous device
+failures.
+
+### Step 5 — did the person actually opt in?
+
+```sql
+select s.enabled, count(*)
+from public.push_subscriptions s
+join public.league_memberships m on m.user_id = s.user_id
+where m.league_id = '<league_id>'
+group by s.enabled;
+```
+
+No row means they never enabled notifications on that device. On **iOS this is
+the single most common cause**: Web Push requires the site to be on the Home
+Screen first, and a player who skipped that step has no subscription at all and
+never will until they do it. See §6.
+
+### What an operator should actually do
+
+| Finding | Action |
+|---|---|
+| No `reminder.run` lines | Fix the scheduler or `CRON_SECRET`. Nothing else matters until this is green |
+| `reminder.failed` repeating | Treat as an incident. Check the service-role key and database health |
+| `reminder.skipped` | Set `SUPABASE_SERVICE_ROLE_KEY` and redeploy |
+| Notifications exist, push does not | Delivery problem only. The inbox is correct; players can still see everything in the app |
+| `permanent_failure` spike | Re-check the VAPID pair and `VAPID_SUBJECT` |
+| `invalidated` for one person | Ask them to re-enable notifications on that device |
+| `reminder.push_incomplete` | Push threw for a whole occurrence. Notifications are safe; check push credentials and service status |
+
+**Reassure the league before firefighting.** Push is a delivery channel, never
+the record. A total push outage means phones stay quiet — it does not mean
+anybody lost their spot, their roster, or their place in a queue.
+
+---
+
+## 9. Backups and the audit trail
 
 Supabase takes automated backups; check the retention on your plan and match it
 to what the league expects.
@@ -224,9 +413,13 @@ Two tables are the historical record and are never rewritten in place:
 Restoring to a point in time restores both. Neither is safe to prune without
 deciding, explicitly, how much of a league's history it is acceptable to lose.
 
+**Rehearse one restore before the pilot.** Knowing backups exist is not the same
+as knowing you can use them, and the first time should not be during an
+incident.
+
 ---
 
-## 9. What this MVP does not have
+## 10. What this MVP does not have
 
 Stated plainly so nobody deploys expecting it:
 
@@ -238,6 +431,9 @@ Stated plainly so nobody deploys expecting it:
 - no weather integration, tournaments, or guest sponsorship
 - no analytics beyond the logs above
 - no automated data-retention or deletion job
+- **one administrator per league**, which makes a league one lost password away
+  from being unmanageable. Recovery is an operational procedure:
+  [`administrator-recovery.md`](administrator-recovery.md)
 
 The last one matters for a real deployment: deleting a member's data is a manual
 database operation today.

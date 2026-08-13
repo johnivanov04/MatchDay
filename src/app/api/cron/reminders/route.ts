@@ -9,10 +9,9 @@ import { runDueReminders } from '@/server/reminders';
  * process and a process-local timer fires once per running instance — neither
  * is a scheduler on a platform that scales to zero and redeploys freely.
  *
- * Production must invoke this on a cadence. See `NEXT_STEPS.md`; a Vercel Cron
- * entry or a Supabase `pg_cron` job calling `generate_due_reminders()` are both
- * fine. Nothing here configures one, so until an operator does, reminders do
- * not go out — stated plainly rather than assumed.
+ * `vercel.json` declares the cron entry that invokes this. See
+ * `docs/operations/production.md` §5 for the deploy-time steps that remain
+ * external, and for the `pg_cron` alternative.
  *
  * Authorization is a shared secret, not a session: the caller is a machine. It
  * is compared in constant time and the endpoint answers 404 without one, so it
@@ -31,7 +30,7 @@ function timingSafeEqual(a: string, b: string): boolean {
   return difference === 0;
 }
 
-export async function POST(request: NextRequest): Promise<NextResponse> {
+async function handle(request: NextRequest): Promise<NextResponse> {
   const secret = process.env.CRON_SECRET;
 
   // With no secret configured the endpoint does not exist. That is the safe
@@ -50,5 +49,37 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   const result = await runDueReminders();
 
-  return NextResponse.json(result);
+  // A FAILED RUN MUST NOT LOOK LIKE A SUCCESSFUL ONE.
+  //
+  // 500 so the platform's own cron dashboard and any uptime check count it as a
+  // failure, rather than the operator having to notice that a 200 body said
+  // `"status":"failed"`. `skipped` is 503: nothing ran and nothing will until
+  // somebody sets the service-role key, which is a configuration problem rather
+  // than a transient one.
+  const httpStatus = result.status === 'failed' ? 500 : result.status === 'skipped' ? 503 : 200;
+
+  return NextResponse.json(result, { status: httpStatus });
+}
+
+/**
+ * Vercel Cron issues **GET**, and injects `Authorization: Bearer $CRON_SECRET`
+ * automatically when that variable is set on the project. Supporting GET is
+ * therefore what makes the declared cron entry work at all — it is the same
+ * contract and the same secret check as POST, not a second mechanism.
+ *
+ * A mutating GET is a deliberate, bounded exception to the usual rule. The
+ * operation is effectively idempotent: `generate_due_reminders()` claims
+ * pending rows with `for update skip locked`, and every notification it writes
+ * carries a recipient-scoped idempotency key, so a repeated or concurrent
+ * invocation cannot produce a second copy of anything. Nothing here is
+ * cacheable — `dynamic = 'force-dynamic'` — and without the bearer secret it is
+ * a 404.
+ */
+export async function GET(request: NextRequest): Promise<NextResponse> {
+  return handle(request);
+}
+
+/** The verb `npm run reminders:run` and the documented `curl` use. */
+export async function POST(request: NextRequest): Promise<NextResponse> {
+  return handle(request);
 }

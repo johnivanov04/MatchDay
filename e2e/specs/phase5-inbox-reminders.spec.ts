@@ -253,8 +253,26 @@ test.describe('reminders', () => {
     // No CRON_SECRET is configured for the E2E server, so the route does not
     // exist at all — the safe default, since an unprotected trigger would let
     // anybody flush a league's reminders early.
-    const response = await request.post('/api/cron/reminders');
-    expect([401, 404]).toContain(response.status());
+    //
+    // Both verbs, because Vercel Cron issues GET while the documented curl and
+    // the local script use POST. The authorized path needs a configured secret
+    // and is proved in `tests/unit/cron-reminders-route.test.ts`.
+    for (const response of [
+      await request.post('/api/cron/reminders'),
+      await request.get('/api/cron/reminders'),
+    ]) {
+      expect([401, 404]).toContain(response.status());
+    }
+  });
+
+  test('a wrong shared secret is refused exactly like no secret at all', async ({ request }) => {
+    const wrong = await request.get('/api/cron/reminders', {
+      headers: { authorization: 'Bearer not-the-configured-secret' },
+    });
+    const none = await request.get('/api/cron/reminders');
+
+    // Identical, so the endpoint cannot be probed for existence.
+    expect(wrong.status()).toBe(none.status());
   });
 });
 

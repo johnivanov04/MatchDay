@@ -1,14 +1,16 @@
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { LeagueSwitcher } from '@/components/league-switcher';
+import { SupportContact } from '@/components/support-contact';
 import type { LeagueContext } from '@/lib/leagues/active-league';
 
 /**
- * Authenticated application shell: identity, active league, navigation.
+ * Authenticated application shell: identity, active league, navigation, and the
+ * one always-present route to a human.
  *
- * Deliberately thin. Everything a player actually comes here for — matches,
- * rosters, notifications — belongs to later phases, and stubbing those links
- * now would promise screens that do not exist.
+ * The navigation is derived from the session's own membership and is
+ * presentation only — every target re-checks authorization server-side, so a
+ * link that should not be there would still refuse.
  */
 export function AppShell({
   displayName,
@@ -137,8 +139,16 @@ export function AppShell({
         {children}
       </main>
 
+      {/* The one always-present route to a human. Quiet by design — small,
+          muted, at the bottom — but on every authenticated page, because the
+          person who needs it is by definition somebody the product has already
+          failed. Renders nothing at all when no support address is configured.
+
+          The old text here announced "Phase 1 foundation — matches, rosters and
+          notifications arrive in later phases", which stopped being true four
+          phases ago. */}
       <footer className="px-5 py-6 text-xs text-muted">
-        Phase 1 foundation — matches, rosters and notifications arrive in later phases.
+        <SupportContact />
       </footer>
     </div>
   );

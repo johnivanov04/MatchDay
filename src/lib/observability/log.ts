@@ -128,10 +128,35 @@ export function describeError(error: unknown): LogFields {
   if (error instanceof Error) {
     const code = (error as { code?: unknown }).code;
     return {
-      error_name: error.name,
+      // `error_type`, NOT `error_name`.
+      //
+      // The key filter above matches `name` as a substring, so the original
+      // `error_name` was silently dropped from every line it appeared on —
+      // meaning `action.failed`, the event most worth alerting on, logged
+      // `{"error_code": null}` and nothing else. A whole class of unexpected
+      // failure was being recorded as a shrug.
+      //
+      // Renamed rather than exempted: the filter is deliberately blunt and
+      // stays that way, because the cost of a false positive here is a missing
+      // field and the cost of a false negative is somebody's personal data in a
+      // log aggregator. `assertLoggable` below is how a new field proves it
+      // survives.
+      error_type: error.name,
       error_code: typeof code === 'string' ? code : null,
     };
   }
 
-  return { error_name: 'unknown', error_code: null };
+  return { error_type: 'unknown', error_code: null };
+}
+
+/**
+ * True when every key would actually be written.
+ *
+ * Exported for tests. A field silently disappearing is the failure mode this
+ * module is most prone to — the filter is a substring match, so an innocuous
+ * technical key like `error_name` or `endpoint_count` vanishes without a word.
+ * Any event whose fields matter operationally should assert this.
+ */
+export function assertLoggable(fields: LogFields): boolean {
+  return Object.keys(fields).every((key) => !isForbidden(key));
 }

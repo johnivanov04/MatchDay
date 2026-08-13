@@ -417,6 +417,9 @@ Two documents, written for an operator rather than a developer:
 - [`docs/operations/pilot.md`](docs/operations/pilot.md) — the RMVFC league
   settings that match 01 §7, the rehearsal match, recording attendance, and the
   no-automatic-discipline rule the pilot must not break.
+- [`docs/operations/administrator-recovery.md`](docs/operations/administrator-recovery.md)
+  — restoring administration when the sole administrator is locked out, by
+  reusing the ordinary transfer primitive rather than hand-editing roles.
 
 ---
 
