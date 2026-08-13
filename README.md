@@ -7,7 +7,7 @@ hard-coded to any one club or format.
 RMV Football Club is the first pilot configuration (11v11, 22 players). A 5v5
 league with 10 players is equally first-class.
 
-**Current state: Phases 1–2.**
+**Current state: the MVP is feature-complete — Phases 1–7.**
 
 - **Phase 1** — authentication, global profiles, leagues, memberships,
   tenant-aware Row Level Security, the audit-event foundation, the
@@ -17,13 +17,28 @@ league with 10 players is equally first-class.
   approval, revocable invitation links, manual member addition, atomic
   administrator transfer, league settings, and audit events for every
   administrative change.
-
 - **Phase 3** — versioned league guidelines with immutable acknowledgements and
   a signup-eligibility predicate, reusable match templates, match creation and
   publication, canonical in-app notifications, and opt-in **Web Push** phone
   notifications delivered through a PWA service worker.
+- **Phase 3B** — editing a match after publication, with revision tracking and
+  change notifications.
+- **Phase 4** — first-come and administrator-approved signup, capacity held
+  under a match row lock, ordered waitlists, the roster workspace, manual
+  additions, and roster publication.
+- **Phase 5** — player cancellation with on-time and late classification,
+  capacity release, automatic and administrator-controlled promotion, the
+  notification inbox with read/archive, and match reminders.
+- **Phase 6** — the multi-team builder, count-only randomization, private
+  drafts and explicit publication with its own revision.
+- **Phase 7** — attendance with five outcomes and corrections, no-show context
+  for roster decisions, membership suspension and removal with a cascade,
+  completed matches, and the accessibility, mobile and operations passes.
 
-Signup, rosters, waitlists, teams and attendance are later phases — see
+Running it for real is documented in
+[`docs/operations/production.md`](docs/operations/production.md) and
+[`docs/operations/pilot.md`](docs/operations/pilot.md). What remains is
+deployment configuration, not code — see
 [`NEXT_STEPS.md`](NEXT_STEPS.md).
 
 The product specification is the source of truth and lives in
@@ -73,6 +88,8 @@ git-ignored.
 | `SUPABASE_SERVICE_ROLE_KEY` | **server only** | Bypasses RLS. Never `NEXT_PUBLIC_`, never in a client component |
 | `VAPID_PRIVATE_KEY` | **server only** | Signs Web Push. `npx web-push generate-vapid-keys` |
 | `VAPID_SUBJECT` | **server only** | `mailto:` contact required by the Web Push protocol |
+| `NEXT_PUBLIC_SUPPORT_EMAIL` | browser + server | Optional. Where a blocked user reaches a human; shown in the footer and error boundaries |
+| `CRON_SECRET` | **server only** | Shared secret the scheduler presents to `/api/cron/reminders`. Without it reminders never go out |
 | `TEST_DATABASE_URL` | tests only | Optional; see [Testing](#testing) |
 
 ### 3. Start the local database
@@ -113,6 +130,8 @@ or the 6-digit code.
 | `npm test` | Every test (unit + database) |
 | `npm run test:unit` | Unit tests only — no database needed |
 | `npm run test:db` | Database, RLS and tenancy tests |
+| `npm run test:concurrency` | Every real-concurrency race, across all phases |
+| `npm run test:e2e:fresh` | Resets the database, then the full Playwright suite |
 | `npm run db:start` / `db:stop` | Local Supabase stack |
 | `npm run db:reset` | Drop, re-migrate and re-seed the local database |
 | `npm run db:migrate` | Apply pending migrations |
@@ -158,6 +177,11 @@ one.
 | `…030700_notification_integration` | Attaches fanout to Phase 2 and Phase 3 events |
 | `…030800_phase3_rls_and_grants` | Phase 3 RLS, column grants, function EXECUTE |
 | `…030900_revoke_public_function_execute` | Takes `EXECUTE` back from `PUBLIC` on Phase 3 functions |
+| `…040000_match_editing` | Editing a published match, with revision tracking |
+| `…050000–050400` | Phase 4: signups, capacity under lock, waitlists, roster publication |
+| `…060000–060400` | Phase 5: cancellation, promotion, reminders, notification inbox |
+| `…070000–070400` | Phase 6: teams, draft/published split, team revisions |
+| `…080000–080600` | Phase 7: attendance, membership status cascade, two defect fixes |
 
 ### Exactly one active league administrator
 
@@ -377,6 +401,8 @@ product deciding something no approved document decides.
   the logs may never contain.
 - [`docs/operations/pilot.md`](docs/operations/pilot.md) — setting the pilot
   league up, the rehearsal match, and what to watch.
+- [`docs/operations/administrator-recovery.md`](docs/operations/administrator-recovery.md)
+  — emergency recovery when a league's sole administrator is locked out.
 
 ## Not built yet
 

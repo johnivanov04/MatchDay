@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
+import { SupportContact } from '@/components/support-contact';
 import { ErrorState } from '@/components/ui/status';
 
 /**
@@ -53,6 +54,12 @@ export default function AuthenticatedError({
           {error.digest === undefined ? null : (
             <p className="text-xs opacity-80">Reference: {error.digest}</p>
           )}
+          {/* The digest above is only useful to somebody who can be told it.
+              Pairing the two means a stuck player can report the exact failure
+              instead of describing it. */}
+          <p className="text-xs opacity-80">
+            <SupportContact prefix="Still stuck?" />
+          </p>
         </div>
       }
     />

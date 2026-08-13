@@ -16,6 +16,16 @@
  * that reliably works from here is a fresh navigation to the dashboard.
  */
 export default function GlobalError() {
+  // Read directly rather than through `SupportContact`, which styles itself with
+  // Tailwind classes — and a failure in the root layout is exactly the case
+  // where the stylesheet may never have loaded. Same variable, same validation
+  // shape, inline styles.
+  const supportEmail = process.env.NEXT_PUBLIC_SUPPORT_EMAIL?.trim();
+  const support =
+    supportEmail !== undefined && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(supportEmail)
+      ? supportEmail
+      : null;
+
   return (
     <html lang="en">
       <body
@@ -55,6 +65,14 @@ export default function GlobalError() {
           >
             Reload Matchday
           </a>
+          {support === null ? null : (
+            <p style={{ fontSize: '0.8125rem', margin: '1.25rem 0 0', opacity: 0.8 }}>
+              Still not working?{' '}
+              <a href={`mailto:${support}`} style={{ color: '#166534' }}>
+                {support}
+              </a>
+            </p>
+          )}
         </main>
       </body>
     </html>

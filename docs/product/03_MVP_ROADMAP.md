@@ -251,50 +251,70 @@ Complete the match lifecycle and prepare for the RMVFC pilot.
 
 ## 11. MVP completion checklist
 
+Ticked against the completion audit of 2026-08-18, which verified each item in
+code, migrations, the live schema, RLS policies and tests rather than against
+the phase reports that claimed them. Items requiring configuration of a
+production deployment are deliberately **left open** — they cannot be closed
+from inside the repository, and are tracked in
+[`../../TODO.md`](../../TODO.md) and
+[`../operations/production.md`](../operations/production.md).
+
 ### Product
 
-- [ ] Multi-league account and switcher
-- [ ] Private/searchable league settings
-- [ ] Join requests and invitations
-- [ ] One administrator per league and transfer
-- [ ] Versioned guidelines
-- [ ] Match templates and configurable matches
-- [ ] First-come and administrator-approved signup
-- [ ] Automatic and administrator-controlled waitlists
-- [ ] Full confirmed roster visibility
-- [ ] In-app notifications
-- [ ] Cancellation and replacement
-- [ ] Multi-team builder and publication
-- [ ] Attendance and no-show warnings
+- [x] Multi-league account and switcher
+- [x] Private/searchable league settings
+- [x] Join requests and invitations
+- [x] One administrator per league and transfer
+- [x] Versioned guidelines
+- [x] Match templates and configurable matches
+- [x] First-come and administrator-approved signup
+- [x] Automatic and administrator-controlled waitlists
+- [x] Full confirmed roster visibility
+- [x] In-app notifications
+- [x] Cancellation and replacement
+- [x] Multi-team builder and publication
+- [x] Attendance and no-show warnings
 
 ### Security
 
-- [ ] Tenant-aware RLS reviewed
-- [ ] Server admin authorization tested
-- [ ] No service keys exposed
-- [ ] Public search projection reviewed
-- [ ] Gender, attendance, and disciplinary data excluded from public/player payloads
-- [ ] Invite tokens secured and revocable
+- [x] Tenant-aware RLS reviewed — every public table has RLS enabled **and**
+      forced, and none is left without a policy
+- [x] Server admin authorization tested
+- [x] No service keys exposed — the service-role key is referenced in one
+      `server-only` module, enforced structurally by `tests/unit/secret-hygiene`
+- [x] Public search projection reviewed — seven columns; location, settings and
+      creator deliberately excluded
+- [x] Gender, attendance, and disciplinary data excluded from public/player
+      payloads — verified against every player-facing function signature
+- [x] Invite tokens secured and revocable — SHA-256 digest only; the raw token
+      is never stored
 
 ### Quality
 
-- [ ] Lint passes
-- [ ] Type-check passes
-- [ ] Unit tests pass
-- [ ] Integration tests pass
-- [ ] RLS isolation tests pass
-- [ ] Playwright flows pass
-- [ ] Concurrent capacity and promotion tests pass
-- [ ] Timezone/deadline tests pass
+- [x] Lint passes
+- [x] Type-check passes
+- [x] Unit tests pass
+- [x] Integration tests pass
+- [x] RLS isolation tests pass
+- [x] Playwright flows pass
+- [x] Concurrent capacity and promotion tests pass
+- [x] Timezone/deadline tests pass
 
 ### Operations
 
-- [ ] Notification failures observable
-- [ ] Administrator recovery process documented
-- [ ] Production secrets configured
-- [ ] Backup posture understood
-- [ ] Monitoring enabled
-- [ ] Support contact shown
+- [x] Notification failures observable — `reminder.run` / `reminder.failed` /
+      `reminder.skipped` / `reminder.push_incomplete`, a failing run answers
+      non-2xx, and `production.md` §8 documents the triage path
+- [x] Administrator recovery process documented —
+      [`../operations/administrator-recovery.md`](../operations/administrator-recovery.md)
+- [x] Support contact shown — `NEXT_PUBLIC_SUPPORT_EMAIL` in the footer and both
+      error boundaries *(the address itself is set at deploy time)*
+- [ ] **Production secrets configured** — every variable is documented and
+      validated in code; setting them on the deployment is external
+- [ ] **Backup posture understood** — the append-only tables are identified, but
+      retention and a rehearsed restore depend on the Supabase plan
+- [ ] **Monitoring enabled** — `/api/health` and the log events exist; wiring the
+      alerts is external
 
 ## 12. Post-MVP backlog
 

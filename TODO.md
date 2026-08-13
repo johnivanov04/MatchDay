@@ -1,12 +1,38 @@
 # TODO
 
-Open work, ordered by phase. Phase numbers follow
-[`docs/product/03_MVP_ROADMAP.md`](docs/product/03_MVP_ROADMAP.md).
+**All seven MVP phases are implemented.** What is left is deliberately deferred
+work, the post-MVP backlog, and the deployment configuration that cannot be done
+from inside this repository.
 
-Phase 1 is complete; what remains below it is either deliberately deferred or
-newly discovered while building the foundation.
+Phase numbers follow
+[`docs/product/03_MVP_ROADMAP.md`](docs/product/03_MVP_ROADMAP.md). The sections
+below marked *complete* are kept as a record of what each phase closed, not as
+open work.
+
+Before the pilot, read
+[`docs/operations/production.md`](docs/operations/production.md) and
+[`docs/operations/pilot.md`](docs/operations/pilot.md) — they are the current
+list of what an operator must actually do.
 
 ---
+
+## Before the RMVFC pilot — external configuration only
+
+None of these is a code change. See `docs/operations/production.md`.
+
+- [ ] Set `CRON_SECRET` on the deployment and confirm the `vercel.json` cron
+      entry is registered and invoking successfully. **Reminders do not go out
+      until this is done**, and on a Hobby plan the ten-minute cadence needs an
+      upgrade.
+- [ ] Set `NEXT_PUBLIC_SUPPORT_EMAIL` so a blocked player has a route to a
+      human.
+- [ ] Configure a real SMTP sender in Supabase Auth. Sign-in is magic-link only
+      and the built-in sender is rate-limited to a handful of messages an hour.
+- [ ] Confirm backup retention on the Supabase plan, and rehearse one restore.
+- [ ] Set the alerts listed in `production.md` §7 — above all, *absence* of
+      `reminder.run`.
+- [ ] Replace the placeholder `general_area` and `typical_schedule` copy for RMV
+      Football Club with the club's real details.
 
 ## Security follow-ups found while building Phase 2
 
@@ -53,8 +79,8 @@ remembering as patterns rather than one-off bugs:
 
 - [ ] **Gender field values.** No product document enumerates them, so `gender`
       is stored as constrained free text (≤64 characters) rather than inventing a
-      taxonomy. Decide whether leagues need a controlled vocabulary before the
-      team builder surfaces gender distribution in Phase 6.
+      taxonomy. The Phase 6 team builder shows gender only when a league enables
+      the field, so this is not blocking; decide before any league relies on it.
 - [ ] **Profile photo upload.** Phase 1 ships `profile_photo_url` only, matching
       `02 §17`. Uploading needs a Supabase Storage bucket, per-user object
       policies, and image size/type validation.
@@ -67,11 +93,11 @@ remembering as patterns rather than one-off bugs:
       against a real server, so drift is caught.
 - [ ] **Seeded placeholder copy.** `general_area` and `typical_schedule` for
       RMV Football Club are plausible placeholders, not the club's real details.
-      Replace before the pilot.
-- [ ] **PostgreSQL version parity.** The test harness runs PostgreSQL 18;
+      Replace before the pilot — tracked in the pilot checklist above.
+- [x] **PostgreSQL version parity.** The test harness runs PostgreSQL 18;
       `supabase/config.toml` pins `major_version = 17` to match hosted Supabase.
-      Re-run `npm run test:db` against `TEST_DATABASE_URL` pointing at the local
-      Supabase stack before the first deployment.
+      `npm run test:db` has been run against `TEST_DATABASE_URL` pointing at the
+      local Supabase stack — 911 tests pass on the 17-series server.
 
 ## Phase 2 — complete
 
@@ -187,31 +213,49 @@ Carried forward from Phase 5:
 - [ ] **`replacement_needed` is not re-sent** if the administrator ignores it.
       One vacancy, one alert; there is no escalation or reminder of the alert.
 
-## Phase 6–7
+## Phase 6 — complete
 
-- [ ] Team builder and publication (Phase 6).
-- [ ] Attendance, no-show warnings, PWA manifest, monitoring (Phase 7).
+- [x] Team builder: 2–20 teams, names and labels, manual assignment, count-only
+      randomization that never claims balance.
+- [x] Private drafts, explicit publication, a distinct `team_revision`, and a
+      new snapshot whenever a cancellation changes what players can see.
 
-## Future requirement — Web Push
+## Phase 7 — complete
 
-Decided 2026-08-03, **not** implemented in Phase 1. See
+- [x] Attendance: five outcomes, corrections with full audit history, the
+      durable `confirmed_at` participation marker.
+- [x] No-show context on the roster workspace — counts and a date, never a
+      threshold, tier or score.
+- [x] Membership suspension/removal with a reason and a future-match cascade.
+- [x] `completed` match lifecycle; accessibility, mobile and operations passes.
+
+## Web Push — complete (Phase 3)
+
+Decided 2026-08-03, delivered in Phase 3. See
 [ADR 0001](docs/decisions/0001-notifications-in-app-center-plus-web-push.md).
 
-- [ ] `push_subscriptions` table (user-owned, RLS-protected).
-- [ ] Service worker and PWA manifest — required before push works on iOS.
-- [ ] VAPID keys as server-only secrets, same posture as the service-role key.
-- [ ] Delivery-attempt logging, retries, stale-endpoint pruning.
-- [ ] Permission UX asked at a moment the user understands.
-- [ ] Payload discipline: push renders on a lock screen, so it must carry no
-      roster, attendance, disciplinary or gender information.
+- [x] `push_subscriptions` table (user-owned, RLS-protected).
+- [x] Service worker and PWA manifest, plus the PNG and apple-touch icons.
+- [x] VAPID keys as server-only secrets, same posture as the service-role key.
+- [x] Delivery-attempt logging, retries and stale-endpoint invalidation.
+- [x] Permission requested only on a deliberate tap, never on page load.
+- [x] Payload discipline: `PUSH_ELIGIBLE_TYPES` is authoritative, and attendance
+      is deliberately excluded because a payload renders on a lock screen.
 
 ## Engineering backlog
 
-- [ ] Playwright end-to-end tests (`02 §23` lists eight journeys).
+- [x] Playwright end-to-end tests — 149 specs across all seven phases.
+- [x] Concurrency tests for capacity and waitlist promotion — 33 races.
+- [x] Structured logging that excludes gender, attendance and disciplinary data
+      (`src/lib/observability/log.ts` refuses forbidden keys by type).
+- [x] Accessibility audit — axe against ten populated pages, plus the checks axe
+      cannot make.
 - [ ] Component tests for the league switcher and forms.
-- [ ] Concurrency tests for capacity and waitlist promotion (Phase 4 — the
-      hardest correctness requirement in the product).
-- [ ] Error monitoring and structured logging that excludes gender, attendance
-      and disciplinary data.
-- [ ] Rate limiting on the sign-in endpoint.
-- [ ] Accessibility audit once there are real screens to audit.
+- [ ] Rate limiting on the sign-in endpoint. Supabase Auth applies its own
+      limits; this is about the application surface in front of it.
+- [ ] Automated data-retention and deletion. Removing a member's data is a
+      manual database operation today — fine for a 22-player pilot, a blocker
+      for anything wider.
+- [ ] `teams_published` is a `match_lifecycle_status` value nothing can reach.
+      Phase 6 settled that publication is metadata; either implement it or drop
+      the enum value rather than leaving it looking implemented.

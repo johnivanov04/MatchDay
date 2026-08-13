@@ -56,3 +56,35 @@ export function getPublicEnv(): PublicEnv {
 export function getSiteUrl(): string {
   return required('NEXT_PUBLIC_SITE_URL').replace(/\/+$/, '');
 }
+
+/**
+ * Where somebody the product has blocked can reach a human.
+ *
+ * OPTIONAL, AND NULL WHEN UNSET — unlike everything above, this does not throw.
+ * A missing support address is a deployment that has not finished being
+ * configured, not one that should refuse to render; the alternative is a
+ * product that crashes on every page because nobody filled in an email
+ * address.
+ *
+ * DELIBERATELY NOT DEFAULTED to an RMVFC address, or any address. The pilot
+ * league is the first tenant, not the product, and a hard-coded club mailbox
+ * would start receiving another league's support mail the moment a second one
+ * signs up.
+ *
+ * Read as a literal `process.env.NAME` expression so Next.js inlines it into
+ * the client bundle — the error boundary that needs it most is a client
+ * component. It is an address an operator chose to publish, so it carries no
+ * secret.
+ */
+export function getSupportEmail(): string | null {
+  const value = process.env.NEXT_PUBLIC_SUPPORT_EMAIL;
+  if (value === undefined) {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  // A bare `user@host` shape. Enough to keep a stray placeholder like "TODO"
+  // from rendering as a broken mailto link that quietly loses somebody's
+  // report; not an attempt to validate deliverability.
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed) ? trimmed : null;
+}
