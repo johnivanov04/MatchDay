@@ -276,6 +276,39 @@ test.describe('reminders', () => {
   });
 });
 
+test.describe('health check', () => {
+  test('reports the database as reachable using only the anonymous key', async ({ request }) => {
+    // THE TEST THAT WOULD HAVE CAUGHT THE PRODUCTION DEFECT.
+    //
+    // The route probed the `leagues` base table, which `anon` holds no grant
+    // on, so PostgREST refused it with a 401 and every production health check
+    // reported a healthy database as unreachable. Nothing exercised the route,
+    // so nothing noticed.
+    //
+    // This runs against the real Next.js server, the real Supabase stack and
+    // the real anonymous key, so it exercises the grant rather than a mock of
+    // it. If the probe is ever pointed back at a table `anon` cannot read, this
+    // fails with a 503.
+    const response = await request.get('/api/health');
+
+    expect(response.status()).toBe(200);
+    expect(await response.json()).toEqual({ status: 'ok', database: 'ok' });
+  });
+
+  test('is never cached', async ({ request }) => {
+    const response = await request.get('/api/health');
+
+    expect(response.headers()['cache-control']).toBe('no-store, max-age=0');
+  });
+
+  test('reveals nothing beyond the two contract fields', async ({ request }) => {
+    const body = (await (await request.get('/api/health')).json()) as Record<string, unknown>;
+
+    // Unauthenticated, so anything it returns is public.
+    expect(Object.keys(body).sort()).toEqual(['database', 'status']);
+  });
+});
+
 test.describe('Web Push surface', () => {
   test('the manifest and the service worker are served', async ({ request }) => {
     const manifest = await request.get('/manifest.webmanifest');
