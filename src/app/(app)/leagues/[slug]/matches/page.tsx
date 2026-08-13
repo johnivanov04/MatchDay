@@ -1,6 +1,8 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { requireLeagueMemberPage } from '@/lib/auth/page-guards';
+import { getMyAttendanceHistory } from '@/lib/matches/attendance';
+import { ATTENDANCE_OUTCOME_LABELS } from '@/lib/matches/attendance-display';
 import { formatMatchTime } from '@/lib/matches/match-timing';
 import { getPastMatches, getUpcomingMatches } from '@/lib/matches/matches';
 import {
@@ -75,9 +77,13 @@ export default async function LeagueMatchesPage({
 
   // Drafts appear here only for an administrator, and only because Row Level
   // Security returns them — the query is identical for everyone.
-  const [upcoming, past] = await Promise.all([
+  const [upcoming, past, attendance] = await Promise.all([
     getUpcomingMatches(league.id),
     getPastMatches(league.id),
+    // The caller's own attendance in this league, and nobody else's. The
+    // function takes no membership parameter, so asking about somebody else is
+    // not expressible, and the administrator's note is not in its signature.
+    getMyAttendanceHistory(league.id),
   ]);
 
   return (
@@ -126,6 +132,48 @@ export default async function LeagueMatchesPage({
           </ul>
         </section>
       ) : null}
+
+      {/*
+        The caller's own attendance record.
+        
+        A plain list, most recent first. There is deliberately no total, no
+        percentage, no streak and no comparison with anybody else: a player
+        seeing "you have attended 62% of matches" invites them to read a
+        judgement into a number the product never intended as one, and 04 §1
+        keeps judgement with the administrator.
+      */}
+      {attendance.length === 0 ? null : (
+        <section className="flex flex-col gap-3">
+          <h2 className="text-base font-semibold">Your attendance</h2>
+          <ul className="surface-card flex flex-col divide-y divide-[var(--border-subtle)] p-4">
+            {attendance.map((entry) => (
+              <li
+                key={entry.match_id}
+                className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 py-2 first:pt-0 last:pb-0"
+              >
+                <Link
+                  href={`/leagues/${league.slug}/matches/${entry.match_id}`}
+                  className="text-sm underline underline-offset-4"
+                >
+                  {entry.match_title}
+                </Link>
+                <span className="text-xs text-muted">
+                  {new Date(entry.kickoff_at).toLocaleDateString('en-GB', {
+                    day: '2-digit',
+                    month: 'short',
+                    year: 'numeric',
+                  })}{' '}
+                  · {ATTENDANCE_OUTCOME_LABELS[entry.outcome]}
+                </span>
+              </li>
+            ))}
+          </ul>
+          <p className="text-xs text-muted">
+            Recorded by your league administrator. If something looks wrong, speak to them and they
+            can correct it.
+          </p>
+        </section>
+      )}
     </>
   );
 }

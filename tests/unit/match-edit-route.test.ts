@@ -35,6 +35,7 @@ const mocks = vi.hoisted(() => {
     getConfirmedRoster: vi.fn(),
     getSignupEligibility: vi.fn(),
     getPublishedTeams: vi.fn(),
+    getMyAttendance: vi.fn(),
   };
 });
 
@@ -86,6 +87,9 @@ vi.mock('@/lib/matches/teams', () => ({
   // it to return something shaped correctly for an empty read.
   groupPublishedTeams: () => [],
 }));
+// Phase 7 addition to the detail page: the caller's own attendance outcome.
+// `ATTENDANCE_OUTCOME_LABELS` is a plain constant, so only the read is stubbed.
+vi.mock('@/lib/matches/attendance', () => ({ getMyAttendance: mocks.getMyAttendance }));
 
 const { default: EditMatchPage } = await import(
   '@/app/(app)/leagues/[slug]/matches/[matchId]/edit/page'
@@ -223,6 +227,7 @@ beforeEach(() => {
   mocks.getConfirmedRoster.mockResolvedValue([]);
   mocks.getSignupEligibility.mockResolvedValue('MEMBERSHIP_REQUIRED');
   mocks.getPublishedTeams.mockResolvedValue([]);
+  mocks.getMyAttendance.mockResolvedValue(null);
 });
 
 describe('the edit route', () => {

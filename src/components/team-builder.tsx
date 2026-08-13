@@ -92,7 +92,7 @@ function PlayerRow({
         <button
           type="submit"
           disabled={pending}
-          className="min-h-9 rounded-lg border border-[var(--border-subtle)] px-2.5 py-1 text-xs font-semibold disabled:opacity-60"
+          className="min-h-11 rounded-lg border border-[var(--border-subtle)] px-2.5 py-1 text-xs font-semibold disabled:opacity-60"
           title={state?.ok === false ? state.message : undefined}
         >
           {pending ? '…' : 'Save'}
@@ -130,7 +130,7 @@ function TeamCard({
           <button
             type="button"
             onClick={() => setEditing((value) => !value)}
-            className="min-h-9 rounded-lg border border-[var(--border-subtle)] px-2.5 py-1 text-xs font-semibold"
+            className="min-h-11 rounded-lg border border-[var(--border-subtle)] px-2.5 py-1 text-xs font-semibold"
           >
             Rename
           </button>
@@ -140,7 +140,7 @@ function TeamCard({
             <button
               type="submit"
               disabled={removing}
-              className="min-h-9 rounded-lg border border-[var(--border-subtle)] px-2.5 py-1 text-xs font-semibold disabled:opacity-60"
+              className="min-h-11 rounded-lg border border-[var(--border-subtle)] px-2.5 py-1 text-xs font-semibold disabled:opacity-60"
             >
               {removing ? '…' : 'Delete'}
             </button>

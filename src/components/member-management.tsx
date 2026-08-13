@@ -47,7 +47,7 @@ export function JoinRequestRow({ entry }: { entry: JoinRequestSummary }) {
           <button
             type="submit"
             disabled={pending}
-            className="min-h-10 rounded-lg bg-pitch-600 px-3 py-2 text-sm font-semibold text-white hover:bg-pitch-700 disabled:opacity-60"
+            className="min-h-11 rounded-lg bg-pitch-600 px-3 py-2 text-sm font-semibold text-white hover:bg-pitch-700 disabled:opacity-60"
           >
             Approve
           </button>
@@ -58,7 +58,7 @@ export function JoinRequestRow({ entry }: { entry: JoinRequestSummary }) {
           <button
             type="submit"
             disabled={pending}
-            className="min-h-10 rounded-lg border border-[var(--border-subtle)] px-3 py-2 text-sm font-semibold disabled:opacity-60"
+            className="min-h-11 rounded-lg border border-[var(--border-subtle)] px-3 py-2 text-sm font-semibold disabled:opacity-60"
           >
             Reject
           </button>
@@ -106,38 +106,112 @@ export function MemberRow({
         </div>
       </div>
 
+      {/* The reason the administrator last gave. Shown back to them because a
+          suspension they set three weeks ago is exactly the thing they will
+          need when deciding whether to lift it — and because it is the only
+          place it is readable. It never reaches the member. */}
+      {membership.status_reason === null ? null : (
+        <p className="text-xs text-muted">
+          Reason: {membership.status_reason}
+          {membership.status === 'suspended' && membership.suspended_until !== null
+            ? ` · until ${new Date(membership.suspended_until).toLocaleDateString('en-GB', {
+                day: '2-digit',
+                month: 'short',
+                year: 'numeric',
+              })}`
+            : ''}
+        </p>
+      )}
+
       {/* The administrator's own membership cannot be changed here: removing it
           would leave the league with no administrator, which the database
-          refuses at COMMIT. Transfer administration first. */}
+          refuses outright with ADMIN_TRANSFER_INVALID. Transfer administration
+          first. */}
       {isSelf ? null : (
-        <form action={submit} className="flex items-center gap-2">
+        <form action={submit} className="flex flex-col gap-2">
           <input type="hidden" name="league_id" value={leagueId} />
           <input type="hidden" name="membership_id" value={membership.id} />
-          <label htmlFor={`status-${membership.id}`} className="sr-only">
-            Membership status
+
+          <div className="flex items-center gap-2">
+            <label htmlFor={`status-${membership.id}`} className="sr-only">
+              Membership status
+            </label>
+            <select
+              id={`status-${membership.id}`}
+              name="status"
+              defaultValue={membership.status === 'pending' ? 'active' : membership.status}
+              className="min-h-11 flex-1 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-raised)] px-2 py-1.5 text-sm"
+            >
+              {/* No `pending` option. It is a state a join request or an
+                  invitation puts somebody in, not a decision an administrator
+                  makes about an existing member, and the database refuses it. */}
+              <option value="active">Active</option>
+              <option value="suspended">Suspended</option>
+              <option value="removed">Removed</option>
+            </select>
+            <button
+              type="submit"
+              disabled={pending}
+              className="min-h-11 rounded-lg border border-[var(--border-subtle)] px-3 py-1.5 text-sm font-semibold disabled:opacity-60"
+            >
+              Update
+            </button>
+          </div>
+
+          <label htmlFor={`reason-${membership.id}`} className="sr-only">
+            Reason for the change
           </label>
-          <select
-            id={`status-${membership.id}`}
-            name="status"
-            defaultValue={membership.status}
-            className="min-h-10 flex-1 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-raised)] px-2 py-1.5 text-sm"
-          >
-            <option value="active">Active</option>
-            <option value="pending">Pending</option>
-            <option value="suspended">Suspended</option>
-            <option value="removed">Removed</option>
-          </select>
-          <button
-            type="submit"
-            disabled={pending}
-            className="min-h-10 rounded-lg border border-[var(--border-subtle)] px-3 py-1.5 text-sm font-semibold disabled:opacity-60"
-          >
-            Update
-          </button>
+          <input
+            id={`reason-${membership.id}`}
+            name="reason"
+            type="text"
+            maxLength={500}
+            placeholder="Reason (required to suspend or remove)"
+            className="min-h-11 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-raised)] px-2 py-1.5 text-sm"
+            aria-describedby={`reason-hint-${membership.id}`}
+            aria-invalid={state?.ok === false && state.fieldErrors['reason'] !== undefined}
+          />
+          {/* The field-level message. Without it a missing reason surfaced as
+              the generic "check the highlighted fields", with nothing
+              highlighted and nothing said about which field. */}
+          {state?.ok === false && state.fieldErrors['reason'] !== undefined ? (
+            <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+              {state.fieldErrors['reason']}
+            </p>
+          ) : null}
+          <p id={`reason-hint-${membership.id}`} className="text-xs text-muted">
+            Only administrators can see this. Suspending or removing somebody also releases the
+            spots they hold in matches that have not been played yet.
+          </p>
+
+          <label htmlFor={`until-${membership.id}`} className="text-xs text-muted">
+            Suspend until (optional)
+          </label>
+          <input
+            id={`until-${membership.id}`}
+            name="suspended_until"
+            type="date"
+            defaultValue={
+              membership.suspended_until === null
+                ? ''
+                : (membership.suspended_until.slice(0, 10) ?? '')
+            }
+            className="min-h-11 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-raised)] px-2 py-1.5 text-sm"
+            aria-describedby={`until-hint-${membership.id}`}
+          />
+          <p id={`until-hint-${membership.id}`} className="text-xs text-muted">
+            A note of when you intend to lift it. Nothing happens automatically on that date —
+            reactivating somebody is always your decision.
+          </p>
         </form>
       )}
 
-      {state?.ok === false ? (
+      {/* The whole-form message, and only when no field carries its own.
+          Rendering both put two `role="alert"` regions in one list item, so a
+          screen reader announced "Give a reason" and then "check the
+          highlighted fields" — the second saying less than the first and
+          contradicting its specificity. */}
+      {state?.ok === false && Object.keys(state.fieldErrors).length === 0 ? (
         <p role="alert" className="text-sm text-red-600 dark:text-red-400">
           {state.message}
         </p>
@@ -323,7 +397,7 @@ export function InviteRow({
           <button
             type="submit"
             disabled={pending}
-            className="min-h-10 rounded-lg border border-[var(--border-subtle)] px-3 py-1.5 text-sm font-semibold disabled:opacity-60"
+            className="min-h-11 rounded-lg border border-[var(--border-subtle)] px-3 py-1.5 text-sm font-semibold disabled:opacity-60"
           >
             {pending ? 'Revoking…' : 'Revoke'}
           </button>

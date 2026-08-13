@@ -1,4 +1,4 @@
-import { expect, expectNoServerError, test } from '../support/fixtures';
+import { expect, expectNoServerError, test, settledUrl } from '../support/fixtures';
 
 /**
  * Cross-phase authorization and leakage regression.
@@ -109,12 +109,13 @@ test.describe('identifiers reveal nothing', () => {
     const page = await asUser(member.email);
 
     // The caller's own league, but a match id from another one.
-    await page.goto(`/leagues/${home.slug}/matches/${match.id}`);
-    const crossLeague = page.url();
+    const crossLeague = await settledUrl(page, `/leagues/${home.slug}/matches/${match.id}`);
 
     // A match id that does not exist anywhere.
-    await page.goto(`/leagues/${home.slug}/matches/aaaaaaaa-aaaa-4aaa-8aaa-0000000000ff`);
-    const unknown = page.url();
+    const unknown = await settledUrl(
+      page,
+      `/leagues/${home.slug}/matches/aaaaaaaa-aaaa-4aaa-8aaa-0000000000ff`,
+    );
 
     expect(crossLeague).toBe(unknown);
     await expectNoServerError(page);
@@ -141,11 +142,11 @@ test.describe('identifiers reveal nothing', () => {
 
     const page = await asUser(member.email);
 
-    await page.goto(`/leagues/${league.slug}/matches/${draft.id}`);
-    const draftUrl = page.url();
-
-    await page.goto(`/leagues/${league.slug}/matches/aaaaaaaa-aaaa-4aaa-8aaa-0000000000fe`);
-    const unknownUrl = page.url();
+    const draftUrl = await settledUrl(page, `/leagues/${league.slug}/matches/${draft.id}`);
+    const unknownUrl = await settledUrl(
+      page,
+      `/leagues/${league.slug}/matches/aaaaaaaa-aaaa-4aaa-8aaa-0000000000fe`,
+    );
 
     expect(draftUrl).toBe(unknownUrl);
   });

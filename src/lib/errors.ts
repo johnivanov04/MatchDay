@@ -1,3 +1,5 @@
+import { describeError, logError, logInfo } from '@/lib/observability/log';
+
 /**
  * Stable domain error codes (02 §21). The full list is defined here even
  * though Phase 1 can only raise a subset, so later phases add behaviour rather
@@ -41,6 +43,12 @@ export const DOMAIN_ERROR_CODES = [
   // Raised by the two lifecycle guard triggers rather than by a function.
   'MATCH_TRANSITION_INVALID',
   'SIGNUP_TRANSITION_INVALID',
+  // Phase 7. Attendance and the administrator's membership decisions.
+  'ATTENDANCE_NOT_OPEN',
+  'ATTENDANCE_NOT_ELIGIBLE',
+  'ATTENDANCE_OUTCOME_INVALID',
+  'ATTENDANCE_REVISION_STALE',
+  'ATTENDANCE_INCOMPLETE',
 ] as const;
 
 export type DomainErrorCode = (typeof DOMAIN_ERROR_CODES)[number];
@@ -95,6 +103,17 @@ const USER_FACING_MESSAGES: Record<DomainErrorCode, string> = {
   // believing they were released when nobody had been told.
   SIGNUP_CANCELLATION_UNAVAILABLE:
     'Cancelling a confirmed spot is not available yet. Please contact your league administrator.',
+  ATTENDANCE_NOT_OPEN: 'Attendance can be recorded once the match has finished.',
+  ATTENDANCE_NOT_ELIGIBLE: 'That player was not confirmed for this match.',
+  // Names the conflict rather than the rule, because the administrator can see
+  // the player's status on the same screen and the two must agree.
+  ATTENDANCE_OUTCOME_INVALID: 'That outcome does not match how this player left the match.',
+  // Actionable, like MATCH_REVISION_STALE: the fix is to reload, and saying so
+  // stops somebody resubmitting a decision that would overwrite one they never
+  // saw.
+  ATTENDANCE_REVISION_STALE:
+    'Somebody else changed this player’s attendance while you were looking at it. Reload the page and try again.',
+  ATTENDANCE_INCOMPLETE: 'Record an outcome for everybody before completing the match.',
 };
 
 export class DomainError extends Error {
@@ -138,6 +157,12 @@ export function actionSuccess<T>(data?: T): ActionResult<T | undefined> {
 
 export function actionFailure(error: unknown): ActionResult<never> {
   if (isDomainError(error)) {
+    // The stable code and nothing else. A refusal is usually the product
+    // working — somebody tried to join a full match — so it is `info`, and its
+    // value is in the aggregate: `CAPACITY_EXCEEDED` five hundred times in an
+    // hour is a story worth reading.
+    logInfo('action.refused', { code: error.code });
+
     return {
       ok: false,
       code: error.code,
@@ -148,7 +173,14 @@ export function actionFailure(error: unknown): ActionResult<never> {
 
   // Anything unrecognised is reported generically. Database and library
   // messages can name tables, constraints and other tenants' identifiers, and
-  // none of that belongs in a client response.
+  // none of that belongs in a client response — or in a log line, which is why
+  // `describeError` returns the class and code and discards the message.
+  //
+  // This is the branch worth alerting on: every *expected* refusal is a
+  // DomainError above, so reaching here means something threw that nobody
+  // anticipated.
+  logError('action.failed', describeError(error));
+
   return {
     ok: false,
     code: 'NOT_AUTHORIZED',

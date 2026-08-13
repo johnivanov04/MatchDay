@@ -1,7 +1,15 @@
 import type { ReactNode } from 'react';
 
+/**
+ * `min-h-11` is 44px, the touch-target floor.
+ *
+ * Padding and line height alone came to 42, which nobody notices reading a form
+ * on a laptop and everybody feels tapping a select on a touchline. `text-base`
+ * (16px) is also load-bearing: iOS Safari zooms the whole page when a focused
+ * input is smaller than that, and the zoom does not undo itself.
+ */
 export const inputClassName =
-  'w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-raised)] px-3 py-2.5 text-base text-[var(--text-primary)] placeholder:text-muted';
+  'w-full min-h-11 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-raised)] px-3 py-2.5 text-base text-[var(--text-primary)] placeholder:text-muted';
 
 export function Field({
   label,

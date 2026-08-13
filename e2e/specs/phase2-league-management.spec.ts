@@ -1,4 +1,4 @@
-import { expect, expectNoServerError, expectRedirectedTo, test } from '../support/fixtures';
+import { expect, expectNoServerError, expectRedirectedTo, test, settledUrl } from '../support/fixtures';
 
 /**
  * Phase 2 — league creation, discovery, join requests, invitations, member
@@ -354,11 +354,8 @@ test('a cross-league administrator is refused, exactly as a stranger is', async 
 
   const page = await asUser(mine.admin.email);
 
-  await page.goto(`/leagues/${theirs.slug}/settings`);
-  const crossLeagueUrl = page.url();
-
-  await page.goto('/leagues/not-a-league-at-all/settings');
-  const unknownUrl = page.url();
+  const crossLeagueUrl = await settledUrl(page, `/leagues/${theirs.slug}/settings`);
+  const unknownUrl = await settledUrl(page, '/leagues/not-a-league-at-all/settings');
 
   expect(crossLeagueUrl).toBe(unknownUrl);
   await expectNoServerError(page);

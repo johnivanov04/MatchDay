@@ -1,5 +1,58 @@
 # Decision Log — Matchday
 
+## 2026-08-17 — Re-entering the same match after cancelling
+
+### Context
+
+Phase 7 found that a cancellation was **permanent**: `cancel_spot()` wrote
+`canceled_at`, nothing cleared it, and every route back into the same match
+failed `match_signups_cancellation_fields_reserved`. Neither the player nor the
+administrator could undo a withdrawal, in a product whose subject is people
+dropping in and out of pickup matches.
+
+That was a defect, not a decision — no document proposed it. But fixing it
+forces a question `02_FUNCTIONAL_SPECIFICATION.md` §9 never answered: what does
+re-entry mean, and what happens to the record of the cancellation?
+
+### Decision
+
+A member who cancelled — **on time or late** — may re-enter the same match
+through every ordinary route, subject to every ordinary rule. The live signup
+row reflects only the current state; the history is never erased.
+
+- **A late withdrawal does not lock anybody out.** `withdrawn_late` is a fact
+  about a past decision, not a sanction. A product-imposed lockout would be an
+  automatic penalty, which `04 §1` reserves for the administrator.
+- **No reserved seat.** Somebody returning to a full match joins the waitlist
+  behind whoever took their place.
+- **One `match_signups` row, always.** Re-entry updates it; a second row is
+  never created, so capacity accounting cannot double-count anybody.
+- **`confirmed_at` is never cleared**, by anything. It is the durable "was ever
+  confirmed" marker that makes the attendance register answerable, and somebody
+  who was only ever waitlisted never acquires one.
+- **`canceled_at` and `cancellation_reason` are cleared** on re-entry, because
+  they describe the row's *current* state. Everything durable — the audit event
+  with its `late` classification, the player's receipt, the administrator's
+  late-withdrawal alert, the attendance record — lives elsewhere and survives.
+
+Attendance therefore follows current state: a player who cancelled, rejoined and
+played is recorded as **attended**, which is the only outcome matching reality.
+
+### Consequences
+
+- Two cancellations produce two audit events and two receipts, distinguishable
+  by classification.
+- A member who withdraws late repeatedly is not throttled by the product. The
+  administrator sees the counts on the roster workspace and decides.
+- Cancellations from before this migration are not recoverable: no historical
+  row carries a `confirmed_at` unless it was confirmed at the time.
+
+Full record:
+[`docs/decisions/0002-same-match-re-entry-after-cancellation.md`](../decisions/0002-same-match-re-entry-after-cancellation.md).
+Verified by `tests/db/signup-reentry.test.ts` (26 tests).
+
+---
+
 ## 2026-08-05 — Web Push moved into Phase 3 and implemented
 
 ### Context

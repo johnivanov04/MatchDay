@@ -423,6 +423,42 @@ export class TestDataFactory {
     );
   }
 
+  /**
+   * Moves a whole match into the past, so attendance can be recorded for it.
+   *
+   * Called *after* seating players, never before: signup closes hours before
+   * kickoff, so a match created in the past cannot be joined and a fixture that
+   * tried would be building a state the product cannot reach.
+   *
+   * Every timestamp shifts by the same interval, so the ordering constraints —
+   * arrival before kickoff, cutoff before kickoff, signup close before kickoff
+   * — all still hold, and the cancellation classification of anybody who
+   * withdrew earlier is unchanged.
+   */
+  async endMatch(match: TestMatch, daysAgo = 2): Promise<void> {
+    // The shift is computed from where the match currently sits, not a fixed
+    // interval: a match created 72 hours ahead and moved back "2 days" is still
+    // a day in the future, which is how the first draft of this helper produced
+    // ATTENDANCE_NOT_OPEN from a fixture that read as if it had ended.
+    await this.client.query(
+      `update public.matches m
+          set match_date = (m.match_date - shift.amount)::date,
+              arrival_at = m.arrival_at - shift.amount,
+              kickoff_at = m.kickoff_at - shift.amount,
+              end_at = m.end_at - shift.amount,
+              signup_closes_at = m.signup_closes_at - shift.amount,
+              cancellation_cutoff_at = m.cancellation_cutoff_at - shift.amount,
+              roster_publish_target_at = m.roster_publish_target_at - shift.amount,
+              priority_window_ends_at = m.priority_window_ends_at - shift.amount
+        from (
+          select (select end_at from public.matches where id = $1)
+                 - (now() - $2::interval) as amount
+        ) shift
+        where m.id = $1`,
+      [match.id, `${String(daysAgo)} days`],
+    );
+  }
+
   /** Schedules a reminder that is already due. */
   async createDueReminder(match: TestMatch): Promise<string> {
     await this.client.query(

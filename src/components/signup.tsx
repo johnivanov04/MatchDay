@@ -216,7 +216,32 @@ export function SignupControls({
     (state) => state?.ok === false,
   );
 
-  if (eligibility !== 'ELIGIBLE') {
+  const status = outcome?.status ?? null;
+  const holdsSpot = status === 'confirmed';
+  const holdsWaitlistPlace = status === 'waitlisted';
+  const alreadyResponded = status === 'confirmed' || status === 'waitlisted' || status === 'interested';
+
+  /**
+   * ELIGIBILITY GOVERNS JOINING, NOT LEAVING.
+   *
+   * Returning early on any non-`ELIGIBLE` code — which is what this did — meant
+   * a confirmed player lost the cancel button the moment the administrator
+   * published the roster (`MATCH_NOT_OPEN`) or signup closed (`SIGNUP_CLOSED`).
+   * Those are precisely the hours when withdrawing matters most: the roster is
+   * set, the teams may be out, and the administrator needs to know now to find
+   * a replacement. `cancel_spot()` has always allowed it — it has no
+   * match-status gate at all, deliberately — so the database was willing and
+   * only the interface refused.
+   *
+   * The other codes still stop everything, because they mean the caller is not
+   * entitled to a place at all rather than that the match has moved on:
+   * `MEMBERSHIP_REQUIRED`, `GUIDELINES_NOT_ACCEPTED` and `AUTH_REQUIRED`.
+   * A canceled match never reaches this component.
+   */
+  const closedButStillLeavable = eligibility === 'MATCH_NOT_OPEN' || eligibility === 'SIGNUP_CLOSED';
+  const mayCancel = (holdsSpot || holdsWaitlistPlace) && closedButStillLeavable;
+
+  if (eligibility !== 'ELIGIBLE' && !mayCancel) {
     return (
       <p role="status" className="rounded-lg border border-[var(--border-subtle)] px-3 py-2 text-sm">
         {BLOCKED_MESSAGES[eligibility]}
@@ -224,10 +249,35 @@ export function SignupControls({
     );
   }
 
-  const status = outcome?.status ?? null;
-  const holdsSpot = status === 'confirmed';
-  const holdsWaitlistPlace = status === 'waitlisted';
-  const alreadyResponded = status === 'confirmed' || status === 'waitlisted' || status === 'interested';
+  // Closed to new signups, but this player still holds a place and may leave it.
+  if (mayCancel) {
+    return (
+      <div className="flex flex-col gap-3">
+        {/* Its own wording, not `BLOCKED_MESSAGES`. "This match is not
+            accepting responses" sitting directly above a Cancel my spot button
+            contradicts it, and the player has to work out which of the two to
+            believe. */}
+        <p
+          role="status"
+          className="rounded-lg border border-[var(--border-subtle)] px-3 py-2 text-sm"
+        >
+          {eligibility === 'SIGNUP_CLOSED'
+            ? 'Signup has closed, so nobody new can join.'
+            : 'The roster is set, so nobody new can join.'}{' '}
+          {holdsSpot
+            ? 'You still have your spot — if you cannot make it, cancel below so your administrator can find a replacement.'
+            : 'You are still on the waitlist and can leave it below.'}
+        </p>
+        <CancelSpotControl
+          matchId={matchId}
+          holdsSpot={holdsSpot}
+          waitlistPosition={outcome?.waitlist_position ?? null}
+          cutoffLabel={cancellationCutoffLabel}
+          isLate={cancellationIsLate}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col gap-3">

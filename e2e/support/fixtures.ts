@@ -61,6 +61,28 @@ export async function expectNoServerError(page: Page): Promise<void> {
   await expect(page.locator('body')).not.toContainText('500');
 }
 
+/**
+ * Navigates and returns the URL the browser *ends up* on.
+ *
+ * `page.goto()` followed by `page.url()` is not that, and stopped being that
+ * when Phase 7 added `loading.tsx`. A route with a loading boundary streams:
+ * Next.js commits the requested URL and paints the skeleton immediately, then
+ * the server component runs and its `redirect()` arrives afterwards. Reading
+ * the URL between those two moments gives the address that was asked for
+ * rather than the one the guard sent the caller to.
+ *
+ * That matters here specifically because the indistinguishability tests compare
+ * two such URLs and require them to be identical — and while the skeleton is on
+ * screen they trivially differ, since each is still showing its own request.
+ * The redirects themselves are unaffected, which is why every assertion built
+ * on `toHaveURL` (which auto-waits) kept passing throughout.
+ */
+export async function settledUrl(page: Page, path: string): Promise<string> {
+  await page.goto(path);
+  await page.waitForLoadState('networkidle');
+  return page.url();
+}
+
 /** Navigates and asserts the caller was redirected to `expectedPath`. */
 export async function expectRedirectedTo(
   page: Page,

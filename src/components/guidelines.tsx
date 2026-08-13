@@ -179,7 +179,7 @@ export function PublishGuidelineButton({
       <button
         type="submit"
         disabled={pending}
-        className="min-h-10 rounded-lg bg-pitch-600 px-3 py-2 text-sm font-semibold text-white hover:bg-pitch-700 disabled:opacity-60"
+        className="min-h-11 rounded-lg bg-pitch-600 px-3 py-2 text-sm font-semibold text-white hover:bg-pitch-700 disabled:opacity-60"
       >
         {pending ? 'Publishing…' : 'Publish'}
       </button>
@@ -208,7 +208,7 @@ export function ArchiveGuidelineButton({
       <button
         type="submit"
         disabled={pending}
-        className="min-h-10 rounded-lg border border-[var(--border-subtle)] px-3 py-2 text-sm font-semibold disabled:opacity-60"
+        className="min-h-11 rounded-lg border border-[var(--border-subtle)] px-3 py-2 text-sm font-semibold disabled:opacity-60"
       >
         {pending ? 'Archiving…' : 'Archive'}
       </button>

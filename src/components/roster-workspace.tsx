@@ -11,6 +11,7 @@ import {
 } from '@/server/actions/signups';
 import type {
   AddableMember,
+  MembershipAttendanceSummary,
   ReplacementState,
   RosterAdminEntry,
   SignupStatus,
@@ -25,9 +26,10 @@ import type {
  * fields, so this file never has to know the league settings — it renders what
  * it is given.
  *
- * There is no attendance count and no no-show warning. 02 §11 lists both, but
- * Phase 7 owns attendance and no such data exists; showing a zero would be a
- * fabricated statistic an administrator might act on.
+ * Phase 7 supplies the attendance context 02 §11 lists and Phase 4 had to omit.
+ * It is counts and a date, rendered as a sentence — see `AttendanceContext`
+ * below for why there is no tier, colour or score, and why nothing on this
+ * screen acts on it.
  */
 
 function fullName(entry: { first_name: string; last_name: string }): string {
@@ -68,7 +70,7 @@ function DecisionButton({
       <button
         type="submit"
         disabled={pending}
-        className="inline-flex min-h-9 items-center rounded-lg border border-[var(--border-subtle)] px-2.5 py-1 text-xs font-semibold disabled:opacity-60"
+        className="inline-flex min-h-11 items-center rounded-lg border border-[var(--border-subtle)] px-2.5 py-1 text-xs font-semibold disabled:opacity-60"
         title={state?.ok === false ? state.message : undefined}
       >
         {pending ? '…' : label}
@@ -77,14 +79,60 @@ function DecisionButton({
   );
 }
 
+/**
+ * What this player's attendance record says, for an administrator choosing a
+ * roster.
+ *
+ * FACTS, IN A SENTENCE. No badge, no colour scale, no tier, no ratio and no
+ * score. 04 §1 settled that the product warns and the administrator decides,
+ * and every one of those devices is the product deciding — a red dot at three
+ * no-shows is a disciplinary threshold, and no approved document defines one.
+ *
+ * Nothing on this screen reads this value. It sits beside the name while a
+ * human makes a choice, and the Confirm, Waitlist and Not selected buttons
+ * behave identically whether it says nothing or twenty.
+ */
+function AttendanceContext({ summary }: { summary: MembershipAttendanceSummary | undefined }) {
+  if (summary === undefined || summary.recorded_count === 0) {
+    return null;
+  }
+
+  if (summary.no_show_count === 0) {
+    return (
+      <p className="text-xs text-muted">
+        {summary.attended_count} of {summary.recorded_count} recorded matches attended
+      </p>
+    );
+  }
+
+  const last =
+    summary.last_no_show_at === null
+      ? null
+      : new Date(summary.last_no_show_at).toLocaleDateString('en-GB', {
+          day: '2-digit',
+          month: 'short',
+          year: 'numeric',
+        });
+
+  return (
+    <p className="text-xs text-amber-700 dark:text-amber-300">
+      Did not attend {summary.no_show_count} of {summary.recorded_count} recorded{' '}
+      {summary.recorded_count === 1 ? 'match' : 'matches'}
+      {last === null ? '' : `, most recently ${last}`}
+    </p>
+  );
+}
+
 function PlayerRow({
   entry,
   leagueId,
   matchId,
+  summary,
 }: {
   entry: RosterAdminEntry;
   leagueId: string;
   matchId: string;
+  summary: MembershipAttendanceSummary | undefined;
 }) {
   const context = [
     entry.waitlist_position === null ? null : `#${String(entry.waitlist_position)}`,
@@ -108,6 +156,7 @@ function PlayerRow({
             Override: {entry.override_reason}
           </p>
         )}
+        <AttendanceContext summary={summary} />
       </div>
       <div className="flex flex-wrap gap-1.5">
         {entry.status === 'confirmed' ? null : (
@@ -148,12 +197,14 @@ function Group({
   leagueId,
   matchId,
   empty,
+  summaries,
 }: {
   title: string;
   entries: RosterAdminEntry[];
   leagueId: string;
   matchId: string;
   empty: string;
+  summaries: Record<string, MembershipAttendanceSummary>;
 }) {
   return (
     <section className="surface-card p-4">
@@ -170,6 +221,7 @@ function Group({
               entry={entry}
               leagueId={leagueId}
               matchId={matchId}
+              summary={summaries[entry.membership_id]}
             />
           ))}
         </ul>
@@ -246,7 +298,7 @@ function WaitlistOrder({
                   onClick={() => move(index, -1)}
                   disabled={index === 0}
                   aria-label={`Move ${fullName(entry)} up`}
-                  className="min-h-9 rounded-lg border border-[var(--border-subtle)] px-2 text-xs disabled:opacity-40"
+                  className="min-h-11 rounded-lg border border-[var(--border-subtle)] px-2 text-xs disabled:opacity-40"
                 >
                   ↑
                 </button>
@@ -255,7 +307,7 @@ function WaitlistOrder({
                   onClick={() => move(index, 1)}
                   disabled={index === order.length - 1}
                   aria-label={`Move ${fullName(entry)} down`}
-                  className="min-h-9 rounded-lg border border-[var(--border-subtle)] px-2 text-xs disabled:opacity-40"
+                  className="min-h-11 rounded-lg border border-[var(--border-subtle)] px-2 text-xs disabled:opacity-40"
                 >
                   ↓
                 </button>
@@ -479,6 +531,7 @@ export function RosterWorkspace({
   leagueId,
   matchId,
   entries,
+  attendanceSummaries,
   addableMembers,
   capacity,
   rosterRevision,
@@ -488,6 +541,7 @@ export function RosterWorkspace({
   leagueId: string;
   matchId: string;
   entries: RosterAdminEntry[];
+  attendanceSummaries: Record<string, MembershipAttendanceSummary>;
   addableMembers: AddableMember[];
   capacity: number;
   rosterRevision: number;
@@ -511,6 +565,7 @@ export function RosterWorkspace({
         entries={of('interested')}
         leagueId={leagueId}
         matchId={matchId}
+        summaries={attendanceSummaries}
         empty="Nobody is waiting on a decision."
       />
       <Group
@@ -518,6 +573,7 @@ export function RosterWorkspace({
         entries={confirmed}
         leagueId={leagueId}
         matchId={matchId}
+        summaries={attendanceSummaries}
         empty="Nobody is confirmed yet."
       />
       <Group
@@ -525,6 +581,7 @@ export function RosterWorkspace({
         entries={waitlisted}
         leagueId={leagueId}
         matchId={matchId}
+        summaries={attendanceSummaries}
         empty="The waitlist is empty."
       />
       <WaitlistOrder entries={waitlisted} leagueId={leagueId} matchId={matchId} />
@@ -541,6 +598,7 @@ export function RosterWorkspace({
         entries={of('not_selected')}
         leagueId={leagueId}
         matchId={matchId}
+        summaries={attendanceSummaries}
         empty="Nobody has been passed over."
       />
       <Group
@@ -548,6 +606,7 @@ export function RosterWorkspace({
         entries={of('not_available')}
         leagueId={leagueId}
         matchId={matchId}
+        summaries={attendanceSummaries}
         empty="Nobody has said they cannot play."
       />
       <Group
@@ -555,6 +614,7 @@ export function RosterWorkspace({
         entries={[...of('canceled'), ...of('withdrawn_late')]}
         leagueId={leagueId}
         matchId={matchId}
+        summaries={attendanceSummaries}
         empty="Nobody has cancelled."
       />
 

@@ -87,7 +87,7 @@ export function NotificationRowItem({ notification }: { notification: Notificati
           <button
             type="submit"
             disabled={markingRead || markingUnread}
-            className="text-sm underline underline-offset-4 disabled:opacity-60"
+            className="inline-flex min-h-11 items-center text-sm underline underline-offset-4 disabled:opacity-60"
           >
             {markingRead || markingUnread
               ? 'Working…'
@@ -102,7 +102,7 @@ export function NotificationRowItem({ notification }: { notification: Notificati
           <button
             type="submit"
             disabled={archiving || restoring}
-            className="text-sm underline underline-offset-4 disabled:opacity-60"
+            className="inline-flex min-h-11 items-center text-sm underline underline-offset-4 disabled:opacity-60"
           >
             {archiving || restoring ? 'Working…' : archived ? 'Restore' : 'Archive'}
           </button>
@@ -130,7 +130,7 @@ export function MarkAllReadButton({ unreadCount }: { unreadCount: number }) {
       <button
         type="submit"
         disabled={pending}
-        className="min-h-10 rounded-lg border border-[var(--border-subtle)] px-3 py-2 text-sm font-semibold disabled:opacity-60"
+        className="min-h-11 rounded-lg border border-[var(--border-subtle)] px-3 py-2 text-sm font-semibold disabled:opacity-60"
       >
         {pending ? 'Marking…' : `Mark all ${unreadCount} as read`}
       </button>

@@ -159,6 +159,33 @@ export const memberEmailSchema = trimmed()
 export const membershipStatusSchema = z.enum(['pending', 'active', 'suspended', 'removed']);
 
 /**
+ * Why an administrator suspended, removed or reactivated a member.
+ *
+ * 500 characters, matching the column check. Optional here and required by the
+ * action for anything but a reactivation, so the two failure modes — "you wrote
+ * too much" and "you have to say why" — read differently.
+ */
+export const membershipStatusReasonSchema = optionalText(500);
+
+/**
+ * When the administrator intends to lift a suspension.
+ *
+ * Informational: nothing expires it, and reactivation stays a deliberate act.
+ * Blank is the normal case — an indefinite suspension — so an empty string
+ * becomes null rather than a validation error.
+ */
+export const suspendedUntilSchema = trimmed().transform((value): string | null => {
+  if (value === '') {
+    return null;
+  }
+
+  // `<input type="date">` submits `YYYY-MM-DD`. Interpreted at the end of that
+  // day so "suspended until the 30th" includes the 30th.
+  const parsed = new Date(`${value}T23:59:59`);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+});
+
+/**
  * Sanitises a discovery query before it reaches PostgREST.
  *
  * `%`, `_` and `,` are stripped rather than escaped: `%` and `_` are `ILIKE`
