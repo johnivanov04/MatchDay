@@ -89,8 +89,14 @@ no environment name, no counts. Point the platform's health check at it.
 
 It runs a real query rather than a connection test, because a pool that connects
 but cannot read is exactly the failure a health check exists to catch. The query
-goes through the anonymous client, so Row Level Security applies and it can only
-ever see what a signed-out visitor could.
+goes through the anonymous client and reads `searchable_leagues_public` — the
+one object anonymous discovery is allowed to read, so the probe sees only what a
+signed-out visitor could.
+
+**It must not be pointed at the `leagues` base table.** `anon` holds no grant on
+it, so PostgREST refuses with a 401 before Row Level Security is consulted, and
+the endpoint reports a perfectly healthy database as `unreachable`. That is not
+hypothetical — it is how this route first shipped to production.
 
 ---
 
