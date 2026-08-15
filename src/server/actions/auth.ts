@@ -2,6 +2,11 @@
 
 import { redirect } from 'next/navigation';
 import { z } from 'zod';
+import {
+  EMAIL_OTP_ERROR_MESSAGE,
+  isValidEmailOtp,
+  normalizeEmailOtp,
+} from '@/lib/auth/otp';
 import { safeRedirectPath } from '@/lib/auth/safe-redirect';
 import { getSiteUrl } from '@/lib/env';
 import { actionFailure, actionSuccess, DomainError, type ActionResult } from '@/lib/errors';
@@ -12,10 +17,20 @@ const emailSchema = z
   .transform((value) => value.trim().toLowerCase())
   .pipe(z.email({ message: 'Enter a valid email address.' }));
 
+/**
+ * The emailed one-time code.
+ *
+ * Six to ten digits, because that is the range Supabase's email OTP length
+ * setting spans and production is configured for eight. It was `\d{6}`, which
+ * rejected every production code outright.
+ *
+ * Stays a string throughout — see `@/lib/auth/otp`. Coercing to a number would
+ * eat a leading zero and silently send the wrong code to Supabase.
+ */
 const otpSchema = z
   .string()
-  .transform((value) => value.replaceAll(/\s/g, ''))
-  .refine((value) => /^\d{6}$/.test(value), { message: 'Enter the 6-digit code from your email.' });
+  .transform(normalizeEmailOtp)
+  .refine(isValidEmailOtp, { message: EMAIL_OTP_ERROR_MESSAGE });
 
 export interface SignInState {
   email: string;
@@ -67,7 +82,12 @@ export async function requestSignInEmailAction(
   return actionSuccess({ email: parsed.data });
 }
 
-/** Exchanges a 6-digit one-time code for a session. */
+/**
+ * Exchanges an emailed one-time code for a session.
+ *
+ * The code is never logged, here or anywhere: it is a live credential until it
+ * is spent.
+ */
 export async function verifySignInCodeAction(
   _previous: ActionResult<never> | null,
   formData: FormData,
@@ -82,7 +102,7 @@ export async function verifySignInCodeAction(
           ...(email.success ? {} : { email: 'Enter a valid email address.' }),
           ...(token.success
             ? {}
-            : { token: token.error?.issues[0]?.message ?? 'Enter the 6-digit code.' }),
+            : { token: token.error?.issues[0]?.message ?? EMAIL_OTP_ERROR_MESSAGE }),
         },
       }),
     );

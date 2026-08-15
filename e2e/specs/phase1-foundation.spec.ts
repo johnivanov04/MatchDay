@@ -1,3 +1,4 @@
+import type { Page } from '@playwright/test';
 import { expect, expectNoServerError, expectRedirectedTo, test, settledUrl } from '../support/fixtures';
 
 /**
@@ -49,6 +50,72 @@ test('a profile edit persists across a reload', async ({ factory, asUser }) => {
 
   await page.reload();
   await expect(page.getByLabel('Last name')).toHaveValue('Renamed');
+});
+
+test.describe('the one-time code field', () => {
+  /**
+   * The production defect, at the layer it actually bit.
+   *
+   * `maxLength={6}` meant the browser silently discarded the seventh and eighth
+   * characters of every real code — Supabase is configured to send eight — so
+   * signing in by code was impossible on production no matter what the server
+   * accepted. A unit test on the validator would not have caught it: the input
+   * never let the value through.
+   */
+  async function openCodeField(page: Page) {
+    await page.goto('/sign-in');
+    await page.getByLabel('Email address').fill(`otp.probe.${Date.now()}@matchday.test`);
+    await page.getByRole('button', { name: 'Email me a sign-in link' }).click();
+    const field = page.getByLabel('One-time code');
+    await expect(field).toBeVisible();
+    return field;
+  }
+
+  test('accepts a full eight-digit production code without truncating it', async ({ page }) => {
+    const field = await openCodeField(page);
+
+    await field.fill('84726193');
+
+    // The assertion that would have failed before the fix: the browser kept
+    // only the first six characters.
+    await expect(field).toHaveValue('84726193');
+  });
+
+  test('accepts the ten-digit maximum', async ({ page }) => {
+    const field = await openCodeField(page);
+
+    await field.fill('1234567890');
+
+    await expect(field).toHaveValue('1234567890');
+  });
+
+  test('preserves a leading zero', async ({ page }) => {
+    const field = await openCodeField(page);
+
+    await field.fill('00123456');
+
+    await expect(field).toHaveValue('00123456');
+  });
+
+  test('still stops at ten characters', async ({ page }) => {
+    const field = await openCodeField(page);
+
+    await field.fill('123456789012345');
+
+    // maxLength still applies — it is simply the right maximum now.
+    await expect(field).toHaveValue('1234567890');
+  });
+
+  test('is labelled without naming a length, and asks for a numeric keypad', async ({ page }) => {
+    const field = await openCodeField(page);
+
+    // "6-digit code" was wrong the moment Supabase was configured for eight.
+    await expect(page.getByText(/6-digit/)).toHaveCount(0);
+    await expect(field).toHaveAttribute('inputmode', 'numeric');
+    await expect(field).toHaveAttribute('pattern', '[0-9]{6,10}');
+    // Keeps iOS autofill working from the mail notification.
+    await expect(field).toHaveAttribute('autocomplete', 'one-time-code');
+  });
 });
 
 test.describe('the magic-link interstitial', () => {
