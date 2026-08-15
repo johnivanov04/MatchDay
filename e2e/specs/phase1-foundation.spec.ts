@@ -51,6 +51,95 @@ test('a profile edit persists across a reload', async ({ factory, asUser }) => {
   await expect(page.getByLabel('Last name')).toHaveValue('Renamed');
 });
 
+test.describe('the magic-link interstitial', () => {
+  /**
+   * `/auth/continue` exists because a one-time sign-in link is often opened by
+   * something other than its recipient — Brevo rewrites every link through its
+   * click tracker, and mail scanners fetch links to inspect them. Either
+   * consumes the token before the human sees it.
+   *
+   * These run signed out, with no fixtures, because the page must work for
+   * somebody who has no session at all — which is everybody who reaches it.
+   */
+  const confirmationUrl = (base: string) =>
+    `${base}/auth/v1/verify?token=pkce_e2e_probe&type=magiclink&redirect_to=${encodeURIComponent(
+      'http://127.0.0.1:3100/auth/callback?next=%2Fdashboard',
+    )}`;
+
+  test('renders a button and navigates nowhere on its own', async ({ page }) => {
+    const supabaseUrl = process.env['NEXT_PUBLIC_SUPABASE_URL'] ?? 'http://127.0.0.1:54321';
+    const target = confirmationUrl(supabaseUrl);
+
+    // Fail loudly if anything requests the confirmation URL without a click.
+    // This is the whole point of the page: a request here means the token was
+    // spent by the render, exactly as a scanner would spend it.
+    const unattendedRequests: string[] = [];
+    await page.route('**/auth/v1/verify**', async (route) => {
+      unattendedRequests.push(route.request().url());
+      await route.abort();
+    });
+
+    await page.goto(`/auth/continue?confirmation_url=${encodeURIComponent(target)}`);
+    await expect(page.getByRole('link', { name: 'Continue sign in' })).toBeVisible();
+
+    // Give any effect, timer, meta refresh or prefetch a generous chance to
+    // fire. Nothing should.
+    await page.waitForLoadState('networkidle');
+
+    expect(unattendedRequests, 'the confirmation URL was requested without a click').toEqual([]);
+    expect(new URL(page.url()).pathname).toBe('/auth/continue');
+  });
+
+  test('follows the confirmation URL only when the human clicks', async ({ page }) => {
+    const supabaseUrl = process.env['NEXT_PUBLIC_SUPABASE_URL'] ?? 'http://127.0.0.1:54321';
+    const target = confirmationUrl(supabaseUrl);
+
+    const requested: string[] = [];
+    await page.route('**/auth/v1/verify**', async (route) => {
+      requested.push(route.request().url());
+      // Aborted rather than fulfilled: this test is about *when* the request
+      // happens, and the token is a fake one Supabase would reject anyway.
+      await route.abort();
+    });
+
+    await page.goto(`/auth/continue?confirmation_url=${encodeURIComponent(target)}`);
+    await page.waitForLoadState('networkidle');
+    expect(requested).toEqual([]);
+
+    await page.getByRole('link', { name: 'Continue sign in' }).click();
+    await expect.poll(() => requested.length).toBeGreaterThan(0);
+  });
+
+  test('shows a safe error and no external link for a foreign confirmation URL', async ({
+    page,
+  }) => {
+    await page.goto(
+      `/auth/continue?confirmation_url=${encodeURIComponent(
+        'https://evil.example/auth/v1/verify?token=abc',
+      )}`,
+    );
+
+    await expect(page.getByText(/not valid/i)).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Continue sign in' })).toHaveCount(0);
+    // The rejected destination must not be rendered as a link anywhere.
+    await expect(page.locator('a[href*="evil.example"]')).toHaveCount(0);
+    await expect(page.getByRole('link', { name: 'Back to sign in' })).toBeVisible();
+  });
+
+  test('shows the same error when the parameter is missing entirely', async ({ page }) => {
+    await page.goto('/auth/continue');
+
+    await expect(page.getByText(/not valid/i)).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Back to sign in' })).toBeVisible();
+  });
+
+  test('still sends a signed-out visitor to sign in from protected routes', async ({ page }) => {
+    // The interstitial adds a route under /auth; this confirms it changed
+    // nothing about the existing guard behaviour.
+    await expectRedirectedTo(page, '/dashboard', '/sign-in');
+  });
+});
+
 test.describe('multi-league membership', () => {
   test('somebody in two leagues sees both, and switching changes the active one', async ({
     factory,
