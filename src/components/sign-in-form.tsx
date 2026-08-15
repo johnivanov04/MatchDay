@@ -2,11 +2,19 @@
 
 import { useActionState, useState } from 'react';
 import { Field, FormError, inputClassName, SubmitButton } from '@/components/ui/field';
+import { EMAIL_OTP_INPUT_PATTERN, EMAIL_OTP_MAX_LENGTH } from '@/lib/auth/otp';
 import { requestSignInEmailAction, verifySignInCodeAction } from '@/server/actions/auth';
 
 /**
- * Email-only sign-in. The same email carries a magic link and a 6-digit code,
+ * Email-only sign-in. The same email carries a magic link and a one-time code,
  * so a player who opens their mail on a different device is not stuck.
+ *
+ * THE CODE IS NOT SIX DIGITS. Supabase's email OTP length is configurable from
+ * 6 to 10, and production sends eight. This form used `maxLength={6}`, so the
+ * browser silently refused the last two characters of every real code and
+ * signing in by code was impossible on production. The bounds now come from
+ * `@/lib/auth/otp`, which the server validator reads too, so the two cannot
+ * drift apart again.
  */
 export function SignInForm({ nextPath }: { nextPath: string }) {
   const [emailState, submitEmail, sendingEmail] = useActionState(requestSignInEmailAction, null);
@@ -21,8 +29,8 @@ export function SignInForm({ nextPath }: { nextPath: string }) {
         <div className="surface-card p-4">
           <h2 className="text-base font-semibold">Check your email</h2>
           <p className="mt-1 text-sm text-muted">
-            We sent a sign-in link and a 6-digit code to <strong>{sentTo}</strong>. Open the link on
-            this device, or enter the code below.
+            We sent a sign-in link and a one-time code to <strong>{sentTo}</strong>. Open the link
+            on this device, or enter the code below.
           </p>
         </div>
 
@@ -33,7 +41,7 @@ export function SignInForm({ nextPath }: { nextPath: string }) {
             message={codeState?.ok === false ? codeState.fieldErrors['form'] : undefined}
           />
           <Field
-            label="6-digit code"
+            label="One-time code"
             htmlFor="token"
             error={codeState?.ok === false ? codeState.fieldErrors['token'] : undefined}
           >
@@ -42,11 +50,14 @@ export function SignInForm({ nextPath }: { nextPath: string }) {
               name="token"
               inputMode="numeric"
               autoComplete="one-time-code"
-              pattern="[0-9]{6}"
-              maxLength={6}
+              // Both derived from the same constants the server validates with.
+              pattern={EMAIL_OTP_INPUT_PATTERN}
+              maxLength={EMAIL_OTP_MAX_LENGTH}
               required
-              className={`${inputClassName} tracking-[0.4em]`}
-              placeholder="000000"
+              // Looser tracking than before: at 0.4em a ten-digit code
+              // overflowed the field on a narrow iPhone. No placeholder,
+              // because any fixed-length example would be wrong for somebody.
+              className={`${inputClassName} tracking-[0.25em]`}
             />
           </Field>
           <SubmitButton pending={verifyingCode}>Sign in</SubmitButton>
