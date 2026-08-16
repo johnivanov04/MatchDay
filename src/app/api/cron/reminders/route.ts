@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server';
+import { signalHeartbeat } from '@/lib/observability/heartbeat';
 import { runDueReminders } from '@/server/reminders';
 
 /**
@@ -58,6 +59,45 @@ async function handle(request: NextRequest): Promise<NextResponse> {
   // than a transient one.
   const httpStatus = result.status === 'failed' ? 500 : result.status === 'skipped' ? 503 : 200;
 
+  // ── External heartbeat ──────────────────────────────────────────────────
+  //
+  // `reminder.run` is emitted on every pass so that its *absence* is the
+  // signal, but a deployment that has stopped running crons cannot notice its
+  // own silence. This tells an outside observer that the scheduler executed.
+  //
+  // WHAT COUNTS AS SUCCESS. Scheduler execution, not whether reminders happened
+  // to be due — an `idle` pass with `claimed: 0` is a perfectly healthy
+  // heartbeat and must not alarm anybody at two in the morning.
+  //
+  // `skipped` is grouped with `failed`, which is a judgement the requirements
+  // did not spell out: it means no service-role key is configured, so nothing
+  // ran and nothing will until an operator acts. Reminders are not being
+  // delivered, and reporting that as healthy would be the monitoring lying. It
+  // is also consistent with the 503 already returned above.
+  //
+  // AWAITED, AND DELIBERATELY SO. On a serverless platform the function can be
+  // frozen the instant the response is returned, so an un-awaited ping is not
+  // reliably sent. `signalHeartbeat` never throws and is bounded by its own
+  // short timeout, so this can neither fail the run nor stall it meaningfully.
+  const heartbeatKind = result.status === 'failed' || result.status === 'skipped'
+    ? 'failure'
+    : 'success';
+
+  try {
+    await signalHeartbeat(heartbeatKind);
+  } catch {
+    // `signalHeartbeat` is documented never to throw, and its own tests hold it
+    // to that. This catch is defence in depth rather than distrust: the one
+    // outcome that must be impossible is a monitoring bug turning a completed
+    // reminder run into a failed cron response, and a future refactor of the
+    // helper should not be able to reintroduce it. Deliberately silent — the
+    // helper owns its own logging, and an error object here could carry the
+    // heartbeat URL.
+  }
+
+  // Unchanged: the heartbeat's outcome is deliberately not consulted. A
+  // monitoring provider being down must not turn a successful reminder run into
+  // a cron failure, nor mask the original error when the run genuinely failed.
   return NextResponse.json(result, { status: httpStatus });
 }
 

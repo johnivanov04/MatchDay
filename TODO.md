@@ -26,6 +26,10 @@ None of these is a code change. See `docs/operations/production.md`.
       upgrade.
 - [ ] Set `NEXT_PUBLIC_SUPPORT_EMAIL` so a blocked player has a route to a
       human.
+- [ ] Set `REMINDER_HEARTBEAT_URL` in Production so an outside observer watches
+      the reminder scheduler. Unset, the cron still works but nothing notices if
+      it stops — and a deployment that stops running crons cannot notice its own
+      silence.
 - [ ] Configure a real SMTP sender in Supabase Auth. Sign-in is magic-link only
       and the built-in sender is rate-limited to a handful of messages an hour.
 - [ ] Confirm backup retention on the Supabase plan, and rehearse one restore.
