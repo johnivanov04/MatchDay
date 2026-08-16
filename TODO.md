@@ -33,8 +33,11 @@ None of these is a code change. See `docs/operations/production.md`.
 - [ ] Configure a real SMTP sender in Supabase Auth. Sign-in is magic-link only
       and the built-in sender is rate-limited to a handful of messages an hour.
 - [ ] Confirm backup retention on the Supabase plan, and rehearse one restore.
-- [ ] Set the alerts listed in `production.md` §7 — above all, *absence* of
-      `reminder.run`.
+- [ ] Configure a **Vercel Log Drain to Better Stack** and set the alerts listed
+      in `production.md` §7. Page on `action.dependency_failed`,
+      `action.failed` (`severity: "unexpected"`) and `reminder.failed`; graph
+      but never page on `action.rejected_input` and `action.refused`. Above all,
+      alert on the *absence* of `reminder.run`.
 - [ ] Replace the placeholder `general_area` and `typical_schedule` copy for RMV
       Football Club with the club's real details.
 

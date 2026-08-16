@@ -254,7 +254,9 @@ indexes. There is no agent and no vendor.
 | Event | Level | Meaning |
 |---|---|---|
 | `action.refused` | info | A Server Action returned a domain error. Usually the product working — somebody tried to join a full match. Watch the aggregate, not the line |
-| `action.failed` | error | Something threw that nobody anticipated. **This is the one to alert on** |
+| `action.rejected_input` | warn | Malformed input — a bad UUID, a stale form, a hand-crafted POST. **Never page on this**; see below |
+| `action.failed` | error | Something threw that nobody anticipated, carrying `severity: "unexpected"`. **Page on this** |
+| `action.dependency_failed` | error | The database said something this application does not model — a lost connection, a statement timeout, a new constraint. Carries `severity: "unexpected"` and the SQLSTATE. **Page on this** |
 | `reminder.run` | info | A reminder pass completed, with `claimed` / `notified` / `push_failures`. Emitted on empty passes too, so its **absence** is the signal |
 | `reminder.failed` | error | The generator errored; nothing was claimed. **Alert on this** |
 | `reminder.skipped` | warn | No service-role key configured, so nothing ran |
@@ -264,8 +266,48 @@ indexes. There is no agent and no vendor.
 | `heartbeat.misconfigured` | warn | `REMINDER_HEARTBEAT_URL` is set but unusable — **monitoring is silently off** |
 | `heartbeat.skipped` | info | No heartbeat configured. Expected locally and on Preview; **unexpected in Production** |
 
-Both come from `actionFailure()`, so every Server Action is covered without each
-one having to remember to log.
+The first three come from `actionFailure()`, so every Server Action is covered
+without each one having to remember to log; the fourth comes from the database
+error mapping.
+
+### Why `action.failed` alone is not the alert
+
+An earlier version of this document said to alert on *any* `action.failed`. That
+was wrong in both directions, and the correction is the reason these four events
+exist.
+
+**It was too loud.** Every action validates its form fields with Zod, and ~94 of
+those calls throw on malformed input. A stale form or a hand-crafted POST landed
+in the same bucket as a genuine fault — so anybody could `POST league_id=x` to a
+server action and manufacture pages indefinitely. Those are now
+`action.rejected_input` at `warn`: worth watching in aggregate (a sudden spike
+means either a broken client or somebody probing), never worth waking anybody.
+
+**It was too quiet.** An unrecognised database error fell through the mapping's
+catch-all into an ordinary `DomainError`, which is logged as `action.refused` at
+**info**. The single failure most worth paging for — the database being
+unreachable — was the quietest line in the logs. It is now
+`action.dependency_failed` at `error`.
+
+**Filter on `severity`, not on the exception class.** `severity: "unexpected"`
+is our own stable contract; a library's class name is not, and would change
+silently under a major version bump.
+
+### Vercel Log Drain → Better Stack
+
+These events are monitored by draining Vercel's stdout to Better Stack and
+filtering there, rather than by MatchDay calling a webhook.
+
+That choice is deliberate: `actionFailure` runs **inside the user's request**.
+The reminder heartbeat can afford an awaited outbound call because it is a cron
+with a ten-minute cadence and nobody waiting; a signup is not that. Putting a
+third-party HTTP call in the path of every unexpected failure would add latency
+exactly when the system is already unhealthy, and a slow provider would make a
+bad request worse. A drain adds nothing to the request path at all, and the
+filter can be retuned without a deploy.
+
+Alert on `action.failed` and `action.dependency_failed`. Do **not** alert on
+`action.rejected_input` or `action.refused`; graph them instead.
 
 A render that throws is **not** in that table. The error boundary
 (`src/app/(app)/error.tsx`) is a client component and cannot import the
@@ -315,11 +357,12 @@ with its own audit trail.
 
 Suggested alerts, in priority order:
 
-1. any `reminder.failed` — the reminder pipeline is broken;
+0. any `action.dependency_failed` — the database is not answering as expected;
 2. **no `reminder.run` line for three cadence intervals** — the scheduler has
    stopped, which is the silent failure worth the most attention. Absence, not
    a value, is the signal;
-3. any `action.failed`;
+3. any `action.failed` (`severity: "unexpected"`) — never
+   `action.rejected_input`, which is ordinary malformed input;
 4. `/api/health` non-200 twice in a row;
 5. any non-2xx from the cron endpoint, which the platform's own cron dashboard
    reports without extra wiring.
