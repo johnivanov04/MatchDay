@@ -88,9 +88,14 @@ remembering as patterns rather than one-off bugs:
       is stored as constrained free text (≤64 characters) rather than inventing a
       taxonomy. The Phase 6 team builder shows gender only when a league enables
       the field, so this is not blocking; decide before any league relies on it.
-- [ ] **Profile photo upload.** Phase 1 ships `profile_photo_url` only, matching
-      `02 §17`. Uploading needs a Supabase Storage bucket, per-user object
-      policies, and image size/type validation.
+- [x] **Profile photo upload.** Done: the public `avatars` bucket with
+      select/insert/delete-own policies, `profiles.profile_photo_path`, and
+      on-device resize to a 512x512 JPEG. `profile_photo_url` is kept for legacy
+      rows, still rendered, no longer editable.
+- [ ] **Avatars beyond the profile page.** The upload flow ships alone by
+      design — rosters, the team builder, published teams, member lists and the
+      attendance register still show names only. Deferred until the upload flow
+      has been used on a physical iPhone.
 - [ ] **Administrator notes UI.** `league_membership_admin_notes` exists with
       administrator-only RLS but has no interface; it is written to only by the
       seed.

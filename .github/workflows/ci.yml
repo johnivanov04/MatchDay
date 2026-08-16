@@ -47,7 +47,13 @@ jobs:
       # The database suite boots its own throwaway PostgreSQL server via
       # `embedded-postgres`, so it needs neither a service container nor the
       # Supabase CLI. It applies the real migrations and the real seed file.
-      - name: Test (unit, integration, RLS and tenancy)
+      #
+      # This deliberately does NOT include the `storage` project. Those tests
+      # need a real Supabase Storage service, which this job does not have, and
+      # a suite that skipped here would report the MIME allowlist and the size
+      # cap as verified when nothing had run. They belong to the `e2e` job
+      # below, which has a stack — see `vitest.config.mts`.
+      - name: Test (unit, integration, RLS, tenancy and components)
         run: npm test
 
       # Deliberately a separate, named step even though `npm test` already
@@ -107,6 +113,28 @@ jobs:
             echo "E2E_SUPABASE_ANON_KEY=$(supabase status -o json | jq -r '.ANON_KEY')"
             echo "E2E_SUPABASE_SERVICE_ROLE_KEY=$(supabase status -o json | jq -r '.SERVICE_ROLE_KEY')"
           } >> "$GITHUB_ENV"
+
+      # ── The only place the Storage service is exercised ───────────────────
+      #
+      # `allowed_mime_types` and `file_size_limit` are columns on
+      # `storage.buckets` that only the Storage service reads; no constraint,
+      # policy or SQL insert can reach them. Public object retrieval is the
+      # same — the public endpoint never consults Row Level Security, so no
+      # database test can tell you whether a signed-out browser can fetch an
+      # avatar. These run here because this is the job that already has a real
+      # stack; adding one to `verify` would double a five-minute Docker boot to
+      # test five things.
+      #
+      # THEY CANNOT SKIP. The suite treats `CI` being set as "a missing stack
+      # is a hard failure", rather than reading an opt-in flag from this file —
+      # because forgetting to pass such a flag is exactly the failure this is
+      # guarding against, and a green job that verified nothing is worse than
+      # no job. See tests/storage/helpers/stack.ts.
+      #
+      # Before the browsers install, so a storage regression reports in seconds
+      # rather than after a Chromium download and a production build.
+      - name: Storage API tests (real Supabase Storage)
+        run: npm run test:storage
 
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium

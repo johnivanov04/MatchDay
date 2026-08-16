@@ -473,4 +473,32 @@ export class TestDataFactory {
     );
     return rows[0]?.id ?? '';
   }
+
+  /**
+   * Writes the legacy external photo column directly.
+   *
+   * The only way to create this state now: the profile form has no URL field
+   * and the avatar action writes null there. A profile that predates the
+   * upload feature is a real thing a pilot league has, so it has to be
+   * reachable as a fixture even though the product can no longer produce one.
+   */
+  async setProfilePhotoUrl(userId: string, url: string): Promise<void> {
+    await this.client.query('update public.profiles set profile_photo_url = $1 where id = $2', [
+      url,
+      userId,
+    ]);
+  }
+
+  /** Both photo columns, for asserting what a removal actually cleared. */
+  async readProfilePhoto(userId: string): Promise<{ path: string | null; url: string | null }> {
+    const rows = await this.query<{
+      profile_photo_path: string | null;
+      profile_photo_url: string | null;
+    }>('select profile_photo_path, profile_photo_url from public.profiles where id = $1', [userId]);
+
+    return {
+      path: rows[0]?.profile_photo_path ?? null,
+      url: rows[0]?.profile_photo_url ?? null,
+    };
+  }
 }

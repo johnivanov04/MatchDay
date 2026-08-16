@@ -143,22 +143,10 @@ export function ProfileForm({
           </select>
         </Field>
 
-        <Field
-          label="Profile photo URL"
-          htmlFor="profile_photo_url"
-          optional
-          hint="A full https:// address. Uploading a photo arrives in a later phase."
-          error={fieldError('profile_photo_url')}
-        >
-          <input
-            id="profile_photo_url"
-            name="profile_photo_url"
-            type="url"
-            inputMode="url"
-            defaultValue={profile?.profile_photo_url ?? ''}
-            className={inputClassName}
-          />
-        </Field>
+        {/* NO PROFILE PHOTO URL FIELD.
+            Photos are uploaded now — see `AvatarPicker`, rendered above this
+            form on the profile page. The field that used to sit here accepted
+            any https address, and `saveProfileAction` no longer reads one. */}
       </fieldset>
 
       <SubmitButton pending={pending}>{submitLabel}</SubmitButton>

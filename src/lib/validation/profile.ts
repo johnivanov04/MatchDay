@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { ProfileWritableFields } from '@/types/database';
+import type { ProfileDetailFields } from '@/types/database';
 
 /**
  * Profile input validation.
@@ -43,20 +43,21 @@ export const profileInputSchema = z.object({
 
   goalkeeper_willing: z.union([z.boolean(), z.null()]).default(null),
 
-  profile_photo_url: z
-    .string()
-    .transform((value) => value.trim())
-    .refine((value) => value === '' || /^https:\/\//.test(value), {
-      message: 'Use a full https:// address.',
-    })
-    .refine((value) => value.length <= 2048, { message: 'That address is too long.' })
-    .transform((value): string | null => (value === '' ? null : value)),
+  // NO PHOTO FIELD, DELIBERATELY.
+  //
+  // `profile_photo_url` used to be a text input here, which meant the profile
+  // form could point somebody's avatar at any https address on the internet.
+  // Photos are now uploaded, and both photo columns are written only by
+  // `uploadAvatarAction` from a path it generates itself. Leaving the field in
+  // this schema would have kept the old capability alive for anybody willing to
+  // add an input to the DOM, so it is gone rather than hidden — and
+  // `toProfileUpdate` below cannot express it either.
 });
 
 export type ProfileInput = z.infer<typeof profileInputSchema>;
 
-/** Narrows the validated input to exactly the columns a user may write. */
-export function toProfileUpdate(input: ProfileInput): ProfileWritableFields {
+/** Narrows the validated input to exactly the columns this form may write. */
+export function toProfileUpdate(input: ProfileInput): ProfileDetailFields {
   return {
     first_name: input.first_name,
     last_name: input.last_name,
@@ -64,7 +65,6 @@ export function toProfileUpdate(input: ProfileInput): ProfileWritableFields {
     gender: input.gender,
     preferred_positions: input.preferred_positions,
     goalkeeper_willing: input.goalkeeper_willing,
-    profile_photo_url: input.profile_photo_url,
   };
 }
 
