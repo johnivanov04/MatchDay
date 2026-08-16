@@ -1,4 +1,4 @@
-import { describeError, logError, logInfo } from '@/lib/observability/log';
+import { describeError, logError, logInfo, logWarn } from '@/lib/observability/log';
 
 /**
  * Stable domain error codes (02 §21). The full list is defined here even
@@ -155,6 +155,18 @@ export function actionSuccess<T>(data?: T): ActionResult<T | undefined> {
   return { ok: true, data };
 }
 
+/**
+ * True for a Zod validation failure.
+ *
+ * Structural, not `instanceof`. `ZodError` is thrown across module and bundle
+ * boundaries where a single class identity is not guaranteed, and this file is
+ * reachable from client code, so importing Zod to narrow one branch would be a
+ * runtime cost for a compile-time convenience.
+ */
+function isZodError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'ZodError';
+}
+
 export function actionFailure(error: unknown): ActionResult<never> {
   if (isDomainError(error)) {
     // The stable code and nothing else. A refusal is usually the product
@@ -171,15 +183,45 @@ export function actionFailure(error: unknown): ActionResult<never> {
     };
   }
 
+  // ── Malformed input is not an incident ──────────────────────────────────
+  //
+  // Every action validates its form fields with Zod, and ~94 of those calls use
+  // the throwing `.parse()` inside the try block. So a stale form, a bad UUID
+  // or a hand-crafted POST lands here as a `ZodError`.
+  //
+  // That used to be logged as `action.failed` — the event documented as "the
+  // one to alert on" — which made the alert both noisy and attacker-triggerable:
+  // anybody can POST `league_id=x` to a server action and manufacture pages
+  // indefinitely. It is an expected refusal that happens to arrive as an
+  // exception rather than a `DomainError`, and it is classified as one here.
+  //
+  // Matched structurally on `name` rather than with `instanceof ZodError`: this
+  // module is imported by client bundles for its types, and importing Zod here
+  // purely to narrow a type would pull the library in for no runtime benefit.
+  if (isZodError(error)) {
+    logWarn('action.rejected_input', describeError(error));
+
+    return {
+      ok: false,
+      code: 'NOT_AUTHORIZED',
+      message: userMessageFor('NOT_AUTHORIZED'),
+      fieldErrors: {},
+    };
+  }
+
   // Anything unrecognised is reported generically. Database and library
   // messages can name tables, constraints and other tenants' identifiers, and
   // none of that belongs in a client response — or in a log line, which is why
   // `describeError` returns the class and code and discards the message.
   //
-  // This is the branch worth alerting on: every *expected* refusal is a
-  // DomainError above, so reaching here means something threw that nobody
-  // anticipated.
-  logError('action.failed', describeError(error));
+  // THIS is the branch worth paging on: every expected refusal is either a
+  // DomainError or a ZodError above, so reaching here means something threw
+  // that nobody anticipated.
+  //
+  // `severity` is our own stable contract. A log drain filtering on it does not
+  // depend on a library's class name, which would change silently under a major
+  // version bump.
+  logError('action.failed', { ...describeError(error), severity: 'unexpected' });
 
   return {
     ok: false,
