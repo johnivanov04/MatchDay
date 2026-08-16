@@ -14,7 +14,6 @@ const validInput = {
   gender: '',
   preferred_positions: [],
   goalkeeper_willing: null,
-  profile_photo_url: '',
 };
 
 describe('profileInputSchema', () => {
@@ -46,15 +45,9 @@ describe('profileInputSchema', () => {
   });
 
   it('turns blank optional fields into null rather than empty strings', () => {
-    const result = profileInputSchema.parse({
-      ...validInput,
-      phone: '   ',
-      gender: '',
-      profile_photo_url: '  ',
-    });
+    const result = profileInputSchema.parse({ ...validInput, phone: '   ', gender: '' });
     expect(result.phone).toBeNull();
     expect(result.gender).toBeNull();
-    expect(result.profile_photo_url).toBeNull();
   });
 
   it('keeps optional values that are supplied', () => {
@@ -69,19 +62,18 @@ describe('profileInputSchema', () => {
     expect(result.goalkeeper_willing).toBe(true);
   });
 
-  it('rejects a photo URL that is not https', () => {
-    for (const url of ['http://example.test/a.jpg', 'javascript:alert(1)', 'data:text/html,x']) {
-      const result = profileInputSchema.safeParse({ ...validInput, profile_photo_url: url });
-      expect(result.success, `${url} must be rejected`).toBe(false);
-    }
-  });
-
-  it('accepts an https photo URL', () => {
+  it('ignores a submitted photo URL entirely, rather than validating one', () => {
+    // The field is gone from the form and from this schema. What matters is
+    // not that a bad URL is rejected but that **no** URL, however well-formed,
+    // can reach a profile through this path any more — the only way to set a
+    // photo is an upload, which writes an object key the server generated.
     const result = profileInputSchema.parse({
       ...validInput,
-      profile_photo_url: 'https://example.test/photo.jpg',
+      profile_photo_url: 'https://attacker.test/tracking-pixel.gif',
     });
-    expect(result.profile_photo_url).toBe('https://example.test/photo.jpg');
+
+    expect(result).not.toHaveProperty('profile_photo_url');
+    expect(result).not.toHaveProperty('profile_photo_path');
   });
 
   it('drops blank and over-long positions instead of failing the whole form', () => {
@@ -107,7 +99,8 @@ describe('toProfileUpdate', () => {
     const update = toProfileUpdate(parsed);
 
     // Identity columns are server-owned: they must not appear in an update
-    // built from form input.
+    // built from form input. Neither may either photo column — those are
+    // written only by the avatar action, from a path it generated itself.
     expect(Object.keys(update).sort()).toEqual(
       [
         'first_name',
@@ -116,11 +109,12 @@ describe('toProfileUpdate', () => {
         'last_name',
         'phone',
         'preferred_positions',
-        'profile_photo_url',
       ].sort(),
     );
     expect(update).not.toHaveProperty('id');
     expect(update).not.toHaveProperty('email_normalized');
+    expect(update).not.toHaveProperty('profile_photo_url');
+    expect(update).not.toHaveProperty('profile_photo_path');
   });
 
   it('carries no skill or rating field, per the product decision', () => {

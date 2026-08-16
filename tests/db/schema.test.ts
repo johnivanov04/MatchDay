@@ -104,7 +104,13 @@ describe('schema', () => {
       for (const required of ['first_name', 'last_name', 'email_normalized']) {
         expect(nullability.get(required), `${required} must exist and be required`).toBe('NO');
       }
-      for (const optional of ['phone', 'gender', 'goalkeeper_willing', 'profile_photo_url']) {
+      for (const optional of [
+        'phone',
+        'gender',
+        'goalkeeper_willing',
+        'profile_photo_url',
+        'profile_photo_path',
+      ]) {
         expect(nullability.get(optional), `${optional} must exist and be optional`).toBe('YES');
       }
       // Array column: NOT NULL with an empty-array default, so "no positions"

@@ -30,21 +30,43 @@ export type ProfileRow = {
   gender: string | null;
   preferred_positions: string[];
   goalkeeper_willing: boolean | null;
+  /**
+   * Legacy external photo address. Still rendered when present, but no longer
+   * editable: the profile form has no URL input, and a managed upload clears
+   * this column. See `20260818090100_profile_photo_path.sql`.
+   */
   profile_photo_url: string | null;
+  /** `{id}/{uuid}.jpg` in the public `avatars` bucket, or null. */
+  profile_photo_path: string | null;
   created_at: string;
   updated_at: string;
 };
 
-/** Columns a user may write on their own profile. Email and id are server-owned. */
-export type ProfileWritableFields = {
+/**
+ * The details half of a profile: everything the profile form submits.
+ *
+ * Deliberately excludes both photo columns. They are written only by the avatar
+ * action, from a path it generated itself — a form field that could set either
+ * one would be a way to point a profile at an arbitrary address again, which is
+ * precisely what this phase removed.
+ */
+export type ProfileDetailFields = {
   first_name: string;
   last_name: string;
   phone: string | null;
   gender: string | null;
   preferred_positions: string[];
   goalkeeper_willing: boolean | null;
+};
+
+/** The photo half. Written together, never independently. */
+export type ProfilePhotoFields = {
+  profile_photo_path: string | null;
   profile_photo_url: string | null;
 };
+
+/** Columns a user may write on their own profile. Email and id are server-owned. */
+export type ProfileWritableFields = ProfileDetailFields & ProfilePhotoFields;
 
 export type LeagueRow = {
   id: string;

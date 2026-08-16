@@ -11,6 +11,9 @@
 --   * the auth schema, auth.users and auth.identities
 --   * auth.uid(), auth.jwt() and auth.role(), reading the same
 --     `request.jwt.claims` GUC that PostgREST sets from the verified JWT
+--   * the storage schema, storage.buckets, storage.objects and
+--     storage.foldername(), which the Storage service creates before any
+--     migration runs
 --
 -- Column lists for auth.users and auth.identities mirror GoTrue's schema. Only
 -- the columns Matchday's seed and code touch need to be exact.
@@ -141,3 +144,77 @@ grant execute on function auth.jwt()  to anon, authenticated, service_role;
 grant execute on function auth.role() to anon, authenticated, service_role;
 
 grant select on auth.users, auth.identities to service_role;
+
+-- ── storage schema ─────────────────────────────────────────────────────────
+--
+-- Same purpose as the auth shim above: the Storage service creates these before
+-- any migration runs, so a bare PostgreSQL server has no `storage` schema and
+-- `20260818090000_avatar_storage.sql` would fail to apply. Without this the
+-- entire database suite stops at the first migration file rather than testing
+-- anything.
+--
+-- ONLY WHAT THE MIGRATION AND ITS POLICIES TOUCH. `storage.objects` here is a
+-- deliberately narrow stand-in for the real table, but the columns the avatar
+-- policies read — `bucket_id`, `name`, `owner` — are the real ones, so the
+-- policy expressions under test are evaluated exactly as they are in
+-- production. What this shim cannot reproduce is behaviour the Storage *API*
+-- enforces rather than the database: `allowed_mime_types` and
+-- `file_size_limit` are checked by the service on upload, never by a
+-- constraint, so those are covered by tests against the running local stack
+-- instead.
+
+create schema if not exists storage;
+grant usage on schema storage to anon, authenticated, service_role;
+
+create table if not exists storage.buckets (
+  id text primary key,
+  name text not null,
+  owner uuid,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now(),
+  public boolean default false,
+  avif_autodetection boolean default false,
+  file_size_limit bigint,
+  allowed_mime_types text[]
+);
+
+create table if not exists storage.objects (
+  id uuid primary key default gen_random_uuid(),
+  bucket_id text references storage.buckets (id),
+  name text,
+  owner uuid,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now(),
+  last_accessed_at timestamptz default now(),
+  metadata jsonb,
+  path_tokens text[] generated always as (string_to_array(name, '/')) stored
+);
+
+-- Row level security is enabled on the real table by the Storage service, not
+-- by a migration, so the shim must enable it too — otherwise every policy in
+-- the migration would be inert here and the tests would pass vacuously.
+alter table storage.objects enable row level security;
+
+-- Byte-for-byte behaviour of Supabase's own `storage.foldername`: split the
+-- object path on `/` and drop the **last** element, so what comes back is the
+-- directory segments only. The avatar policies use `[1]` to read the owning
+-- user's folder.
+--
+-- Dropping the filename is not incidental. For a bare `loose-file.jpg` the real
+-- function returns an empty array, so `[1]` is NULL and the ownership
+-- comparison yields NULL rather than false — which is still a refusal, but for
+-- a different reason than a mismatched folder. A shim that returned the whole
+-- split would pass the same tests while modelling something the production
+-- database does not do.
+create or replace function storage.foldername(name text)
+returns text[]
+language sql
+immutable
+as $$
+  select (string_to_array(name, '/'))[1:greatest(array_length(string_to_array(name, '/'), 1) - 1, 0)];
+$$;
+
+grant execute on function storage.foldername(text) to anon, authenticated, service_role;
+grant select on storage.buckets to anon, authenticated, service_role;
+grant select, insert, update, delete on storage.objects to authenticated, service_role;
+grant select on storage.objects to anon;

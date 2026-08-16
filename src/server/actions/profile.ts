@@ -33,7 +33,9 @@ export async function saveProfileAction(
       gender: formData.get('gender') ?? '',
       preferred_positions: parsePositionsFromForm(formData),
       goalkeeper_willing: parseGoalkeeperWillingFromForm(formData),
-      profile_photo_url: formData.get('profile_photo_url') ?? '',
+      // `profile_photo_url` is NOT read from this form, and adding it back
+      // would restore the ability to point an avatar at an arbitrary address.
+      // Photos are written only by `uploadAvatarAction`.
     });
 
     if (!parsed.success) {
