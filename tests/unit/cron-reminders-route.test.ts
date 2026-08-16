@@ -11,9 +11,10 @@ import type { ReminderRunResult } from '@/server/reminders';
  * needs a configured secret, so it is proved here.
  */
 
-const mocks = vi.hoisted(() => ({ runDueReminders: vi.fn() }));
+const mocks = vi.hoisted(() => ({ runDueReminders: vi.fn(), signalHeartbeat: vi.fn() }));
 
 vi.mock('@/server/reminders', () => ({ runDueReminders: mocks.runDueReminders }));
+vi.mock('@/lib/observability/heartbeat', () => ({ signalHeartbeat: mocks.signalHeartbeat }));
 
 const route = await import('@/app/api/cron/reminders/route');
 
@@ -41,6 +42,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   process.env.CRON_SECRET = SECRET;
   mocks.runDueReminders.mockResolvedValue(result());
+  mocks.signalHeartbeat.mockResolvedValue('sent');
 });
 
 afterEach(() => {
@@ -183,5 +185,108 @@ describe('the response body leaks nothing', () => {
     const body = await (await route.GET(authorized())).text();
 
     expect(body).not.toContain(SECRET);
+  });
+});
+
+
+describe('the external heartbeat', () => {
+  it('sends exactly one success heartbeat after a run that did work', async () => {
+    mocks.runDueReminders.mockResolvedValue(result({ status: 'worked', claimed: 2, notified: 5 }));
+
+    await route.GET(authorized());
+
+    expect(mocks.signalHeartbeat).toHaveBeenCalledTimes(1);
+    expect(mocks.signalHeartbeat).toHaveBeenCalledWith('success');
+  });
+
+  it('sends a success heartbeat for a zero-work run', async () => {
+    mocks.runDueReminders.mockResolvedValue(result({ status: 'idle' }));
+
+    await route.GET(authorized());
+
+    // The heartbeat monitors that the scheduler executed, not whether any
+    // reminder happened to be due. An idle pass at 03:00 is perfectly healthy
+    // and must not page anybody.
+    expect(mocks.signalHeartbeat).toHaveBeenCalledTimes(1);
+    expect(mocks.signalHeartbeat).toHaveBeenCalledWith('success');
+  });
+
+  it('sends a failure heartbeat when the run failed', async () => {
+    mocks.runDueReminders.mockResolvedValue(result({ status: 'failed', errorCode: '42501' }));
+
+    await route.GET(authorized());
+
+    expect(mocks.signalHeartbeat).toHaveBeenCalledWith('failure');
+  });
+
+  it('sends a failure heartbeat when nothing ran for want of configuration', async () => {
+    mocks.runDueReminders.mockResolvedValue(result({ status: 'skipped' }));
+
+    await route.GET(authorized());
+
+    // `skipped` means no reminders are being delivered and none will be until
+    // an operator acts. Reporting that as healthy would be the monitoring lying.
+    expect(mocks.signalHeartbeat).toHaveBeenCalledWith('failure');
+  });
+
+  it('never sends a heartbeat for an unauthorized request', async () => {
+    await route.GET(request());
+
+    // Otherwise anybody could keep the monitor green without the cron running.
+    expect(mocks.signalHeartbeat).not.toHaveBeenCalled();
+  });
+});
+
+describe('the heartbeat cannot affect the cron outcome', () => {
+  it('keeps a successful run successful when the provider is down', async () => {
+    mocks.runDueReminders.mockResolvedValue(result({ status: 'worked', claimed: 1 }));
+    mocks.signalHeartbeat.mockResolvedValue('network_error');
+
+    const response = await route.GET(authorized());
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ status: 'worked', claimed: 1 });
+  });
+
+  it('keeps a successful run successful even if the heartbeat throws', async () => {
+    // Belt and braces: `signalHeartbeat` is documented never to throw, but the
+    // route must not depend on that promise being kept.
+    mocks.runDueReminders.mockResolvedValue(result({ status: 'idle' }));
+    mocks.signalHeartbeat.mockRejectedValue(new Error('monitoring exploded'));
+
+    await expect(route.GET(authorized())).resolves.toBeDefined();
+  });
+
+  it('does not mask the original error when the failure heartbeat also fails', async () => {
+    mocks.runDueReminders.mockResolvedValue(result({ status: 'failed', errorCode: '42501' }));
+    mocks.signalHeartbeat.mockResolvedValue('timeout');
+
+    const response = await route.GET(authorized());
+
+    // The reminder failure is still what the cron reports.
+    expect(response.status).toBe(500);
+    expect(await response.json()).toMatchObject({ status: 'failed', errorCode: '42501' });
+  });
+
+  it('leaves the response body untouched by the heartbeat', async () => {
+    mocks.signalHeartbeat.mockResolvedValue('http_error');
+
+    const body = (await (await route.GET(authorized())).json()) as Record<string, unknown>;
+
+    // No heartbeat field, no URL, nothing new.
+    expect(Object.keys(body).sort()).toEqual([
+      'claimed',
+      'errorCode',
+      'notified',
+      'pushFailures',
+      'status',
+    ]);
+  });
+
+  it('runs the reminder pass before signalling, and only once', async () => {
+    await route.GET(authorized());
+
+    expect(mocks.runDueReminders).toHaveBeenCalledTimes(1);
+    expect(mocks.signalHeartbeat).toHaveBeenCalledTimes(1);
   });
 });

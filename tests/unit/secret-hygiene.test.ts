@@ -54,6 +54,16 @@ describe('secret hygiene', () => {
     expect(offenders).toEqual(['src/lib/push/sender.ts']);
   });
 
+  it('names the reminder heartbeat URL in exactly one module', () => {
+    // It embeds a token: whoever holds it can report the reminder job healthy.
+    // Same containment rule as the VAPID and service-role secrets.
+    const offenders = sourceFiles
+      .filter((path) => read(path).includes('REMINDER_HEARTBEAT_URL'))
+      .map((path) => relative(REPO_ROOT, path));
+
+    expect(offenders).toEqual(['src/lib/observability/heartbeat.ts']);
+  });
+
   it('keeps the VAPID private key out of every client component', () => {
     const clientComponents = sourceFiles.filter((path) => {
       const contents = read(path);

@@ -38,6 +38,11 @@ each one. The rules that matter:
 - **`CRON_SECRET` is required for reminders to work at all.** Without it
   `/api/cron/reminders` answers 404 to everybody — including Vercel Cron, so
   the declared schedule silently does nothing.
+- **`REMINDER_HEARTBEAT_URL` must be set in Production for external heartbeat
+  monitoring.** It is a **credential** — anyone holding it can report the
+  reminder job healthy — so it is server-only, never logged and never returned
+  in a response. Unset (locally, in tests, on Preview) the cron behaves exactly
+  as before and logs `heartbeat.skipped`. See §7.
 - **`NEXT_PUBLIC_SUPPORT_EMAIL` is optional but strongly recommended before a
   pilot.** Unset, the footer and both error boundaries render nothing, and a
   player who cannot sign in has no route to a human. It is published on purpose
@@ -254,6 +259,10 @@ indexes. There is no agent and no vendor.
 | `reminder.failed` | error | The generator errored; nothing was claimed. **Alert on this** |
 | `reminder.skipped` | warn | No service-role key configured, so nothing ran |
 | `reminder.push_incomplete` | warn | Notifications committed, push fan-out threw for at least one occurrence |
+| `heartbeat.sent` | info | The external heartbeat was pinged, with `kind` = `success` or `failure` |
+| `heartbeat.failed` | warn | The monitoring provider was unreachable or answered non-2xx. **Does not affect the cron result** |
+| `heartbeat.misconfigured` | warn | `REMINDER_HEARTBEAT_URL` is set but unusable — **monitoring is silently off** |
+| `heartbeat.skipped` | info | No heartbeat configured. Expected locally and on Preview; **unexpected in Production** |
 
 Both come from `actionFailure()`, so every Server Action is covered without each
 one having to remember to log.
@@ -264,6 +273,37 @@ server-only logger, so it emits a plain `[matchday] render failed` line with the
 error's `digest` and class. The server side of the same failure is already in
 the platform's own request log under that identical digest, which is what to
 search on — and it is why the boundary shows the digest to the user.
+
+### External heartbeat monitoring
+
+The log events above only help somebody who is reading them. A deployment that
+has stopped running crons cannot notice its own silence, so the absence of
+`reminder.run` needs an *outside* observer. After every cron invocation the
+route pings a Better Stack heartbeat:
+
+| Reminder outcome | HTTP | Heartbeat |
+|---|---|---|
+| `worked` | 200 | success — base URL |
+| `idle` (nothing was due) | 200 | **success** — the heartbeat monitors that the scheduler ran, not whether reminders happened to be due |
+| `failed` | 500 | failure — base URL + `/fail` |
+| `skipped` (no service-role key) | 503 | failure — reminders are not being delivered, and reporting that as healthy would be the monitoring lying |
+
+Unauthorized requests send nothing at all, so nobody can keep the monitor green
+without the cron actually running.
+
+**The heartbeat can never affect the cron.** It is sent after the result and its
+HTTP status are already decided, it is bounded by a 3-second timeout, and both
+the helper and the route swallow every failure. A monitoring outage cannot turn
+a successful reminder run into a failed one, nor mask the original error when a
+run genuinely failed — only a `heartbeat.failed` line appears.
+
+**Nothing is sent to the provider but the request itself** — a bare GET with no
+body, no query string and no headers of ours. There is no payload to review for
+PII, reminder contents or internal error text, because there is no payload.
+
+Configure the monitor with an expected interval matching the cron cadence (10
+minutes) plus a grace period (5 minutes). If `heartbeat.skipped` appears in
+Production logs, the variable is unset and **nothing is watching the scheduler**.
 
 **What is never logged**, by type rather than by convention (see
 `src/lib/observability/log.ts`): names, email addresses, phone numbers, gender,
