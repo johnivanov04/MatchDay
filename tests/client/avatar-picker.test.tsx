@@ -316,6 +316,67 @@ describe('saving', () => {
     unmount();
   });
 
+  /**
+   * The regression this exists for.
+   *
+   * `router.refresh()` is asynchronous, so `currentSrc` still names the OLD
+   * object for as long as the round trip takes. Dropping the preview when the
+   * action resolves therefore put the *previous* photo back on screen,
+   * underneath "Photo saved.", until the refresh landed — 50ms locally, long
+   * enough on CI that the end-to-end suite read the old URL and failed.
+   *
+   * `currentSrc` is deliberately not changed here: this asserts what the picker
+   * shows during the window, which is the whole bug.
+   */
+  it('never falls back to the previous photo while the refresh is in flight', async () => {
+    const { container, unmount } = await render(
+      <AvatarPicker currentSrc={STORED} initials="SO" label="Sam Okafor" />,
+    );
+
+    await chooseFile(fileInput(container), chosenPhoto());
+    await settle();
+    await click(buttonLabelled(container, 'Save photo')!);
+    await settle();
+
+    const src = container.querySelector('img')?.getAttribute('src');
+    expect(src).not.toBe(STORED);
+    // The processed preview: the same bytes that were just uploaded.
+    expect(src).toMatch(/^blob:/);
+    unmount();
+  });
+
+  /** And it hands back to the server the moment the refresh does land. */
+  it('shows the stored object once the refreshed prop carries it', async () => {
+    const { container, rerender, unmount } = await render(
+      <AvatarPicker currentSrc={STORED} initials="SO" label="Sam Okafor" />,
+    );
+
+    await chooseFile(fileInput(container), chosenPhoto());
+    await settle();
+    await click(buttonLabelled(container, 'Save photo')!);
+    await settle();
+
+    const next = STORED.replace('b.jpg', 'c.jpg');
+    await rerender(<AvatarPicker currentSrc={next} initials="SO" label="Sam Okafor" />);
+
+    expect(container.querySelector('img')?.getAttribute('src')).toBe(next);
+    unmount();
+  });
+
+  /** The same window, the other way round: a removal must not linger either. */
+  it('drops the photo immediately on removal rather than waiting for the refresh', async () => {
+    const { container, unmount } = await render(
+      <AvatarPicker currentSrc={STORED} initials="SO" label="Sam Okafor" />,
+    );
+
+    await click(buttonLabelled(container, 'Remove photo')!);
+    await settle();
+
+    expect(container.querySelector('img')).toBeNull();
+    expect(container.querySelector('[role="status"]')?.textContent).toBe('Photo removed.');
+    unmount();
+  });
+
   it('surfaces the server field error and keeps the preview', async () => {
     mocks.upload.mockResolvedValue({
       ok: false,

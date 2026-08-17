@@ -495,3 +495,61 @@
 @utility min-h-control {
   min-height: 2.875rem;
 }
+
+/**
+ * The league menu's `<dialog>`.
+ *
+ * ── WHY A NATIVE `<dialog>` AND NOT A LIBRARY ──────────────────────────────
+ *
+ * `showModal()` gives the four things a modal has to get right — a focus trap,
+ * Escape to dismiss, inertness for everything behind it, and a real backdrop —
+ * from the platform, for free. The alternative is a dependency, or a hand-rolled
+ * trap that is subtly wrong on the first keyboard user who tries it.
+ *
+ * This utility only undoes the user-agent stylesheet, which sizes a dialog to
+ * its content and centres it. The element becomes the full-viewport layer and
+ * the panel inside it does the positioning: pinned to the bottom edge on a
+ * phone, floating under the app bar from `sm` up.
+ *
+ * The backdrop fade and the panel's slide are separate animations because they
+ * are on separate elements — `::backdrop` cannot be reached from JSX. Both are
+ * silenced by the global `prefers-reduced-motion` rule near the top of this
+ * file, which zeroes every animation and transition in the product.
+ */
+@utility sheet-dialog {
+  max-width: none;
+  max-height: none;
+  width: 100%;
+  height: 100dvh;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  overflow: hidden;
+
+  &::backdrop {
+    background: oklch(0.22 0.02 165 / 0.5);
+    animation: fade 0.2s var(--ease-out-soft) both;
+  }
+}
+
+/**
+ * The panel's entrance: a short slide, no fade.
+ *
+ * 8% of its own height, so it reads as a sheet coming up from the bottom edge
+ * on a phone and as a small settle on a desktop popover — one animation for
+ * both, rather than a breakpoint-conditional class. Transform only, for the
+ * same reason `rise` is: animating opacity means animating contrast.
+ */
+@keyframes sheet-up {
+  from {
+    transform: translate3d(0, 8%, 0);
+  }
+  to {
+    transform: none;
+  }
+}
+
+@utility sheet-enter {
+  animation: sheet-up 0.26s var(--ease-out-soft) both;
+}

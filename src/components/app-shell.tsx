@@ -1,10 +1,12 @@
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { BottomNav, HeaderNav, type NavTab } from '@/components/bottom-nav';
+import type { LeagueMenuEntry } from '@/components/league-menu';
 import { LeagueStrip } from '@/components/league-strip';
 import { SupportContact } from '@/components/support-contact';
 import { Avatar } from '@/components/ui/avatar';
 import { BrandLockup } from '@/components/ui/brand';
+import type { LeagueMembershipWithLeague } from '@/lib/auth/authorization';
 import type { LeagueContext } from '@/lib/leagues/active-league';
 
 /**
@@ -60,6 +62,30 @@ export function AppShell({
   const activeLeague = leagueContext.active;
   const isAdmin = activeLeague?.membership.role === 'league_admin';
 
+  // Projected here rather than passed whole: the switcher model carries full
+  // league rows, and the league menu is a client component. Sending it four
+  // fields per league instead of the entire row keeps the payload to what the
+  // menu actually renders. The groups arrive already sorted by league name, and
+  // the status comes from which group a membership is in rather than from a
+  // cast — `buildLeagueSwitcherModel` has already done that filtering.
+  const entriesOf = (
+    memberships: LeagueMembershipWithLeague[],
+    status: LeagueMenuEntry['status'],
+  ): LeagueMenuEntry[] =>
+    memberships.map(({ league, membership }) => ({
+      id: league.id,
+      name: league.name,
+      slug: league.slug,
+      isAdmin: membership.role === 'league_admin',
+      status,
+    }));
+
+  const menuEntries: LeagueMenuEntry[] = [
+    ...entriesOf(leagueContext.switcher.active, 'active'),
+    ...entriesOf(leagueContext.switcher.pending, 'pending'),
+    ...entriesOf(leagueContext.switcher.suspended, 'suspended'),
+  ];
+
   const tabs: NavTab[] = [
     { href: '/dashboard', label: 'Home', icon: 'home' },
     // Points at the active league when there is one. Without a league there is
@@ -107,7 +133,12 @@ export function AppShell({
         </div>
 
         {activeLeague === null ? null : (
-          <LeagueStrip name={activeLeague.league.name} isAdmin={isAdmin} />
+          <LeagueStrip
+            name={activeLeague.league.name}
+            isAdmin={isAdmin}
+            activeLeagueId={activeLeague.league.id}
+            entries={menuEntries}
+          />
         )}
       </header>
 

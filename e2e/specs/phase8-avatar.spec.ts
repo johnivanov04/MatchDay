@@ -93,6 +93,36 @@ async function avatarSrc(page: Page): Promise<string> {
   return (await avatarImage(page).getAttribute('src')) ?? '';
 }
 
+/**
+ * The stored object the avatar has **settled** on, rather than whatever it
+ * happens to be showing this millisecond.
+ *
+ * ── WHY THIS IS NOT JUST `avatarSrc` ───────────────────────────────────────
+ *
+ * "Photo saved." means the upload succeeded and the profile row points at the
+ * new object. It does not mean the page is rendering that object's URL yet:
+ * the picker holds its local preview — the same bytes, as a `blob:` URL —
+ * until `router.refresh()` brings the new server prop down. Both states are
+ * "the new photo"; only the second is the *URL* these tests are about.
+ *
+ * So the wait is for the externally observable settled condition — a public
+ * Storage URL under this member's own folder — and, where a previous URL is
+ * given, for it to no longer be that one. No sleeps, and nothing weakened:
+ * this fails just as loudly if the avatar never reaches a managed object.
+ */
+async function storedAvatarSrc(page: Page, memberId: string, notSrc?: string): Promise<string> {
+  const image = avatarImage(page);
+  await expect(image).toBeVisible();
+  await expect(image).toHaveAttribute(
+    'src',
+    new RegExp(`/storage/v1/object/public/avatars/${memberId}/[0-9a-f-]{36}\\.jpg$`),
+  );
+  if (notSrc !== undefined) {
+    await expect(image).not.toHaveAttribute('src', notSrc);
+  }
+  return (await image.getAttribute('src')) ?? '';
+}
+
 test.describe('profile photo', () => {
   test('a chosen photo previews, saves, and survives a reload', async ({ factory, asUser }) => {
     const league = await factory.createLeague();
@@ -113,7 +143,7 @@ test.describe('profile photo', () => {
 
     await save(page);
 
-    const stored = await avatarSrc(page);
+    const stored = await storedAvatarSrc(page, member.id);
     // Now a public Storage object under this member's own folder, named with a
     // uuid the server generated.
     expect(stored).toContain('/storage/v1/object/public/avatars/');
@@ -140,7 +170,10 @@ test.describe('profile photo', () => {
     await choose(page, LANDSCAPE);
     await save(page);
 
-    const stored = await avatarSrc(page);
+    // The *stored* object, not the local preview it is briefly rendered from —
+    // otherwise this measures the blob the browser just encoded and proves
+    // nothing about what Storage received.
+    const stored = await storedAvatarSrc(page, member.id);
 
     // Decoded in the browser, so this measures the bytes that were actually
     // stored rather than the CSS the circle is drawn with. A 900x600 source
@@ -172,12 +205,12 @@ test.describe('profile photo', () => {
     await page.goto('/profile');
     await choose(page, LANDSCAPE);
     await save(page);
-    const first = await avatarSrc(page);
+    const first = await storedAvatarSrc(page, member.id);
 
     await expect(page.getByText('Change photo')).toBeVisible();
     await choose(page, PORTRAIT);
     await save(page);
-    const second = await avatarSrc(page);
+    const second = await storedAvatarSrc(page, member.id, first);
 
     // A new uuid, never an overwrite: that is what lets a CDN cache an avatar
     // forever without ever serving a stale face.
@@ -201,7 +234,9 @@ test.describe('profile photo', () => {
     await page.goto('/profile');
     await choose(page, LANDSCAPE);
     await save(page);
-    const stored = await avatarSrc(page);
+    // The object's own URL, so the deletion below is checked against Storage
+    // rather than against a `blob:` URL that was never there to delete.
+    const stored = await storedAvatarSrc(page, member.id);
 
     await page.getByRole('button', { name: 'Remove photo' }).click();
     await expect(page.getByText('Photo removed.')).toBeVisible();
