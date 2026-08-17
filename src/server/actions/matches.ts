@@ -131,7 +131,35 @@ export async function saveMatchTemplateAction(
 }
 
 /**
- * Creates a match as a draft.
+ * Which button was pressed.
+ *
+ * A submit button contributes its own `name`/`value`, so the two outcomes are
+ * one form and one action rather than two of each. Parsed strictly: anything
+ * that is not the publish intent is treated as a draft, so a malformed or
+ * absent value can only ever produce the *safer* of the two — a match nobody
+ * has been notified about.
+ */
+function isPublishIntent(formData: FormData): boolean {
+  return formData.get('intent') === 'publish';
+}
+
+/**
+ * Creates a match, as a draft or open in one step.
+ *
+ * ── WHY BOTH LIVE IN ONE ACTION ────────────────────────────────────────────
+ *
+ * Identical input, identical validation, identical redirect; the only
+ * difference is which database function runs. Splitting them would mean two
+ * copies of the twenty-argument mapping below, and the day somebody adds a
+ * field to the form they would fix one.
+ *
+ * ── WHY PUBLISHING IS ONE RPC AND NOT TWO ──────────────────────────────────
+ *
+ * `create_and_publish_match()` calls `create_match()` then `publish_match()`
+ * inside one transaction, so a publication that fails leaves nothing behind.
+ * Doing it here as two sequential calls would leave an unexplained draft every
+ * time the second one failed — which is the exact failure mode this whole
+ * change exists to remove.
  *
  * Local times and relative deadline rules go to the database, which resolves
  * them against the league's own timezone. Doing that conversion here would put
@@ -142,6 +170,8 @@ export async function createMatchAction(
   formData: FormData,
 ): Promise<ActionResult<undefined>> {
   let slug: string;
+  let matchId: string;
+  let published: boolean;
 
   try {
     const leagueId = z.uuid().parse(formData.get('league_id') ?? '');
@@ -158,12 +188,17 @@ export async function createMatchAction(
       admin_notes: formData.get('admin_notes') ?? '',
     });
 
+    // The same schema for both paths, before either. Publishing cannot become a
+    // way to get data past a check the draft path applies.
     if (!parsed.success) {
       throw new DomainError('VALIDATION_FAILED', { fieldErrors: toFieldErrors(parsed.error) });
     }
 
-    const supabase = await createSupabaseServerClient();
-    const { error } = await supabase.rpc('create_match', {
+    published = isPublishIntent(formData);
+
+    // Byte-identical arguments either way: a draft and a published match made
+    // from the same form differ in `status` and nothing else.
+    const args = {
       p_league_id: leagueId,
       p_title: parsed.data.title,
       p_match_date: parsed.data.match_date,
@@ -184,17 +219,41 @@ export async function createMatchAction(
       p_roster_publish_before: hoursToInterval(parsed.data.roster_publish_before_hours),
       p_public_notes: parsed.data.public_notes,
       p_admin_notes: parsed.data.admin_notes,
-    });
+    };
+
+    const supabase = await createSupabaseServerClient();
+    const { data, error } = published
+      ? await supabase.rpc('create_and_publish_match', args)
+      : await supabase.rpc('create_match', args);
 
     if (error !== null) {
       throw domainErrorFromDatabase(error);
     }
+
+    // Both functions return the new match's id. It was previously discarded,
+    // which is why this used to redirect to the list — there was nothing else
+    // it could point at.
+    matchId = z.uuid().parse(data);
   } catch (error: unknown) {
     return actionFailure(error);
   }
 
+  // Post-commit, and outside every `try` that decides this action's result: the
+  // match is open and the canonical notifications exist by now, so a push that
+  // does not go out must never be reported as a failed publication. Nothing is
+  // pushed for a draft, because nothing was notified.
+  if (published) {
+    await pushCommittedFanout(`match_published:${matchId}`);
+  }
+
   revalidatePath('/', 'layout');
-  redirect(`/leagues/${slug}/matches`);
+  redirect(
+    matchPathWithNotice(
+      slug,
+      matchId,
+      published ? MATCH_NOTICES.published : MATCH_NOTICES.draftSaved,
+    ),
+  );
 }
 
 /**

@@ -947,6 +947,36 @@ export interface Database {
         };
         Returns: string;
       };
+      /**
+       * `create_match` then `publish_match`, in one transaction. Identical
+       * arguments to `create_match` on purpose — the two paths differ only in
+       * whether the new match is opened, never in what it contains.
+       */
+      create_and_publish_match: {
+        Args: {
+          p_league_id: string;
+          p_title: string;
+          p_match_date: string;
+          p_arrival_time: string;
+          p_kickoff_time: string;
+          p_end_time: string;
+          p_location_name: string;
+          p_capacity: number;
+          p_min_players: number;
+          p_selection_mode: SelectionMode;
+          p_waitlist_mode: WaitlistMode;
+          p_team_count?: number;
+          p_template_id?: string | null;
+          p_location_map_url?: string | null;
+          p_priority_window?: string | null;
+          p_signup_closes_before?: string;
+          p_cancellation_cutoff_before?: string;
+          p_roster_publish_before?: string | null;
+          p_public_notes?: string | null;
+          p_admin_notes?: string | null;
+        };
+        Returns: string;
+      };
       publish_match: { Args: { p_match_id: string }; Returns: string };
       cancel_match: { Args: { p_match_id: string; p_reason?: string | null }; Returns: string };
 
