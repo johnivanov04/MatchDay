@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import { LeagueSwitcher } from '@/components/league-switcher';
+import { MembershipNotices } from '@/components/membership-notices';
 import { Badge } from '@/components/ui/badge';
 import { ButtonLink } from '@/components/ui/button';
 import { Card, Panel, Section, Stat, StatGrid } from '@/components/ui/card';
@@ -210,10 +210,12 @@ export default async function DashboardPage({
         </Panel>
       )}
 
-      {/* The switcher lives here rather than in the header. It is a rare action
-          that was taking permanent space on every screen, and this is where
-          somebody already comes to decide what they are working on. */}
-      <LeagueSwitcher model={switcher} activeLeagueId={active?.league.id ?? null} />
+      {/* Switching moved to the league menu behind the active-league strip,
+          which is on every screen rather than on this one. What is left is the
+          pending and suspended memberships PRD §11 asks to be visible — and
+          only when there is no active league, because otherwise the strip is
+          directly above this and its menu already lists them. */}
+      {active === null ? <MembershipNotices model={switcher} /> : null}
 
       {active === null ? null : (
         <Section title="Other leagues" description="Join another, or start one of your own.">

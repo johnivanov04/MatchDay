@@ -225,22 +225,34 @@ test.describe('multi-league membership', () => {
       [second.id, member.id],
     );
 
+    // Which league is active without a stored preference is decided by league
+    // name, and the factory's names carry a random token — so the one being
+    // switched *to* is pinned as the one not currently active.
+    await factory.query(
+      `insert into public.user_app_state (user_id, active_league_id) values ($1, $2)
+         on conflict (user_id) do update set active_league_id = excluded.active_league_id`,
+      [member.id, first.id],
+    );
+
     const page = await asUser(member.email);
     await page.goto('/dashboard');
 
-    // Both memberships are offered. Asserting on the options rather than on
-    // page text, because an <option> is never "visible" to Playwright.
-    const switcher = page.getByLabel('Active league');
-    await expect(switcher.locator('option')).toHaveCount(2);
-    await expect(switcher.locator('option', { hasText: first.name })).toHaveCount(1);
-    await expect(switcher.locator('option', { hasText: second.name })).toHaveCount(1);
+    // The control moved: this was a `<select>` and a Switch button on the
+    // dashboard, and is now the league menu behind the active-league strip,
+    // which is reachable from every screen rather than from this one. The
+    // server action underneath is the same one — see phase9-league-menu.spec.ts
+    // for the menu's own behaviour. What this test still owns is the tenancy
+    // property: one person, two leagues, and a choice that sticks.
+    await page.getByRole('button', { name: /^Active league:/ }).click();
+    const menu = page.getByRole('dialog');
+    await expect(menu.getByText(first.name)).toBeVisible();
+    await expect(menu.getByText(second.name)).toBeVisible();
 
     // Switching is a real form post that writes `user_app_state`. Asserting on
-    // the stored row rather than on the select immediately after the click: the
-    // control's value comes from a fresh server render, so reading it straight
+    // the stored row rather than on the rendered strip immediately after the
+    // click: the strip comes from a fresh server render, so reading it straight
     // away races the revalidation.
-    await switcher.selectOption(second.id);
-    await page.getByRole('button', { name: 'Switch' }).click();
+    await menu.getByRole('button', { name: new RegExp(second.name) }).click();
 
     await expect
       .poll(async () => {
@@ -255,7 +267,7 @@ test.describe('multi-league membership', () => {
     await page.reload();
     // The choice survives a reload, which is the whole point of persisting it
     // server-side rather than in the browser.
-    await expect(page.getByLabel('Active league')).toHaveValue(second.id);
+    await expect(page.getByRole('button', { name: /^Active league:/ })).toContainText(second.name);
   });
 
   test('a league A member cannot read league B pages', async ({ factory, asUser }) => {
