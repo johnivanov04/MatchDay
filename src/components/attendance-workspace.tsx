@@ -3,6 +3,7 @@
 import { useActionState } from 'react';
 import { allowedOutcomes, ATTENDANCE_OUTCOME_LABELS } from '@/lib/matches/attendance-display';
 import { FormError, inputClassName, SubmitButton } from '@/components/ui/field';
+import { PlayerAvatar } from '@/components/ui/player-avatar';
 import { completeMatchAction, recordAttendanceAction } from '@/server/actions/attendance';
 import type { AttendanceOutcome, AttendanceWorkspaceEntry } from '@/types/database';
 
@@ -100,8 +101,14 @@ function AttendanceRow({
             rather than overwriting a decision this administrator never saw. */}
         <input type="hidden" name="expected_revision" value={entry.revision ?? ''} />
 
-        <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-          <p className="text-sm font-medium">{fullName(entry)}</p>
+        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+          {/* `items-center` rather than `items-baseline`: a 32px circle has no
+              text baseline to align to, and baseline alignment would hang it
+              below the name. */}
+          <span className="flex min-w-0 items-center gap-2.5">
+            <PlayerAvatar player={entry} size={32} />
+            <span className="min-w-0 truncate text-sm font-medium">{fullName(entry)}</span>
+          </span>
           {entry.outcome === null ? (
             <p className="text-xs text-muted">Not recorded yet</p>
           ) : (

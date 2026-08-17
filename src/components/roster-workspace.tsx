@@ -2,6 +2,7 @@
 
 import { useActionState, useState } from 'react';
 import { FormError, inputClassName, SubmitButton } from '@/components/ui/field';
+import { PlayerAvatar } from '@/components/ui/player-avatar';
 import {
   addMemberToMatchAction,
   finalizeRosterAction,
@@ -145,18 +146,25 @@ function PlayerRow({
 
   return (
     <li className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--border-subtle)] py-2 last:border-b-0">
-      <div className="min-w-0">
-        <p className="text-sm font-medium">{fullName(entry)}</p>
-        <p className="text-xs text-muted">
-          Responded {respondedLabel(entry.responded_at)}
-          {context.length > 0 ? ` · ${context.join(' · ')}` : ''}
-        </p>
-        {entry.override_reason === null ? null : (
-          <p className="text-xs text-amber-700 dark:text-amber-300">
-            Override: {entry.override_reason}
+      {/* 32px sits inside the row's existing height: the block beside it is
+          already two lines of text. The avatar is `shrink-0` and the text block
+          keeps `min-w-0`, so a long name truncates rather than widening the
+          row. */}
+      <div className="flex min-w-0 items-center gap-2.5">
+        <PlayerAvatar player={entry} size={32} />
+        <div className="min-w-0">
+          <p className="truncate text-sm font-medium">{fullName(entry)}</p>
+          <p className="text-xs text-muted">
+            Responded {respondedLabel(entry.responded_at)}
+            {context.length > 0 ? ` · ${context.join(' · ')}` : ''}
           </p>
-        )}
-        <AttendanceContext summary={summary} />
+          {entry.override_reason === null ? null : (
+            <p className="text-xs text-amber-700 dark:text-amber-300">
+              Override: {entry.override_reason}
+            </p>
+          )}
+          <AttendanceContext summary={summary} />
+        </div>
       </div>
       <div className="flex flex-wrap gap-1.5">
         {entry.status === 'confirmed' ? null : (
@@ -289,10 +297,15 @@ function WaitlistOrder({
           return (
             <li key={membershipId} className="flex items-center justify-between gap-2">
               <input type="hidden" name="membership_ids" value={membershipId} />
-              <span className="text-sm">
-                {index + 1}. {fullName(entry)}
+              {/* The waitlist is the other place a player's identity is visible
+                  to an administrator. 24px, because this row already carries two
+                  44px reorder buttons and does not need to grow. */}
+              <span className="flex min-w-0 items-center gap-2 text-sm">
+                <span className="shrink-0 tabular-nums">{index + 1}.</span>
+                <PlayerAvatar player={entry} size={24} />
+                <span className="min-w-0 truncate">{fullName(entry)}</span>
               </span>
-              <span className="flex gap-1">
+              <span className="flex shrink-0 gap-1">
                 <button
                   type="button"
                   onClick={() => move(index, -1)}

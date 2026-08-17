@@ -47,6 +47,19 @@ export default async function DashboardPage({
         </p>
       )}
 
+      {/*
+        NO AVATAR HERE, DELIBERATELY.
+
+        The obvious place for one is beside this greeting — and it would sit
+        roughly a hundred pixels below the header, which already shows the same
+        person's face next to the same person's first name. Two copies of one
+        avatar, stacked, on the first screen somebody sees after signing in.
+
+        The header's is the useful one: it is on every page, it doubles as the
+        link to the profile, and it is where somebody checks "am I signed in as
+        me". Repeating it here would add clutter and no information, so the
+        greeting stays text. Phase 2's brief allowed for exactly this call.
+      */}
       <section className="flex flex-col gap-2">
         <h1 className="text-2xl font-bold">Hello, {profile.first_name}</h1>
         <p className="text-sm text-muted">

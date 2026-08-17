@@ -874,12 +874,17 @@ describe('teams', () => {
       expect(fields.self).toBe(1);
       // No column exists through which a position, goalkeeper flag, gender or
       // phone number could travel.
+      //
+      // `profile_photo_path` is the one deliberate addition (Phase 2 of profile
+      // photos): an avatar travels exactly as far as the name beside it.
+      // `profile_photo_url` is absent and stays absent.
       expect(fields.columns).toEqual([
         'display_order',
         'first_name',
         'is_self',
         'last_name',
         'membership_id',
+        'profile_photo_path',
         'team_label',
         'team_name',
       ]);

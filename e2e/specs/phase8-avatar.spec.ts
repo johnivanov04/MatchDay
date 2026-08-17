@@ -34,6 +34,20 @@ function avatarImage(page: Page) {
 }
 
 /**
+ * The picker's own initials circle.
+ *
+ * Scoped to the picker, and it has to be: since Phase 2 of profile photos the
+ * application header carries the signed-in user's avatar too, so an unscoped
+ * `getByRole('img', { name: /no profile photo/ })` matches twice on this page —
+ * the header's circle labelled with the first name, and this one labelled with
+ * the full name — and Playwright's strict mode refuses both. The subject of
+ * these tests is the picker.
+ */
+function pickerFallback(page: Page) {
+  return page.getByTestId('avatar-picker').getByRole('img', { name: /no profile photo/ });
+}
+
+/**
  * The picker's own alert.
  *
  * Scoped, because Next.js renders a permanent empty `role="alert"` route
@@ -89,7 +103,7 @@ test.describe('profile photo', () => {
     await expectNoServerError(page);
 
     // Initials to begin with — a new member has no photo.
-    await expect(page.getByRole('img', { name: /no profile photo/ })).toBeVisible();
+    await expect(pickerFallback(page)).toBeVisible();
     await expect(page.getByText('Add photo')).toBeVisible();
 
     await choose(page, LANDSCAPE);
@@ -193,7 +207,7 @@ test.describe('profile photo', () => {
     await expect(page.getByText('Photo removed.')).toBeVisible();
 
     await expect(avatarImage(page)).toHaveCount(0);
-    await expect(page.getByRole('img', { name: /no profile photo/ })).toBeVisible();
+    await expect(pickerFallback(page)).toBeVisible();
 
     await page.reload();
     await expect(avatarImage(page)).toHaveCount(0);

@@ -11,6 +11,7 @@ import {
   type MatchNotice,
 } from '@/lib/auth/page-guards';
 import { SignupControls, SignupStatusBadge } from '@/components/signup';
+import { PlayerAvatar } from '@/components/ui/player-avatar';
 import { formatMatchDate, formatMatchTime } from '@/lib/matches/match-timing';
 import { getMatch, getMatchAdminNotes } from '@/lib/matches/matches';
 import { canEditMatch } from '@/lib/matches/match-permissions';
@@ -296,11 +297,18 @@ export default async function MatchDetailPage({
         ) : (
           // Names only. The waitlist is deliberately absent: a member sees the
           // size of the queue in the line above, never who is in it or where.
-          <ul className="mt-2 flex flex-col gap-1">
+          <ul className="mt-2 flex flex-col gap-1.5">
             {roster.map((player) => (
-              <li key={player.membership_id} className="text-sm">
-                {player.first_name} {player.last_name}
-                {player.is_self ? <span className="ml-1.5 text-xs text-muted">(you)</span> : null}
+              <li key={player.membership_id} className="flex items-center gap-2 text-sm">
+                {/* 24px: the row was a single line of `text-sm`, so this adds
+                    four pixels of height rather than turning a twenty-player
+                    roster into a scroll. `min-w-0` + `truncate` on the name is
+                    what keeps a long one from pushing the row past 320px. */}
+                <PlayerAvatar player={player} size={24} />
+                <span className="min-w-0 truncate">
+                  {player.first_name} {player.last_name}
+                  {player.is_self ? <span className="ml-1.5 text-xs text-muted">(you)</span> : null}
+                </span>
               </li>
             ))}
           </ul>
@@ -355,7 +363,13 @@ export default async function MatchDetailPage({
                       key={team.displayOrder}
                       role="group"
                       aria-label={accessibleName}
-                      className={`rounded-lg border p-3 ${
+                      // `min-w-0`: a grid item will not shrink below its
+                      // content's min-content width, and a truncating name is
+                      // `white-space: nowrap`, so its min-content width is the
+                      // whole name. Without this the team card grows to fit the
+                      // longest name on the sheet and the page scrolls
+                      // sideways at 320px.
+                      className={`min-w-0 rounded-lg border p-3 ${
                         mine
                           ? 'border-pitch-500/50 bg-pitch-50 dark:bg-pitch-900/40'
                           : 'border-[var(--border-subtle)]'
@@ -368,13 +382,19 @@ export default async function MatchDetailPage({
                       {team.label === null ? null : (
                         <p className="text-xs text-muted">{team.label}</p>
                       )}
-                      <ul className="mt-1.5 flex flex-col gap-0.5">
+                      <ul className="mt-1.5 flex flex-col gap-1">
                         {team.players.map((player) => (
-                          <li key={player.membership_id} className="text-sm">
-                            {player.first_name} {player.last_name}
-                            {player.is_self ? (
-                              <span className="ml-1.5 text-xs text-muted">(you)</span>
-                            ) : null}
+                          <li
+                            key={player.membership_id}
+                            className="flex items-center gap-2 text-sm"
+                          >
+                            <PlayerAvatar player={player} size={24} />
+                            <span className="min-w-0 truncate">
+                              {player.first_name} {player.last_name}
+                              {player.is_self ? (
+                                <span className="ml-1.5 text-xs text-muted">(you)</span>
+                              ) : null}
+                            </span>
                           </li>
                         ))}
                       </ul>

@@ -42,18 +42,25 @@ export async function findMyLeagueBySlug(
 export interface LeagueMemberSummary {
   membership: LeagueMembershipRow;
   /** Only the fields an administrator needs to manage membership. */
-  profile: Pick<ProfileRow, 'id' | 'first_name' | 'last_name' | 'email_normalized'> | null;
+  profile: Pick<
+    ProfileRow,
+    'id' | 'first_name' | 'last_name' | 'email_normalized' | 'profile_photo_path'
+  > | null;
 }
 
 /**
  * Every membership in the league, with just enough profile to identify a
  * person.
  *
- * Phone, gender, goalkeeper willingness and photo are deliberately not
- * selected. An administrator may read them under Phase 1's
- * `profiles_select_league_admin` policy, but the member-management screen has
- * no use for them, and not fetching them is what keeps them out of the RSC
- * payload.
+ * Phone, gender and goalkeeper willingness are deliberately not selected. An
+ * administrator may read them under Phase 1's `profiles_select_league_admin`
+ * policy, but the member-management screen has no use for them, and not
+ * fetching them is what keeps them out of the RSC payload.
+ *
+ * `profile_photo_path` is selected and `profile_photo_url` is not. The
+ * administrator could read the legacy column too, so this is not a security
+ * boundary here — it is the same rule every other-player surface follows, kept
+ * uniform so nobody has to remember which screens are exceptions.
  */
 export async function getLeagueMembers(leagueId: string): Promise<LeagueMemberSummary[]> {
   await requireLeagueAdmin(leagueId);
@@ -77,7 +84,7 @@ export async function getLeagueMembers(leagueId: string): Promise<LeagueMemberSu
 
   const { data: profiles } = await supabase
     .from('profiles')
-    .select('id, first_name, last_name, email_normalized')
+    .select('id, first_name, last_name, email_normalized, profile_photo_path')
     .in('id', userIds);
 
   const profilesById = new Map((profiles ?? []).map((profile) => [profile.id, profile]));
@@ -90,10 +97,23 @@ export async function getLeagueMembers(leagueId: string): Promise<LeagueMemberSu
 
 export interface JoinRequestSummary {
   request: LeagueJoinRequestRow;
+  /**
+   * NO PHOTO, DELIBERATELY — see the select below. Kept as a narrower `Pick`
+   * than `LeagueMemberSummary` so a component cannot render an avatar here even
+   * by accident.
+   */
   profile: Pick<ProfileRow, 'id' | 'first_name' | 'last_name' | 'email_normalized'> | null;
 }
 
-/** Pending join requests for the league, oldest first. */
+/**
+ * Pending join requests for the league, oldest first.
+ *
+ * `profile_photo_path` is **not** selected. The product rule is that a managed
+ * avatar is visible where an existing member's identity already is, and somebody
+ * asking to join is not a member yet — they are a stranger whose request has not
+ * been decided. Their name and email are shown because deciding requires
+ * knowing who is asking; a face is not part of that decision.
+ */
 export async function getPendingJoinRequests(leagueId: string): Promise<JoinRequestSummary[]> {
   await requireLeagueAdmin(leagueId);
   const supabase = await createSupabaseServerClient();

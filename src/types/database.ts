@@ -393,12 +393,23 @@ export type SignupOutcome = {
   waitlist_position: number | null;
 };
 
-/** A confirmed player as a member is allowed to see them: a name, and nothing else. */
+/**
+ * A confirmed player as a member is allowed to see them.
+ *
+ * A name and a managed avatar path, and nothing else. `profile_photo_path` is
+ * the *object key* — `{uuid}/{uuid}.jpg` — not a URL; `managedAvatarUrl()`
+ * turns it into one, and is the only thing that does.
+ *
+ * There is deliberately no `profile_photo_url` here or on any other projected
+ * player type. A legacy address points at a host nobody here controls, and no
+ * projection returns one — not even for the caller's own row.
+ */
 export type ConfirmedRosterEntry = {
   membership_id: string;
   first_name: string;
   last_name: string;
   is_self: boolean;
+  profile_photo_path: string | null;
 };
 
 export type MatchSignupCounts = {
@@ -439,6 +450,7 @@ export type RosterAdminEntry = {
   membership_status: MembershipStatus;
   selected_at: string | null;
   override_reason: string | null;
+  profile_photo_path: string | null;
 };
 
 export type AddableMember = {
@@ -493,13 +505,15 @@ export type TeamBuilderPlayer = {
   preferred_positions: string[];
   goalkeeper_willing: boolean | null;
   gender: string | null;
+  profile_photo_path: string | null;
 };
 
 /**
  * One published team placement, as a confirmed player sees it.
  *
- * Names only. There is no column here through which a position, goalkeeper
- * flag, gender or phone number could travel.
+ * Names and managed avatar paths only. There is no column here through which a
+ * position, goalkeeper flag, gender, phone number or legacy photo address could
+ * travel.
  */
 export type PublishedTeamEntry = {
   team_name: string;
@@ -509,6 +523,7 @@ export type PublishedTeamEntry = {
   first_name: string;
   last_name: string;
   is_self: boolean;
+  profile_photo_path: string | null;
 };
 
 // ── Phase 7 ────────────────────────────────────────────────────────────────
@@ -546,6 +561,7 @@ export type AttendanceWorkspaceEntry = {
   note: string | null;
   revision: number | null;
   recorded_at: string | null;
+  profile_photo_path: string | null;
 };
 
 /** A player's own outcome for one match. No note, and no way to ask about anybody else. */
