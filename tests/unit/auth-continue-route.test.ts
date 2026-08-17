@@ -64,6 +64,17 @@ function render(confirmationUrl?: string) {
   });
 }
 
+/** The new link shape: the hashed token itself, verified by our own POST. */
+function renderTokenHash(params: Record<string, string>) {
+  return AuthContinuePage({ searchParams: Promise.resolve(params) });
+}
+
+async function tokenHashHtml(params: Record<string, string>): Promise<string> {
+  return renderToStaticMarkup((await renderTokenHash(params)) as ReactElement);
+}
+
+const TOKEN_HASH = 'pkce_c0adcef6376432f4b676752aa1a63bd7b4b71876b82705abedee78fd';
+
 /**
  * The page's actual HTML.
  *
@@ -146,14 +157,89 @@ describe('rendering does not consume the one-time token', () => {
     expect(code).not.toContain('redirect(');
   });
 
-  it('does not use next/link for the confirmation anchor, which would prefetch', async () => {
+  it('does not use next/link for the legacy anchor, which would prefetch', async () => {
     const code = codeOf('src/app/auth/continue/page.tsx');
 
     // next/link prefetches on hover and on entering the viewport. Pointing it
     // at the confirmation URL would recreate the exact bug this page fixes.
     // `<Link>` is still used for the internal /sign-in links, which is fine.
-    expect(code).not.toMatch(/<Link[^>]*href=\{result\.url\}/);
-    expect(code).toMatch(/<a[\s\S]*href=\{result\.url\}/);
+    expect(code).not.toMatch(/<Link[^>]*href=\{legacy\./);
+    expect(code).toMatch(/<a[\s\S]*href=\{legacy\.ok/);
+  });
+
+  it('spends nothing when handed a token hash either', async () => {
+    await renderTokenHash({ token_hash: TOKEN_HASH, type: 'signup' });
+
+    expect(mocks.createSupabaseServerClient).not.toHaveBeenCalled();
+    expect(mocks.createSupabaseAnonClient).not.toHaveBeenCalled();
+    expect(mocks.createSupabaseAdminClient).not.toHaveBeenCalled();
+    expect(mocks.fetch).not.toHaveBeenCalled();
+    expect(mocks.redirect).not.toHaveBeenCalled();
+  });
+});
+
+describe('the token-hash link renders a form, not a navigation', () => {
+  it('puts the token in a form that only a submission can send', async () => {
+    const markup = await tokenHashHtml({ token_hash: TOKEN_HASH, type: 'signup' });
+
+    // A form and a submit button. A scanner issuing GETs cannot trigger either,
+    // which is the entire prefetch defence.
+    expect(markup).toContain('<form');
+    expect(markup).toContain('Continue to MatchDay');
+    expect(markup).toContain('type="submit"');
+    // And no anchor pointing anywhere near Supabase.
+    expect(markup).not.toContain('/auth/v1/verify');
+  });
+
+  it('carries the token and type as form fields', async () => {
+    const markup = await tokenHashHtml({ token_hash: TOKEN_HASH, type: 'magiclink' });
+
+    expect(markup).toContain(`value="${TOKEN_HASH}"`);
+    expect(markup).toContain('value="magiclink"');
+  });
+
+  it('sanitises the next path before it reaches the form', async () => {
+    const markup = await tokenHashHtml({
+      token_hash: TOKEN_HASH,
+      type: 'signup',
+      next: 'https://evil.example/steal',
+    });
+
+    expect(markup).not.toContain('evil.example');
+    expect(markup).toContain('value="/dashboard"');
+  });
+
+  const rejected: Array<[string, Record<string, string>]> = [
+    ['an unsupported type', { token_hash: TOKEN_HASH, type: 'recovery' }],
+    ['an invented type', { token_hash: TOKEN_HASH, type: 'admin' }],
+    ['a missing type', { token_hash: TOKEN_HASH }],
+    ['a malformed token', { token_hash: '../../etc/passwd', type: 'signup' }],
+    ['an empty token', { token_hash: '', type: 'signup' }],
+    ['a token that is far too long', { token_hash: 'a'.repeat(500), type: 'signup' }],
+    ['an explicit failure marker', { error: 'invalid' }],
+  ];
+
+  it.each(rejected)('refuses %s with the one shared message', async (_label, params) => {
+    const markup = await tokenHashHtml(params);
+
+    expect(markup).toContain('expired');
+    expect(markup).not.toContain('type="submit"');
+    expect(markup).toContain('/sign-in');
+  });
+
+  it('does not echo a rejected token back into the page', async () => {
+    const markup = await tokenHashHtml({ token_hash: 'x'.repeat(500), type: 'signup' });
+
+    expect(markup).not.toContain('xxxxxxxxxx');
+  });
+
+  it('refuses a valid token carrying an unsupported type, even with a legacy URL alongside', async () => {
+    // Belt and braces: a crafted link cannot smuggle `recovery` through by
+    // pairing it with something the page does accept.
+    const markup = await tokenHashHtml({ token_hash: TOKEN_HASH, type: 'recovery' });
+
+    expect(markup).toContain('expired');
+    expect(markup).not.toContain(TOKEN_HASH);
   });
 });
 
@@ -162,7 +248,7 @@ describe('the valid case renders an explicit human action', () => {
     const markup = await html(VALID);
 
     expect(markup).toContain('/auth/v1/verify');
-    expect(markup).toContain('Continue sign in');
+    expect(markup).toContain('Continue to MatchDay');
   });
 
   it('asks crawlers not to follow it', async () => {
@@ -186,7 +272,7 @@ describe('an unusable link produces a safe error state', () => {
   it.each(bad)('renders the error state for %s', async (_label, value) => {
     const markup = await html(value);
 
-    expect(markup).toContain('not valid');
+    expect(markup).toContain('expired');
     expect(markup).toContain('/sign-in');
   });
 

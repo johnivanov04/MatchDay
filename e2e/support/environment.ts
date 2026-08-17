@@ -16,6 +16,15 @@ export interface SupabaseEnvironment {
   databaseUrl: string;
   anonKey: string;
   serviceRoleKey: string;
+  /**
+   * The local mail catcher, where every email the stack sends arrives.
+   *
+   * Needed by the confirmation-flow spec, which reads a real email rather than
+   * composing the link it is supposed to be testing. Defaults to the CLI's
+   * standard port so a stack started without the extra environment variable
+   * still works.
+   */
+  mailpitUrl: string;
 }
 
 interface SupabaseStatusJson {
@@ -23,7 +32,11 @@ interface SupabaseStatusJson {
   DB_URL?: string;
   ANON_KEY?: string;
   SERVICE_ROLE_KEY?: string;
+  MAILPIT_URL?: string;
+  INBUCKET_URL?: string;
 }
+
+const DEFAULT_MAILPIT_URL = 'http://127.0.0.1:54324';
 
 let cached: SupabaseEnvironment | null = null;
 
@@ -52,6 +65,7 @@ export function readSupabaseEnvironment(): SupabaseEnvironment {
       databaseUrl: fromEnv.databaseUrl,
       anonKey: fromEnv.anonKey,
       serviceRoleKey: fromEnv.serviceRoleKey,
+      mailpitUrl: process.env['E2E_MAILPIT_URL'] ?? DEFAULT_MAILPIT_URL,
     };
     return cached;
   }
@@ -92,6 +106,11 @@ export function readSupabaseEnvironment(): SupabaseEnvironment {
     databaseUrl: status.DB_URL,
     anonKey: status.ANON_KEY,
     serviceRoleKey: status.SERVICE_ROLE_KEY,
+    mailpitUrl:
+      process.env['E2E_MAILPIT_URL'] ??
+      status.MAILPIT_URL ??
+      status.INBUCKET_URL ??
+      DEFAULT_MAILPIT_URL,
   };
   return cached;
 }
