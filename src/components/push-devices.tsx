@@ -139,7 +139,7 @@ export function EnablePushButton({ vapidPublicKey }: { vapidPublicKey: string | 
         type="button"
         onClick={() => void enable()}
         disabled={status.kind === 'working'}
-        className="inline-flex min-h-11 items-center justify-center rounded-lg bg-pitch-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-pitch-700 disabled:opacity-60"
+        className="inline-flex min-h-control items-center justify-center rounded-lg bg-pitch-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-pitch-700 disabled:opacity-55"
       >
         {status.kind === 'working' ? 'Enabling…' : 'Enable phone notifications'}
       </button>
@@ -154,18 +154,18 @@ export function EnablePushButton({ vapidPublicKey }: { vapidPublicKey: string | 
       {status.kind === 'denied' ? (
         <p role="status" className="text-sm text-muted">
           Notifications are blocked for this site in your browser settings. Everything still
-          arrives in your Matchday inbox.
+          arrives in your MatchDay inbox.
         </p>
       ) : null}
 
       {status.kind === 'error' ? (
-        <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+        <p role="alert" className="text-sm text-whistle-600 dark:text-whistle-300">
           {status.message}
         </p>
       ) : null}
 
       <p className="text-xs text-muted">
-        On iPhone, add Matchday to your home screen first — iOS only delivers web notifications to
+        On iPhone, add MatchDay to your home screen first — iOS only delivers web notifications to
         installed apps.
       </p>
     </div>
@@ -195,7 +195,7 @@ export function DeviceRow({ device }: { device: PushSubscriptionRow }) {
           <button
             type="submit"
             disabled={toggling}
-            className="min-h-11 rounded-lg border border-[var(--border-subtle)] px-3 py-1.5 text-sm disabled:opacity-60"
+            className="min-h-control rounded-[var(--radius-md)] border border-[var(--border-subtle)] px-3 py-1.5 text-sm disabled:opacity-55"
           >
             {device.enabled ? 'Turn off' : 'Turn on'}
           </button>
@@ -206,7 +206,7 @@ export function DeviceRow({ device }: { device: PushSubscriptionRow }) {
           <button
             type="submit"
             disabled={removing}
-            className="min-h-11 rounded-lg border border-[var(--border-subtle)] px-3 py-1.5 text-sm disabled:opacity-60"
+            className="min-h-control rounded-[var(--radius-md)] border border-[var(--border-subtle)] px-3 py-1.5 text-sm disabled:opacity-55"
           >
             Remove
           </button>
@@ -214,7 +214,7 @@ export function DeviceRow({ device }: { device: PushSubscriptionRow }) {
       </div>
 
       {toggleState?.ok === false || removeState?.ok === false ? (
-        <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+        <p role="alert" className="text-sm text-whistle-600 dark:text-whistle-300">
           That device could not be updated.
         </p>
       ) : null}

@@ -85,7 +85,7 @@ const USER_FACING_MESSAGES: Record<DomainErrorCode, string> = {
   // Deliberately identical for a bad, expired, revoked or exhausted link: the
   // distinction would tell a probe that a private league exists.
   INVITE_INVALID: 'That invitation link is not valid or has expired.',
-  PROFILE_NOT_FOUND: 'No Matchday account uses that email address.',
+  PROFILE_NOT_FOUND: 'No MatchDay account uses that email address.',
   SLUG_TAKEN: 'That league address is already taken.',
   MATCH_NOT_DRAFT: 'That match has been published, so it is edited a different way.',
   // Actionable on purpose: the fix is to reload, and saying so avoids somebody

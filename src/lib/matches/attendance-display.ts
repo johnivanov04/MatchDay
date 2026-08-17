@@ -1,3 +1,4 @@
+import type { BadgeTone } from '@/components/ui/badge';
 import type { AttendanceOutcome } from '@/types/database';
 
 /**
@@ -27,6 +28,31 @@ export const ATTENDANCE_OUTCOME_LABELS: Record<AttendanceOutcome, string> = {
   canceled_on_time: 'Cancelled on time',
   canceled_late: 'Cancelled late',
   no_show: 'Did not attend',
+};
+
+/**
+ * The badge tone each outcome is shown in.
+ *
+ * ── WHY THIS IS NOT A SEVERITY SCALE ───────────────────────────────────────
+ *
+ * It is the same four-tone vocabulary the rest of the product uses for state —
+ * a match is open or cancelled, a membership is active or suspended — applied
+ * to a *single recorded fact* about a *single match*. That is deliberately not
+ * the same thing as colouring somebody's history: the roster workspace shows
+ * attendance counts as a plain sentence with no badge and no colour, because
+ * 04 §1 reserves judgement about a person for the administrator, and a red dot
+ * against a running total is the product making that judgement instead.
+ *
+ * Here there is no total to judge. "Did not attend, on this match" is red for
+ * the same reason "Canceled" is red on a match card: it is the negative
+ * outcome of one event, and it is stated in words beside the colour.
+ */
+export const ATTENDANCE_OUTCOME_TONES: Record<AttendanceOutcome, BadgeTone> = {
+  attended: 'live',
+  excused_absence: 'neutral',
+  canceled_on_time: 'neutral',
+  canceled_late: 'pending',
+  no_show: 'off',
 };
 
 /** The order the outcomes are offered in: most common first, not most severe. */

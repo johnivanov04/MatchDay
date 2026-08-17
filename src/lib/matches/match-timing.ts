@@ -156,6 +156,24 @@ export function formatMatchTime(instant: Date, timeZone: string): string {
   }).format(instant);
 }
 
+/**
+ * Clock time only, in the league's zone.
+ *
+ * For the arrive/kickoff/ends strip on the match page, where the date sits
+ * above it in the page header and the zone is stated once beneath. The full
+ * `formatMatchTime` string — "Wed 19 Aug, 19:00 GMT-7" — wrapped onto three
+ * lines inside a 130px column on a phone and turned a scannable strip into a
+ * block of broken text.
+ */
+export function formatMatchClock(instant: Date, timeZone: string): string {
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone,
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).format(instant);
+}
+
 /** Date only, in the league's zone. */
 export function formatMatchDate(instant: Date, timeZone: string): string {
   return new Intl.DateTimeFormat('en-GB', {

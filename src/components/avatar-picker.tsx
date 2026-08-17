@@ -3,6 +3,9 @@
 import { useEffect, useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { Avatar } from '@/components/ui/avatar';
+import { Button } from '@/components/ui/button';
+import { Spinner } from '@/components/ui/field';
+import { CheckIcon, ImageIcon } from '@/components/ui/icon';
 import { AVATAR_FILE_FIELD } from '@/lib/profile/avatar';
 import { AvatarImageError, avatarImageMessage, processAvatarImage } from '@/lib/profile/image';
 import { removeAvatarAction, uploadAvatarAction } from '@/server/actions/avatar';
@@ -183,33 +186,29 @@ export function AvatarPicker({ currentSrc, initials, label }: AvatarPickerProps)
       />
 
       <div className="flex flex-wrap items-center justify-center gap-2">
+        {/* A styled <label>, not a button: it has to be the file input's label
+            for the native picker to open from a tap, and for keyboard users to
+            reach the input at all. It borrows the secondary button's styling
+            rather than sharing the component, because `Button` renders a
+            <button> and a nested control here would break both. */}
         <label
           htmlFor="avatar-file"
-          className={`inline-flex min-h-11 cursor-pointer items-center justify-center rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-raised)] px-4 py-2.5 text-sm font-semibold hover:bg-pitch-50 dark:hover:bg-pitch-900 ${
-            busy ? 'pointer-events-none opacity-60' : ''
+          className={`press inline-flex min-h-control cursor-pointer select-none items-center justify-center gap-2 rounded-[var(--radius-md)] border border-[var(--border-strong)] bg-[var(--surface-raised)] px-4 py-2.5 text-sm font-semibold hover:bg-[var(--surface-hover)] ${
+            busy ? 'pointer-events-none opacity-55' : ''
           }`}
         >
+          <ImageIcon size={16} />
           {hasStoredPhoto || processed !== null ? 'Change photo' : 'Add photo'}
         </label>
 
         {processed === null ? null : (
           <>
-            <button
-              type="button"
-              onClick={onSave}
-              disabled={busy}
-              className="inline-flex min-h-11 items-center justify-center rounded-lg bg-pitch-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-pitch-700 disabled:opacity-60"
-            >
+            <Button variant="primary" onClick={onSave} disabled={busy} icon={<CheckIcon size={16} />}>
               {phase === 'saving' ? 'Saving…' : 'Save photo'}
-            </button>
-            <button
-              type="button"
-              onClick={discard}
-              disabled={busy}
-              className="inline-flex min-h-11 items-center justify-center rounded-lg px-3 py-2.5 text-sm font-medium text-muted underline disabled:opacity-60"
-            >
+            </Button>
+            <Button variant="ghost" onClick={discard} disabled={busy}>
               Cancel
-            </button>
+            </Button>
           </>
         )}
 
@@ -218,21 +217,22 @@ export function AvatarPicker({ currentSrc, initials, label }: AvatarPickerProps)
             type="button"
             onClick={onRemove}
             disabled={busy}
-            className="inline-flex min-h-11 items-center justify-center rounded-lg px-3 py-2.5 text-sm font-medium text-red-700 underline disabled:opacity-60 dark:text-red-400"
+            className="press inline-flex min-h-control items-center justify-center rounded-[var(--radius-md)] px-3 py-2.5 text-sm font-medium text-whistle-700 hover:bg-whistle-50 disabled:opacity-55 dark:text-whistle-300 dark:hover:bg-whistle-900/30"
           >
             {phase === 'removing' ? 'Removing…' : 'Remove photo'}
           </button>
         ) : null}
       </div>
 
-      <p className="text-center text-xs text-muted">
+      <p className="flex items-center justify-center gap-1.5 text-center text-xs text-muted">
+        {phase === 'processing' ? <Spinner size={13} /> : null}
         {phase === 'processing'
           ? 'Preparing your photo…'
           : 'Squared and resized on your device before it is uploaded.'}
       </p>
 
       {error === null ? null : (
-        <p role="alert" className="text-center text-sm text-red-600 dark:text-red-400">
+        <p role="alert" className="text-center text-sm text-whistle-600 dark:text-whistle-300">
           {error}
         </p>
       )}

@@ -107,7 +107,11 @@ test.describe('join requests', () => {
     await applicantPage.goto('/leagues/discover');
     await applicantPage.getByLabel('Search by name or area').fill(league.name);
     await applicantPage.getByRole('button', { name: 'Search' }).click();
+    // Two steps by design: the card offers a quiet "Request to join", which
+    // reveals the optional note to the administrator and the confirm. A result
+    // list of eight leagues is not eight primary actions.
     await applicantPage.getByRole('button', { name: 'Request to join' }).click();
+    await applicantPage.getByRole('button', { name: 'Send request' }).click();
     await expect(applicantPage.getByText('Request sent — awaiting approval.')).toBeVisible();
 
     // A second attempt must not create a second request.

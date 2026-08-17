@@ -154,11 +154,33 @@ function isElement(node: unknown): node is ElementLike {
   return typeof node === 'object' && node !== null && 'type' in node && 'props' in node;
 }
 
-/** Every element in a rendered tree, so assertions can ask what it contains. */
+/**
+ * Every element in a rendered tree, so assertions can ask what it contains.
+ *
+ * ── WHY THIS WALKS EVERY PROP AND NOT ONLY `children` ──────────────────────
+ *
+ * It used to follow `props.children` alone, which was enough while every page
+ * was one nested chain of markup. The redesign passes composed elements through
+ * *named* props — `<PageHeader actions={<ButtonLink …/>} />`,
+ * `<EmptyState action={…} />`, `<Section action={…} />` — and a walker that
+ * only follows `children` cannot see any of them.
+ *
+ * That is a limitation of this helper rather than a change in the product: the
+ * edit button is still rendered, still a link, still guarded the same way. Left
+ * as it was, these tests would have reported "the administrator has no edit
+ * link" for a page that has one, which is the worst kind of test failure —
+ * loud, and about the wrong thing.
+ */
 function flatten(node: unknown): ElementLike[] {
   if (Array.isArray(node)) return node.flatMap(flatten);
   if (!isElement(node)) return [];
-  return [node, ...flatten(node.props['children'])];
+
+  return [
+    node,
+    // Every prop, not just `children`. Non-element values fall out of
+    // `isElement` immediately, so this costs a type check per prop.
+    ...Object.values(node.props).flatMap(flatten),
+  ];
 }
 
 function linkTargets(tree: unknown): string[] {

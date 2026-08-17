@@ -166,10 +166,15 @@ test('an administrator can see who has acknowledged', async ({ factory, asUser }
   await page.goto(`/leagues/${league.slug}/guidelines/manage`);
 
   await expectNoServerError(page);
-  // Reported as an aggregate — "N of M members have not yet accepted" — rather
-  // than as a list of names. Who has not signed a document is exactly the kind
-  // of per-person detail the administrator does not need spelled out to act.
-  await expect(page.getByText(/members have not yet accepted/)).toBeVisible();
+  // Reported as an aggregate — "N of M members ha{s,ve} not yet accepted" —
+  // rather than as a list of names. Who has not signed a document is exactly
+  // the kind of per-person detail the administrator does not need spelled out
+  // to act.
+  //
+  // The verb is not pinned, because it agrees with the outstanding count: the
+  // sentence reads "1 of 3 members has" and "2 of 3 members have". Matching the
+  // plural form alone was quietly asserting a grammatical bug.
+  await expect(page.getByText(/of \d+ members? ha(s|ve) not yet accepted/)).toBeVisible();
   await expect(page.locator('body')).not.toContainText(accepted.email);
 });
 

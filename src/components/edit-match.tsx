@@ -59,7 +59,7 @@ export function EditDraftMatchForm({
 
       <FormError message={state?.ok === false ? state.message : undefined} />
 
-      <p className="rounded-lg border border-[var(--border-subtle)] px-3 py-2 text-sm text-muted">
+      <p className="rounded-[var(--radius-md)] border border-[var(--border-subtle)] px-3 py-2 text-sm text-muted">
         This match is a draft. Members cannot see it, and saving does not notify anybody.
       </p>
 

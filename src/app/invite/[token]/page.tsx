@@ -36,7 +36,7 @@ export default async function InvitePage({ params }: { params: Promise<{ token: 
   return (
     <main id="main" className="mx-auto flex w-full max-w-md flex-col gap-6 px-5 py-12">
       <header className="flex flex-col gap-2">
-        <p className="text-sm font-semibold uppercase tracking-wide text-pitch-600">Matchday</p>
+        <p className="text-sm font-semibold uppercase tracking-wide text-pitch-600">MatchDay</p>
         <h1 className="text-2xl font-bold">You have been invited</h1>
         <p className="text-sm text-muted">
           Accepting adds this league to your account. You keep one profile across every league you
@@ -49,7 +49,7 @@ export default async function InvitePage({ params }: { params: Promise<{ token: 
       ) : (
         <p
           role="alert"
-          className="rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-900 dark:bg-red-950/50 dark:text-red-200"
+          className="rounded-lg border border-whistle-200 bg-whistle-50 px-3 py-2 text-sm text-red-800 dark:border-whistle-900 dark:bg-whistle-900/25 dark:text-red-200"
         >
           That invitation link is not valid or has expired.
         </p>

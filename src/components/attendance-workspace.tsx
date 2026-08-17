@@ -1,7 +1,12 @@
 'use client';
 
 import { useActionState } from 'react';
-import { allowedOutcomes, ATTENDANCE_OUTCOME_LABELS } from '@/lib/matches/attendance-display';
+import {
+  allowedOutcomes,
+  ATTENDANCE_OUTCOME_LABELS,
+  ATTENDANCE_OUTCOME_TONES,
+} from '@/lib/matches/attendance-display';
+import { Badge } from '@/components/ui/badge';
 import { FormError, inputClassName, SubmitButton } from '@/components/ui/field';
 import { PlayerAvatar } from '@/components/ui/player-avatar';
 import { completeMatchAction, recordAttendanceAction } from '@/server/actions/attendance';
@@ -109,17 +114,40 @@ function AttendanceRow({
             <PlayerAvatar player={entry} size={32} />
             <span className="min-w-0 truncate text-sm font-medium">{fullName(entry)}</span>
           </span>
-          {entry.outcome === null ? (
-            <p className="text-xs text-muted">Not recorded yet</p>
-          ) : (
-            <p className="text-xs text-muted">
-              {ATTENDANCE_OUTCOME_LABELS[entry.outcome]}
-              {entry.recorded_at === null ? '' : ` · ${recordedLabel(entry.recorded_at)}`}
-              {entry.revision !== null && entry.revision > 1
-                ? ` · corrected ${String(entry.revision - 1)}×`
-                : ''}
-            </p>
-          )}
+          {/*
+            The outcome now speaks the same visual language as every other state
+            in the product — a `Badge` with a tone, the label always present so
+            colour is a second channel rather than the only one. It was `text-xs
+            text-muted` prose, identical in weight to the timestamp beside it,
+            on the one screen whose entire purpose is recording these five
+            values.
+
+            `data-testid` because the end-to-end suite used to reach this
+            through `locator('p')` — "the paragraph in this row" — which pinned
+            the markup to a `<p>` and would have made any structural improvement
+            a test failure. A test identity is the right anchor for something a
+            test needs to find.
+          */}
+          <span
+            data-testid="attendance-summary"
+            className="flex flex-wrap items-center gap-2 text-xs text-muted"
+          >
+            {entry.outcome === null ? (
+              'Not recorded yet'
+            ) : (
+              <>
+                <Badge tone={ATTENDANCE_OUTCOME_TONES[entry.outcome]} dot>
+                  {ATTENDANCE_OUTCOME_LABELS[entry.outcome]}
+                </Badge>
+                <span>
+                  {entry.recorded_at === null ? '' : `· ${recordedLabel(entry.recorded_at)}`}
+                  {entry.revision !== null && entry.revision > 1
+                    ? ` · corrected ${String(entry.revision - 1)}×`
+                    : ''}
+                </span>
+              </>
+            )}
+          </span>
         </div>
 
         {note === null ? null : <p className="text-xs text-muted">{note}</p>}

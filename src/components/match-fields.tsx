@@ -1,6 +1,6 @@
 'use client';
 
-import { Field, inputClassName } from '@/components/ui/field';
+import { Field, inputClassName, timeInputClassName } from '@/components/ui/field';
 
 /**
  * The match form fields, shared by creation and by both edit modes.
@@ -74,11 +74,11 @@ export function MatchCoreFields({
           type="date"
           required
           defaultValue={defaults.match_date}
-          className={inputClassName}
+          className={timeInputClassName}
         />
       </Field>
 
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-3 gap-2">
         <Field label="Arrive" htmlFor="arrival_time" error={fieldError('arrival_time')}>
           <input
             id="arrival_time"
@@ -86,7 +86,7 @@ export function MatchCoreFields({
             type="time"
             required
             defaultValue={defaults.arrival_time}
-            className={inputClassName}
+            className={timeInputClassName}
           />
         </Field>
         <Field label="Kickoff" htmlFor="kickoff_time" error={fieldError('kickoff_time')}>
@@ -96,7 +96,7 @@ export function MatchCoreFields({
             type="time"
             required
             defaultValue={defaults.kickoff_time}
-            className={inputClassName}
+            className={timeInputClassName}
           />
         </Field>
         <Field label="Ends" htmlFor="end_time" error={fieldError('end_time')}>
@@ -106,7 +106,7 @@ export function MatchCoreFields({
             type="time"
             required
             defaultValue={defaults.end_time}
-            className={inputClassName}
+            className={timeInputClassName}
           />
         </Field>
       </div>
@@ -141,7 +141,7 @@ export function MatchCoreFields({
         />
       </Field>
 
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-3 gap-2">
         <Field label="Capacity" htmlFor="capacity" error={fieldError('capacity')}>
           <input
             id="capacity"

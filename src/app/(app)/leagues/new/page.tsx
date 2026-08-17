@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { LeagueForm } from '@/components/league-form';
 import { requireOnboardedUser } from '@/lib/auth/page-guards';
 import { supportedTimezones } from '@/lib/leagues/timezones';
+import { PageHeader } from '@/components/ui/page-header';
 
 export const metadata: Metadata = { title: 'Create a league' };
 
@@ -15,12 +16,11 @@ export default async function NewLeaguePage() {
 
   return (
     <>
-      <header className="flex flex-col gap-1">
-        <h1 className="text-2xl font-bold">Create a league</h1>
-        <p className="text-sm text-muted">
-          You will be its administrator. Everything here can be changed later.
-        </p>
-      </header>
+      <PageHeader
+        title="Create a league"
+        description="You will be its administrator. Everything here can be changed later."
+        back={{ href: '/leagues/discover', label: 'Back to search' }}
+      />
 
       <LeagueForm mode="create" timezones={supportedTimezones()} />
     </>

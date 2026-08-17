@@ -2,6 +2,7 @@
 
 import { useActionState, useState } from 'react';
 import { Field, FormError, inputClassName, SubmitButton } from '@/components/ui/field';
+import { CheckIcon } from '@/components/ui/icon';
 import { EMAIL_OTP_INPUT_PATTERN, EMAIL_OTP_MAX_LENGTH } from '@/lib/auth/otp';
 import { requestSignInEmailAction, verifySignInCodeAction } from '@/server/actions/auth';
 
@@ -25,10 +26,16 @@ export function SignInForm({ nextPath }: { nextPath: string }) {
 
   if (sentTo !== null) {
     return (
-      <div className="flex flex-col gap-5">
-        <div className="surface-card p-4">
-          <h2 className="text-base font-semibold">Check your email</h2>
-          <p className="mt-1 text-sm text-muted">
+      <div className="animate-rise flex flex-col gap-5">
+        <div className="flex flex-col items-center gap-2 text-center">
+          <span
+            aria-hidden="true"
+            className="animate-pop inline-flex h-12 w-12 items-center justify-center rounded-full bg-pitch-50 text-pitch-600 dark:bg-pitch-900/50 dark:text-pitch-300"
+          >
+            <CheckIcon size={24} />
+          </span>
+          <h2 className="text-lg font-bold">Check your email</h2>
+          <p className="text-sm leading-relaxed text-secondary">
             We sent a sign-in link and a one-time code to <strong>{sentTo}</strong>. Open the link
             on this device, or enter the code below.
           </p>

@@ -3,6 +3,7 @@ import { DeviceRow, EnablePushButton } from '@/components/push-devices';
 import { requireOnboardedUser } from '@/lib/auth/page-guards';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import type { PushSubscriptionRow } from '@/types/database';
+import { PageHeader } from '@/components/ui/page-header';
 
 export const metadata: Metadata = { title: 'Phone notifications' };
 
@@ -33,16 +34,14 @@ export default async function DevicesPage() {
 
   return (
     <>
-      <header className="flex flex-col gap-1">
-        <h1 className="text-2xl font-bold">Phone notifications</h1>
-        <p className="text-sm text-muted">
-          Get match alerts on your phone even when Matchday is closed. Everything also stays in
-          your in-app inbox, so turning this off loses nothing.
-        </p>
-      </header>
+      <PageHeader
+        title="Phone notifications"
+        description="Get match alerts on your phone even when MatchDay is closed. Everything also stays in your in-app inbox, so turning this off loses nothing."
+        back={{ href: '/profile', label: 'Back to your profile' }}
+      />
 
       <section className="surface-card flex flex-col gap-3 p-4">
-        <h2 className="text-base font-semibold">This device</h2>
+        <h2 className="text-[0.9375rem] font-semibold">This device</h2>
         {vapidPublicKey === null ? (
           <p className="text-sm text-muted">
             Phone notifications are not configured on this deployment. Your in-app inbox works
@@ -54,7 +53,7 @@ export default async function DevicesPage() {
       </section>
 
       <section className="flex flex-col gap-3">
-        <h2 className="text-base font-semibold">Your devices ({devices.length})</h2>
+        <h2 className="text-[0.9375rem] font-semibold">Your devices ({devices.length})</h2>
         {devices.length === 0 ? (
           <p className="text-sm text-muted">No devices are registered yet.</p>
         ) : (
@@ -67,7 +66,7 @@ export default async function DevicesPage() {
       </section>
 
       <section className="surface-card p-4">
-        <h2 className="text-base font-semibold">What gets sent to your phone</h2>
+        <h2 className="text-[0.9375rem] font-semibold">What gets sent to your phone</h2>
         <ul className="mt-2 list-disc pl-5 text-sm text-muted">
           <li>A match is published, changed or canceled</li>
           <li>Your request to join a league is approved or declined</li>

@@ -25,7 +25,7 @@ export function LeagueVisibilityControl({
   return (
     <section className="surface-card flex flex-col gap-3 p-4">
       <div>
-        <h2 className="text-base font-semibold">Visibility</h2>
+        <h2 className="text-[0.9375rem] font-semibold">Visibility</h2>
         <p className="mt-1 text-sm text-muted">
           {visibility === 'private'
             ? 'Private. This league does not appear in search; people join by invitation only.'
@@ -33,7 +33,7 @@ export function LeagueVisibilityControl({
         </p>
       </div>
 
-      <div className="rounded-lg border border-[var(--border-subtle)] p-3 text-xs text-muted">
+      <div className="rounded-[var(--radius-md)] border border-[var(--border-subtle)] p-3 text-xs text-muted">
         <p className="font-medium text-[var(--text-primary)]">
           A searchable league publishes exactly these:
         </p>
@@ -50,7 +50,7 @@ export function LeagueVisibilityControl({
         <button
           type="submit"
           disabled={pending}
-          className="inline-flex min-h-11 items-center justify-center rounded-lg border border-[var(--border-subtle)] px-4 py-2.5 text-sm font-semibold disabled:opacity-60"
+          className="inline-flex min-h-control items-center justify-center rounded-[var(--radius-md)] border border-[var(--border-subtle)] px-4 py-2.5 text-sm font-semibold disabled:opacity-55"
         >
           {pending
             ? 'Updating…'
@@ -61,7 +61,7 @@ export function LeagueVisibilityControl({
       </form>
 
       {state?.ok === false ? (
-        <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+        <p role="alert" className="text-sm text-whistle-600 dark:text-whistle-300">
           {state.message}
         </p>
       ) : null}

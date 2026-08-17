@@ -43,7 +43,7 @@ export default function GlobalError() {
       >
         <main role="alert" style={{ maxWidth: '32rem', textAlign: 'center' }}>
           <h1 style={{ fontSize: '1.25rem', fontWeight: 700, margin: '0 0 0.5rem' }}>
-            Matchday could not load
+            MatchDay could not load
           </h1>
           <p style={{ fontSize: '0.9375rem', lineHeight: 1.5, margin: '0 0 1.25rem' }}>
             Something went wrong before the page could start. Reloading usually fixes it.
@@ -63,7 +63,7 @@ export default function GlobalError() {
               textDecoration: 'none',
             }}
           >
-            Reload Matchday
+            Reload MatchDay
           </a>
           {support === null ? null : (
             <p style={{ fontSize: '0.8125rem', margin: '1.25rem 0 0', opacity: 0.8 }}>

@@ -1,5 +1,4 @@
 import type { Metadata } from 'next';
-import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { AttendanceWorkspace } from '@/components/attendance-workspace';
 import {
@@ -10,6 +9,8 @@ import {
 } from '@/lib/auth/page-guards';
 import { getAttendanceWorkspace, matchAcceptsAttendance } from '@/lib/matches/attendance';
 import { getMatch } from '@/lib/matches/matches';
+import { ClipboardIcon } from '@/components/ui/icon';
+import { PageHeader } from '@/components/ui/page-header';
 
 export const metadata: Metadata = { title: 'Attendance' };
 
@@ -46,19 +47,18 @@ export default async function MatchAttendancePage({
 
   return (
     <>
-      <header className="flex flex-col gap-1">
-        <p className="text-xs uppercase tracking-wide text-muted">{league.name}</p>
-        <h1 className="text-2xl font-bold">Attendance</h1>
-        <p className="text-sm text-muted">{match.title}</p>
-        <Link href={matchPath(slug, matchId)} className="mt-1 text-sm underline underline-offset-4">
-          Back to the match
-        </Link>
-      </header>
+      <PageHeader
+        eyebrow={league.name}
+        icon={<ClipboardIcon size={13} />}
+        title="Attendance"
+        description={match.title}
+        back={{ href: matchPath(slug, matchId), label: 'Back to the match' }}
+      />
 
       {match.status === 'canceled' ? (
         <p
           role="status"
-          className="rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-900 dark:bg-red-950/50 dark:text-red-200"
+          className="rounded-lg border border-whistle-200 bg-whistle-50 px-3 py-2 text-sm text-red-800 dark:border-whistle-900 dark:bg-whistle-900/25 dark:text-red-200"
         >
           This match was canceled, so there is no attendance to record.
         </p>

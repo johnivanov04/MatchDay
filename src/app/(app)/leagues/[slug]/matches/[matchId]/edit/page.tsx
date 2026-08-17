@@ -1,5 +1,4 @@
 import type { Metadata } from 'next';
-import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import {
   EditDraftMatchForm,
@@ -17,6 +16,8 @@ import {
 import { matchCoreDefaults, matchPolicyDefaults } from '@/lib/matches/match-form-defaults';
 import { matchEditMode } from '@/lib/matches/match-permissions';
 import { getMatch, getMatchAdminNotes } from '@/lib/matches/matches';
+import { BallIcon } from '@/components/ui/icon';
+import { PageHeader } from '@/components/ui/page-header';
 
 export const metadata: Metadata = { title: 'Edit match' };
 
@@ -59,13 +60,12 @@ export default async function EditMatchPage({
 
   return (
     <>
-      <header className="flex flex-col gap-1">
-        <p className="text-xs uppercase tracking-wide text-muted">{league.name}</p>
-        <h1 className="text-2xl font-bold">Edit match</h1>
-        <Link href={matchPath(slug, matchId)} className="mt-1 text-sm underline underline-offset-4">
-          Back to the match
-        </Link>
-      </header>
+      <PageHeader
+        eyebrow={league.name}
+        icon={<BallIcon size={13} />}
+        title="Edit match"
+        back={{ href: matchPath(slug, matchId), label: 'Back to the match' }}
+      />
 
       {mode === 'draft' ? (
         <EditDraftMatchForm
@@ -88,7 +88,7 @@ export default async function EditMatchPage({
       )}
 
       <section className="surface-card flex flex-col gap-3 p-4">
-        <h2 className="text-base font-semibold">Administrator notes</h2>
+        <h2 className="text-[0.9375rem] font-semibold">Administrator notes</h2>
         <MatchAdminNotesForm
           leagueId={league.id}
           leagueSlug={slug}

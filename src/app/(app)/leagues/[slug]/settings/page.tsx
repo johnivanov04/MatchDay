@@ -1,9 +1,11 @@
 import type { Metadata } from 'next';
-import Link from 'next/link';
 import { LeagueForm } from '@/components/league-form';
 import { LeagueVisibilityControl } from '@/components/league-visibility-control';
 import { requireLeagueAdminPage } from '@/lib/auth/page-guards';
 import { supportedTimezones } from '@/lib/leagues/timezones';
+import { ButtonLink } from '@/components/ui/button';
+import { ShieldIcon, UsersIcon } from '@/components/ui/icon';
+import { PageHeader } from '@/components/ui/page-header';
 
 export const metadata: Metadata = { title: 'League settings' };
 
@@ -22,16 +24,17 @@ export default async function LeagueSettingsPage({
 
   return (
     <>
-      <header className="flex flex-col gap-1">
-        <p className="text-xs uppercase tracking-wide text-muted">{league.name}</p>
-        <h1 className="text-2xl font-bold">League settings</h1>
-        <Link
-          href={`/leagues/${league.slug}/members`}
-          className="mt-1 text-sm font-semibold underline underline-offset-4"
-        >
-          Manage members and invitations
-        </Link>
-      </header>
+      <PageHeader
+        eyebrow={league.name}
+        icon={<ShieldIcon size={13} />}
+        title="League settings"
+        description="Defaults for new matches, who can find this league, and who runs it."
+        actions={
+          <ButtonLink href={`/leagues/${league.slug}/members`} icon={<UsersIcon size={16} />}>
+            Manage members and invitations
+          </ButtonLink>
+        }
+      />
 
       <LeagueVisibilityControl leagueId={league.id} visibility={league.visibility} />
 

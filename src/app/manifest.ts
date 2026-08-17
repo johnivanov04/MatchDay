@@ -24,8 +24,8 @@ import type { MetadataRoute } from 'next';
  */
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: 'Matchday',
-    short_name: 'Matchday',
+    name: 'MatchDay',
+    short_name: 'MatchDay',
     description:
       'Organise pickup matches: membership, guidelines, matches and notifications for every league you play in.',
     start_url: '/dashboard',

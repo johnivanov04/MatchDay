@@ -1,4 +1,4 @@
-import Link from 'next/link';
+import { ButtonLink } from '@/components/ui/button';
 
 /**
  * An address that does not correspond to anything.
@@ -21,15 +21,12 @@ export default function NotFound() {
     >
       <h1 className="text-2xl font-bold">Page not found</h1>
       <p className="text-sm text-muted">
-        That address does not point to anything in Matchday. It may have been mistyped, or it may
+        That address does not point to anything in MatchDay. It may have been mistyped, or it may
         have moved.
       </p>
-      <Link
-        href="/dashboard"
-        className="inline-flex min-h-11 items-center rounded-lg bg-pitch-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-pitch-700"
-      >
+      <ButtonLink href="/dashboard" variant="primary">
         Go to your dashboard
-      </Link>
+      </ButtonLink>
     </main>
   );
 }

@@ -125,7 +125,7 @@ function CancelSpotControl({
         <button
           type="button"
           onClick={() => setConfirming(true)}
-          className="inline-flex min-h-11 w-fit items-center justify-center rounded-lg border border-[var(--border-subtle)] px-4 py-2.5 text-sm font-semibold"
+          className="press inline-flex min-h-control w-fit items-center justify-center rounded-[var(--radius-md)] border border-[var(--border-strong)] bg-[var(--surface-raised)] px-4 py-2.5 text-sm font-semibold hover:bg-[var(--surface-hover)]"
         >
           {holdsSpot ? 'Cancel my spot' : 'Leave the waitlist'}
         </button>
@@ -137,7 +137,7 @@ function CancelSpotControl({
   }
 
   return (
-    <form action={submit} className="flex flex-col gap-3 rounded-lg border border-[var(--border-subtle)] p-3">
+    <form action={submit} className="flex flex-col gap-3 rounded-[var(--radius-md)] border border-[var(--border-subtle)] p-3">
       <input type="hidden" name="match_id" value={matchId} />
 
       <FormError message={state?.ok === false ? state.message : undefined} />
@@ -184,7 +184,7 @@ function CancelSpotControl({
         <button
           type="button"
           onClick={() => setConfirming(false)}
-          className="inline-flex min-h-11 items-center justify-center rounded-lg border border-[var(--border-subtle)] px-4 py-2.5 text-sm font-semibold"
+          className="press inline-flex min-h-control items-center justify-center rounded-[var(--radius-md)] border border-[var(--border-strong)] bg-[var(--surface-raised)] px-4 py-2.5 text-sm font-semibold hover:bg-[var(--surface-hover)]"
         >
           Keep my place
         </button>
@@ -243,7 +243,7 @@ export function SignupControls({
 
   if (eligibility !== 'ELIGIBLE' && !mayCancel) {
     return (
-      <p role="status" className="rounded-lg border border-[var(--border-subtle)] px-3 py-2 text-sm">
+      <p role="status" className="rounded-[var(--radius-md)] border border-[var(--border-subtle)] px-3 py-2 text-sm">
         {BLOCKED_MESSAGES[eligibility]}
       </p>
     );
@@ -259,7 +259,7 @@ export function SignupControls({
             believe. */}
         <p
           role="status"
-          className="rounded-lg border border-[var(--border-subtle)] px-3 py-2 text-sm"
+          className="rounded-[var(--radius-md)] border border-[var(--border-subtle)] px-3 py-2 text-sm"
         >
           {eligibility === 'SIGNUP_CLOSED'
             ? 'Signup has closed, so nobody new can join.'
