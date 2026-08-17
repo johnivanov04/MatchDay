@@ -94,7 +94,9 @@ test.describe('notification inbox', () => {
 
     const page = await asUser(member.email);
     await page.goto('/notifications');
-    await page.getByRole('link', { name: 'Open' }).first().click();
+    // A button rather than a link since opening also marks the notification
+    // read — one action, one submission. See `openNotificationAction`.
+    await page.getByRole('button', { name: 'Open' }).first().click();
 
     await expect(page).toHaveURL(new RegExp(`/matches/${match.id}`));
     await expect(page.getByRole('heading', { name: match.title })).toBeVisible();

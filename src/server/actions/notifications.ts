@@ -1,7 +1,9 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { redirect } from 'next/navigation';
 import { z } from 'zod';
+import { safeRedirectPath } from '@/lib/auth/safe-redirect';
 import { requireSessionUser } from '@/lib/auth/session';
 import { actionFailure, actionSuccess, type ActionResult } from '@/lib/errors';
 import { domainErrorFromDatabase } from '@/lib/errors-from-database';
@@ -37,6 +39,81 @@ export async function markNotificationReadAction(
   } catch (error: unknown) {
     return actionFailure(error);
   }
+}
+
+/**
+ * Opening a notification: marks it read, then goes where it points.
+ *
+ * ── THE BUG THIS FIXES ─────────────────────────────────────────────────────
+ *
+ * "Open" was a plain link. Somebody tapped it, read the thing it was about, and
+ * came back to an inbox still insisting the notification was unread — because
+ * the only control that ever wrote `read_at` was the *secondary* "Mark as read"
+ * button beside it, which nobody presses after they have already read it. The
+ * unread count was never wrong; it was faithfully reporting a timestamp nothing
+ * on the path people actually take had ever written.
+ *
+ * ── WHY THE DESTINATION IS READ BACK FROM THE DATABASE ─────────────────────
+ *
+ * This is a server-side `redirect()`, so the target is a genuine open-redirect
+ * surface — unlike the anchor it replaces, where the browser was the only thing
+ * following the href. The deep link is therefore **never taken from the form**.
+ * Only the notification id crosses the wire; the path comes from the row, which
+ * a CHECK constraint already restricts to `^/[^/\\]`, and which `notifications`
+ * RLS only lets the recipient read at all.
+ *
+ * `safeRedirectPath` is then a second, independent layer over that. It cannot
+ * currently fire — the constraint would have to have been dropped for a row to
+ * hold anything else — which is exactly why it belongs here rather than being
+ * left to the day somebody changes the schema.
+ *
+ * ── THE TRADEOFF ───────────────────────────────────────────────────────────
+ *
+ * A form submission, not an anchor, so middle-click and "open in new tab" are
+ * gone from this control. Keeping both would mean either firing the mutation
+ * from an `onClick` and racing the navigation, or marking read inside the
+ * destination page — which would then mark it read for somebody arriving from a
+ * push notification, a bookmark or a link in another league's chat. MatchDay is
+ * a phone product; a reliable single tap is worth more than a middle-click
+ * nobody performs on a touchscreen.
+ */
+export async function openNotificationAction(formData: FormData): Promise<void> {
+  let destination: string;
+
+  try {
+    await requireSessionUser();
+    const notificationId = z.uuid().parse(formData.get('notification_id') ?? '');
+
+    const supabase = await createSupabaseServerClient();
+
+    // Idempotent by construction: `mark_notification_read` coalesces `read_at`,
+    // so re-opening something already read does not rewrite the timestamp.
+    const { error } = await supabase.rpc('mark_notification_read', {
+      p_notification_id: notificationId,
+    });
+
+    if (error !== null) {
+      throw domainErrorFromDatabase(error);
+    }
+
+    const { data } = await supabase
+      .from('notifications')
+      .select('deep_link')
+      .eq('id', notificationId)
+      .maybeSingle();
+
+    destination = safeRedirectPath(data?.deep_link ?? null);
+  } catch {
+    // A notification that has gone, or one that was never this user's, is not
+    // worth an error screen: the inbox is one navigation away and will show the
+    // truth. Nothing about which of the two it was is disclosed.
+    redirect('/notifications');
+  }
+
+  // The badge renders from the layout, so the count is stale on every page
+  // until this runs — including the page being navigated to.
+  revalidatePath('/', 'layout');
+  redirect(destination);
 }
 
 /**

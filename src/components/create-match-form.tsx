@@ -127,9 +127,39 @@ export function CreateMatchForm({
         </Field>
       </div>
 
-      <SubmitButton pending={pending}>Create as draft</SubmitButton>
+      {/*
+        Two outcomes, one form.
+
+        Publishing is the primary action because it is what an organizer came
+        here to do: the old form offered "Create as draft" and nothing else, so
+        every match needed a second visit to open it — and the ones nobody
+        remembered to open simply never happened. Draft stays, in secondary
+        treatment, because a half-planned match with no location yet is a real
+        thing to want.
+
+        `name="intent"` on each button is what tells the action them apart; a
+        submit button contributes its own name and value. No confirmation
+        dialog: the hierarchy says which is which, and publishing a match is
+        recoverable — it can be cancelled, and members are told.
+      */}
+      <div className="flex flex-col-reverse gap-2 sm:flex-row-reverse">
+        <SubmitButton pending={pending} name="intent" value="publish" block={false} className="flex-1">
+          Publish match
+        </SubmitButton>
+        <SubmitButton
+          pending={pending}
+          name="intent"
+          value="draft"
+          variant="secondary"
+          block={false}
+          className="flex-1"
+        >
+          Save as draft
+        </SubmitButton>
+      </div>
       <p className="text-xs text-muted">
-        The match is created as a draft. Members see nothing until you publish it.
+        Publishing opens signup and notifies every active member once. A draft stays invisible
+        until you publish it.
       </p>
     </form>
   );

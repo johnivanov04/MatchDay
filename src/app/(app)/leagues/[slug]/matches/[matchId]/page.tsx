@@ -16,6 +16,7 @@ import { Panel, Stat, StatGrid } from '@/components/ui/card';
 import {
   AlertIcon,
   BallIcon,
+  CheckIcon,
   ClipboardIcon,
   InfoIcon,
   PinIcon,
@@ -60,6 +61,10 @@ const NOTICE_MESSAGES: Record<MatchNotice, string> = {
   [MATCH_NOTICES.saved]: 'Match saved.',
   [MATCH_NOTICES.notesSaved]: 'Notes saved. Members were not notified.',
   [MATCH_NOTICES.notEditable]: 'A canceled match cannot be edited.',
+  [MATCH_NOTICES.published]: 'Match published — members have been notified.',
+  // Says what did *not* happen, because that is the part somebody who meant to
+  // publish needs to notice. The draft banner below repeats it in place.
+  [MATCH_NOTICES.draftSaved]: 'Saved as a draft. Nobody has been notified yet.',
 };
 
 export default async function MatchDetailPage({
@@ -147,6 +152,15 @@ export default async function MatchDetailPage({
       ) : match.status === 'draft' ? (
         <Notice tone="info" icon={<InfoIcon size={17} />}>
           Draft — members cannot see this match yet.
+        </Notice>
+      ) : isAdmin && match.status === 'open' ? (
+        // The counterpart to the draft banner, for the administrator only. A
+        // draft says loudly that it is not live; until now nothing said the
+        // opposite, so somebody arriving from the create form had to infer
+        // "published" from the absence of a warning. Members do not need it:
+        // for them an open match is simply a match.
+        <Notice tone="success" icon={<CheckIcon size={17} />}>
+          Open — members can see this match and sign up.
         </Notice>
       ) : null}
 

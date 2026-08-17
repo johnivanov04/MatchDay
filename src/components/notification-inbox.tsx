@@ -1,6 +1,5 @@
 'use client';
 
-import Link from 'next/link';
 import { useActionState } from 'react';
 import { CheckIcon, ChevronRightIcon } from '@/components/ui/icon';
 import {
@@ -8,6 +7,7 @@ import {
   markAllNotificationsReadAction,
   markNotificationReadAction,
   markNotificationUnreadAction,
+  openNotificationAction,
   unarchiveNotificationAction,
 } from '@/server/actions/notifications';
 import type { NotificationRow } from '@/types/database';
@@ -80,13 +80,20 @@ export function NotificationRowItem({ notification }: { notification: Notificati
       </div>
 
       <div className={`flex flex-wrap items-center gap-2 ${unread ? 'pl-2' : ''}`}>
-        <Link
-          href={notification.deep_link}
-          className="press inline-flex min-h-control items-center gap-1.5 rounded-[var(--radius-md)] bg-pitch-600 px-3.5 py-2 text-sm font-semibold text-white shadow-[var(--shadow-card)] hover:bg-pitch-700 dark:bg-pitch-500 dark:text-pitch-950 dark:hover:bg-pitch-400"
-        >
-          Open
-          <ChevronRightIcon size={15} />
-        </Link>
+        {/* A form, not a link — see `openNotificationAction` for why, and for
+            what that costs. One tap marks this notification read and lands on
+            the thing it is about, which is what "opening" it has always meant
+            to everybody except the code. */}
+        <form action={openNotificationAction} className="inline">
+          <input type="hidden" name="notification_id" value={notification.id} />
+          <button
+            type="submit"
+            className="press inline-flex min-h-control items-center gap-1.5 rounded-[var(--radius-md)] bg-pitch-600 px-3.5 py-2 text-sm font-semibold text-white shadow-[var(--shadow-card)] hover:bg-pitch-700 dark:bg-pitch-500 dark:text-pitch-950 dark:hover:bg-pitch-400"
+          >
+            Open
+            <ChevronRightIcon size={15} />
+          </button>
+        </form>
 
         <form action={unread ? markRead : markUnread} className="inline">
           <input type="hidden" name="notification_id" value={notification.id} />

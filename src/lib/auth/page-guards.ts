@@ -67,6 +67,11 @@ export const MATCH_NOTICES = {
   saved: 'saved',
   notesSaved: 'notes-saved',
   notEditable: 'not-editable',
+  // The two outcomes of the create form. They land on the match itself rather
+  // than on the list, because "did that work, and is it live?" is a question
+  // about this match and the match page is the only screen that answers it.
+  published: 'published',
+  draftSaved: 'draft-saved',
 } as const;
 
 export type MatchNotice = (typeof MATCH_NOTICES)[keyof typeof MATCH_NOTICES];

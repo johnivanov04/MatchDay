@@ -134,11 +134,24 @@ export function SubmitButton({
   pending,
   variant = 'primary',
   block = true,
+  name,
+  value,
+  className = '',
 }: {
   children: ReactNode;
   pending: boolean;
   variant?: 'primary' | 'secondary';
   block?: boolean;
+  /**
+   * For a form with more than one outcome.
+   *
+   * A submit button contributes its own `name`/`value` to the submitted data,
+   * so "Save as draft" and "Publish match" are one form and one action that can
+   * tell which was pressed — rather than two forms duplicating twenty fields.
+   */
+  name?: string;
+  value?: string;
+  className?: string;
 }) {
   const base =
     'press inline-flex min-h-control select-none items-center justify-center gap-2 rounded-[var(--radius-md)] px-4 py-2.5 text-sm font-semibold disabled:pointer-events-none disabled:opacity-55';
@@ -152,7 +165,9 @@ export function SubmitButton({
       type="submit"
       disabled={pending}
       aria-busy={pending}
-      className={`${base} ${styles} ${block ? 'w-full' : ''}`}
+      {...(name === undefined ? {} : { name })}
+      {...(value === undefined ? {} : { value })}
+      className={`${base} ${styles} ${block ? 'w-full' : ''} ${className}`}
     >
       {pending ? <Spinner /> : null}
       {pending ? 'Working…' : children}
