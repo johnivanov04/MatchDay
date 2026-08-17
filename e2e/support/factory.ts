@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { Client } from 'pg';
 import { readSupabaseEnvironment } from './environment';
 
@@ -487,6 +489,67 @@ export class TestDataFactory {
       url,
       userId,
     ]);
+  }
+
+  /**
+   * Gives a member a **real** managed avatar: an object in Storage plus the row
+   * that points at it.
+   *
+   * ── WHY THIS EXISTS ALONGSIDE THE REAL UPLOAD FLOW ─────────────────────────
+   *
+   * `phase8-player-avatars.spec.ts` drives the genuine flow — file picker,
+   * canvas, Server Action — because that is what it is testing. Specs that
+   * merely need faces on the screen, like the 320px mobile pass, should not pay
+   * a browser round trip per player to get them.
+   *
+   * What this deliberately does **not** do is write the column alone. A row
+   * pointing at an object that does not exist makes every `<img>` 404, `Avatar`
+   * falls back to initials, and a spec would then be asserting the fallback
+   * while appearing to assert the avatar. So the bytes go to Storage first,
+   * with the service-role key, and the object genuinely loads.
+   *
+   * @returns the object path written to `profiles.profile_photo_path`
+   */
+  async giveAvatar(user: TestUser, fixture = 'avatar-landscape.jpg'): Promise<string> {
+    const { apiUrl, serviceRoleKey } = readSupabaseEnvironment();
+    const path = `${user.id}/${randomUUID()}.jpg`;
+    const bytes = readFileSync(join(__dirname, '..', 'fixtures', fixture));
+
+    const response = await fetch(`${apiUrl}/storage/v1/object/avatars/${path}`, {
+      method: 'POST',
+      headers: {
+        apikey: serviceRoleKey,
+        Authorization: `Bearer ${serviceRoleKey}`,
+        'Content-Type': 'image/jpeg',
+      },
+      body: new Blob([new Uint8Array(bytes)]),
+    });
+
+    if (!response.ok) {
+      throw new Error(
+        `Could not store a fixture avatar (${String(response.status)}). Is the local stack running?`,
+      );
+    }
+
+    await this.client.query('update public.profiles set profile_photo_path = $1 where id = $2', [
+      path,
+      user.id,
+    ]);
+    return path;
+  }
+
+  /**
+   * Renames a member.
+   *
+   * For the mobile pass, mostly: the default fixture names are short and
+   * uniform, so nothing in the suite would otherwise exercise a name long
+   * enough to push a row past 320px next to a 32px avatar.
+   */
+  async setName(userId: string, firstName: string, lastName: string): Promise<void> {
+    await this.client.query(
+      'update public.profiles set first_name = $1, last_name = $2 where id = $3',
+      [firstName, lastName, userId],
+    );
   }
 
   /** Both photo columns, for asserting what a removal actually cleared. */

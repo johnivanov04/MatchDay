@@ -2,6 +2,7 @@
 
 import { useActionState } from 'react';
 import { Field, FormError, inputClassName, SubmitButton } from '@/components/ui/field';
+import { PlayerAvatar } from '@/components/ui/player-avatar';
 import { createInviteAction, revokeInviteAction } from '@/server/actions/invites';
 import {
   addMemberByEmailAction,
@@ -89,14 +90,23 @@ export function MemberRow({
   return (
     <li className="surface-card flex flex-col gap-2 p-3">
       <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="text-sm font-semibold">
-            {displayName(entry.profile, 'A Matchday member')}
-            {isSelf ? ' (you)' : ''}
-          </p>
-          <p className="text-xs text-muted">{entry.profile?.email_normalized ?? ''}</p>
+        <div className="flex min-w-0 items-center gap-2.5">
+          {/* A deleted or not-yet-created profile has no name to take initials
+              from, so there is nothing to render but the text fallback. */}
+          {entry.profile === null ? null : (
+            <PlayerAvatar player={entry.profile} size={36} />
+          )}
+          <div className="min-w-0">
+            <p className="truncate text-sm font-semibold">
+              {displayName(entry.profile, 'A Matchday member')}
+              {isSelf ? ' (you)' : ''}
+            </p>
+            <p className="truncate text-xs text-muted">
+              {entry.profile?.email_normalized ?? ''}
+            </p>
+          </div>
         </div>
-        <div className="flex flex-col items-end gap-1">
+        <div className="flex shrink-0 flex-col items-end gap-1">
           {membership.role === 'league_admin' ? (
             <span className="rounded-full border border-pitch-500/50 px-2 py-0.5 text-xs font-medium">
               Administrator

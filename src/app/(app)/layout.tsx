@@ -3,6 +3,7 @@ import { AppShell } from '@/components/app-shell';
 import { requireOnboardedUser } from '@/lib/auth/page-guards';
 import { getLeagueContext } from '@/lib/leagues/active-league';
 import { getUnreadNotificationCount } from '@/lib/notifications/notifications';
+import { avatarImageUrl, avatarInitials } from '@/lib/profile/avatar';
 
 /**
  * Guard for every authenticated page.
@@ -23,6 +24,11 @@ export default async function AuthenticatedLayout({ children }: { children: Reac
   return (
     <AppShell
       displayName={profile.first_name}
+      // The self resolver: managed path, then a legacy pasted address, then
+      // initials. This is the only place in the product where step two still
+      // happens — no projection returns `profile_photo_url` to anybody.
+      avatarSrc={avatarImageUrl(profile)}
+      avatarInitials={avatarInitials(profile.first_name, profile.last_name)}
       leagueContext={leagueContext}
       unreadNotifications={unreadNotifications}
     >

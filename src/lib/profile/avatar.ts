@@ -79,11 +79,74 @@ export function isManagedAvatarPath(path: string | null | undefined, ownerId: st
   );
 }
 
+/** The owner folder: a lower-case uuid, and nothing else. */
+const MANAGED_FOLDER = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/**
+ * True when `path` has the shape of a Matchday-managed object — **whoever owns
+ * it**.
+ *
+ * ── WHY THIS EXISTS ALONGSIDE `isManagedAvatarPath` ────────────────────────
+ *
+ * The two answer different questions and must not be merged.
+ *
+ *   * `isManagedAvatarPath(path, ownerId)` asks *may I delete this?* It needs
+ *     the owner's auth user id, because a deletion built from the wrong value
+ *     destroys somebody else's photo. It is the gate in front of every Storage
+ *     removal and it stays exactly as strict as it is.
+ *
+ *   * this one asks *may I render this?* It is used on paths that arrived from
+ *     a SECURITY DEFINER projection, where the row is another member's and the
+ *     caller has no business knowing their user id — the projections return
+ *     `membership_id` and deliberately no `user_id`.
+ *
+ * Dropping the ownership check costs nothing here, because
+ * `profiles_photo_path_shape` already guarantees in the database that the first
+ * segment **is** that profile's id. So a path reaching this function is
+ * trustworthy by construction, and the shape check that remains is what stops a
+ * malformed or hostile value being concatenated into a URL.
+ */
+function isWellFormedAvatarPath(path: string): boolean {
+  const segments = path.split('/');
+  return (
+    segments.length === 2 &&
+    MANAGED_FOLDER.test(segments[0] ?? '') &&
+    MANAGED_FILENAME.test(segments[1] ?? '')
+  );
+}
+
 /** The public URL Supabase Storage serves a bucket object from. */
 export function avatarPublicUrl(path: string): string {
   const { supabaseUrl } = getPublicEnv();
   const origin = supabaseUrl.replace(/\/+$/, '');
   return `${origin}/storage/v1/object/public/${AVATAR_BUCKET}/${path}`;
+}
+
+/**
+ * The image URL for a projected avatar path, or `null`.
+ *
+ * ── THE ONLY WAY A COMPONENT TURNS A PATH INTO A URL ───────────────────────
+ *
+ * Every other-player surface goes through here, so URL construction lives in
+ * one place and a change of bucket, origin or object route is a change to one
+ * function rather than to nine components.
+ *
+ * Anything that is not exactly `{uuid}/{uuid}.jpg` returns `null` and the
+ * caller renders initials. That covers the obvious malformed cases and the
+ * dangerous ones equally: a full `https://…` URL, a protocol-relative `//host`,
+ * a traversal, a nested key, an extra segment or a swapped extension all fail
+ * the same way, so none of them can be spliced into the address an `<img>` is
+ * pointed at.
+ *
+ * **This never sees `profile_photo_url`.** Legacy addresses are not returned by
+ * any projection and render only on their owner's own profile page, through
+ * `avatarImageUrl` below.
+ */
+export function managedAvatarUrl(path: string | null | undefined): string | null {
+  if (typeof path !== 'string' || path === '' || !isWellFormedAvatarPath(path)) {
+    return null;
+  }
+  return avatarPublicUrl(path);
 }
 
 /** The two photo columns, as much of a profile as any avatar decision needs. */
@@ -94,13 +157,27 @@ export interface AvatarSource {
 }
 
 /**
- * The image to render for a profile, or `null` for initials.
+ * The image to render for **the signed-in user's own profile**, or `null`.
  *
  * The priority is fixed and documented in the migration:
  *
  *   1. a Matchday-managed object, resolved to its public Storage URL;
  *   2. a legacy external address, rendered exactly as it was stored;
  *   3. nothing.
+ *
+ * ── SELF ONLY. USE `managedAvatarUrl` FOR ANYBODY ELSE ─────────────────────
+ *
+ * Step 2 is the reason for the distinction. A legacy address points at a host
+ * nobody here controls, and rendering it inside another member's browser would
+ * disclose that member's IP address and user agent to whoever runs it, on a
+ * page they never chose to visit. So legacy addresses stay on their owner's own
+ * profile, where the request is one the owner is already making.
+ *
+ * That rule is **not** conditional on `is_self`: no projection returns
+ * `profile_photo_url` at all, so a roster row for the caller themselves renders
+ * initials if their only photo is a legacy one. The inconsistency is accepted
+ * and is fixed by one upload; a conditional invariant would be correct today
+ * and wrong two phases from now.
  *
  * A managed path that fails `isManagedAvatarPath` is ignored rather than
  * rendered, and falls through to the legacy value. That can only happen if a

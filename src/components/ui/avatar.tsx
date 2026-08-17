@@ -35,10 +35,26 @@ export interface AvatarProps {
   label: string;
   /** Rendered edge length in pixels. */
   size?: number;
+  /**
+   * `'lazy'` for a list, where twenty faces sit below the fold on a phone and
+   * fetching them all on paint costs bandwidth nobody is looking at yet.
+   *
+   * Defaults to eager, because the one avatar that matters most — the player's
+   * own, at the top of their profile — is above the fold and deferring it would
+   * make the page appear to load its own face last.
+   */
+  loading?: 'lazy' | 'eager';
   className?: string;
 }
 
-export function Avatar({ src, initials, label, size = 96, className = '' }: AvatarProps) {
+export function Avatar({
+  src,
+  initials,
+  label,
+  size = 96,
+  loading = 'eager',
+  className = '',
+}: AvatarProps) {
   // Keyed by URL rather than a boolean, so swapping in a new photo after a
   // failed one re-attempts the load instead of staying stuck on initials.
   const [failedSrc, setFailedSrc] = useState<string | null>(null);
@@ -73,6 +89,7 @@ export function Avatar({ src, initials, label, size = 96, className = '' }: Avat
           alt={`${label}, profile photo`}
           width={size}
           height={size}
+          loading={loading}
           decoding="async"
           className="absolute inset-0 h-full w-full object-cover"
           onError={() => {

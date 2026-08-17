@@ -351,7 +351,7 @@ describe('roster publication', () => {
       expect(rows.every((row) => row.is_self === false)).toBe(true);
     });
 
-    it('returns names and nothing else', async () => {
+    it('returns names, a managed avatar path, and nothing else', async () => {
       const rows = await asUser(db, members[0]!.user, async (client) => {
         const result = await client.query('select * from public.match_confirmed_roster($1)', [
           SEED_MATCHES.rmvfcOpen,
@@ -361,7 +361,20 @@ describe('roster publication', () => {
 
       // The signature is the boundary: there is no column here that could carry
       // a phone number, gender, attendance record or waitlist position.
-      expect(rows).toEqual(['first_name', 'is_self', 'last_name', 'membership_id']);
+      //
+      // `profile_photo_path` was added deliberately in
+      // 20260819100000_player_avatar_projections.sql — an avatar is visible
+      // exactly where a name already is. `profile_photo_url` was NOT, and must
+      // never be: a legacy address points at a host nobody here controls, and
+      // rendering it in another member's browser would disclose their IP and
+      // user agent to whoever runs it.
+      expect(rows).toEqual([
+        'first_name',
+        'is_self',
+        'last_name',
+        'membership_id',
+        'profile_photo_path',
+      ]);
     });
 
     it('shows a player only their own signup row', async () => {

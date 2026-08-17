@@ -2,6 +2,7 @@
 
 import { useActionState, useState } from 'react';
 import { FormError, inputClassName, SubmitButton } from '@/components/ui/field';
+import { PlayerAvatar } from '@/components/ui/player-avatar';
 import {
   assignPlayerAction,
   createTeamAction,
@@ -60,11 +61,14 @@ function PlayerRow({
 
   return (
     <li className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--border-subtle)] py-2 last:border-b-0">
-      <div className="min-w-0">
-        <p className="text-sm font-medium">{fullName(player)}</p>
-        {indicators.length === 0 ? null : (
-          <p className="text-xs text-muted">{indicators.join(' · ')}</p>
-        )}
+      <div className="flex min-w-0 items-center gap-2.5">
+        <PlayerAvatar player={player} size={32} />
+        <div className="min-w-0">
+          <p className="truncate text-sm font-medium">{fullName(player)}</p>
+          {indicators.length === 0 ? null : (
+            <p className="truncate text-xs text-muted">{indicators.join(' · ')}</p>
+          )}
+        </div>
       </div>
 
       <form action={submit} className="flex items-center gap-2">
@@ -118,9 +122,15 @@ function TeamCard({
   const members = players.filter((player) => player.team_id === team.team_id);
 
   return (
-    <section className="surface-card flex flex-col gap-2 p-4">
+    // `min-w-0` is load-bearing, not tidiness. A grid item defaults to
+    // `min-width: auto`, so it refuses to shrink below its content's
+    // min-content width — and the truncating player names inside are
+    // `white-space: nowrap`, whose min-content width is the *whole* name.
+    // Without this the track grows to fit the longest name in the squad and
+    // takes the document sideways with it at 320px.
+    <section className="surface-card flex min-w-0 flex-col gap-2 p-4">
       <div className="flex items-start justify-between gap-2">
-        <div>
+        <div className="min-w-0">
           <h3 className="text-sm font-semibold">
             {team.name} <span className="text-muted">({members.length})</span>
           </h3>
@@ -193,10 +203,13 @@ function TeamCard({
       {members.length === 0 ? (
         <p className="text-sm text-muted">Nobody on this team yet.</p>
       ) : (
-        <ul className="flex flex-col gap-0.5">
+        <ul className="flex flex-col gap-1">
           {members.map((player) => (
-            <li key={player.membership_id} className="text-sm">
-              {fullName(player)}
+            <li key={player.membership_id} className="flex items-center gap-2 text-sm">
+              {/* 24px in the dense per-team lists, matching the published team
+                  sheet a player sees — the same information at the same weight. */}
+              <PlayerAvatar player={player} size={24} />
+              <span className="min-w-0 truncate">{fullName(player)}</span>
             </li>
           ))}
         </ul>

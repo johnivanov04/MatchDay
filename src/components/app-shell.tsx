@@ -2,6 +2,7 @@ import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { LeagueSwitcher } from '@/components/league-switcher';
 import { SupportContact } from '@/components/support-contact';
+import { Avatar } from '@/components/ui/avatar';
 import type { LeagueContext } from '@/lib/leagues/active-league';
 
 /**
@@ -14,11 +15,23 @@ import type { LeagueContext } from '@/lib/leagues/active-league';
  */
 export function AppShell({
   displayName,
+  avatarSrc,
+  avatarInitials,
   leagueContext,
   unreadNotifications,
   children,
 }: {
   displayName: string;
+  /**
+   * The signed-in user's own avatar, already resolved.
+   *
+   * `Avatar` directly rather than `PlayerAvatar`, because this is the **self**
+   * flow: it is the one place a legacy `profile_photo_url` still renders, and
+   * `PlayerAvatar` deliberately cannot express one. Resolved by
+   * `avatarImageUrl` in the layout, which owns that priority order.
+   */
+  avatarSrc: string | null;
+  avatarInitials: string;
   leagueContext: LeagueContext;
   unreadNotifications: number;
   children: ReactNode;
@@ -57,12 +70,26 @@ export function AppShell({
               ) : null}
             </Link>
             {/* The one element here with no length limit, so it is the one that
-                gives way. The full name is still on the profile page. */}
+                gives way. The full name is still on the profile page.
+
+                The avatar is `shrink-0` and the name still truncates, so the
+                28px circle is the only fixed width this adds — and it lands in
+                the row that was already the tightest thing at 320px. That is
+                asserted rather than assumed: the mobile spec checks every
+                screen for horizontal overflow, and every screen has this
+                header. */}
             <Link
               href="/profile"
-              className="min-w-0 truncate text-sm font-medium underline underline-offset-4"
+              className="flex min-w-0 items-center gap-2 text-sm font-medium underline underline-offset-4"
             >
-              {displayName}
+              <Avatar
+                src={avatarSrc}
+                initials={avatarInitials}
+                label={displayName}
+                size={28}
+                className="no-underline"
+              />
+              <span className="min-w-0 truncate">{displayName}</span>
             </Link>
             <form action="/auth/sign-out" method="post" className="shrink-0">
               <button
