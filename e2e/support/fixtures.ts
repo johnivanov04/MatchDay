@@ -54,11 +54,31 @@ export { expect };
  * escape a Server Component — which Next.js reports as an unhandled application
  * error. This is the browser-level check for that rule: the response is not a
  * 500 and the page is not the error boundary.
+ *
+ * ── WHY IT NAMES THE ERROR SCREENS INSTEAD OF LOOKING FOR "500" ────────────
+ *
+ * It used to assert the body did not contain the bare string `500`, which
+ * matches anywhere — including inside the random hex token the factory puts in
+ * every league name and every email address. `E2E League 5250036d` contains
+ * `500`, and this helper runs on most navigations in the suite, so a healthy
+ * page failed at random, in a different spec each time, for no reason anybody
+ * could reproduce. It cost a full CI run while this very investigation was
+ * being verified.
+ *
+ * It was also checking for something this application never renders: neither
+ * error boundary prints a status code. The four strings below are the actual
+ * error surfaces — `ErrorState` under `(app)/error.tsx`, the document-level
+ * `global-error.tsx`, and the two Next.js/platform texts for a request that
+ * failed before either could run. That is a stronger assertion than the digits
+ * ever were, and a deterministic one.
  */
 export async function expectNoServerError(page: Page): Promise<void> {
-  await expect(page.locator('body')).not.toContainText('Application error', { timeout: 5_000 });
-  await expect(page.locator('body')).not.toContainText('Internal Server Error');
-  await expect(page.locator('body')).not.toContainText('500');
+  const body = page.locator('body');
+
+  await expect(body).not.toContainText('Application error', { timeout: 5_000 });
+  await expect(body).not.toContainText('Internal Server Error');
+  await expect(body).not.toContainText('Something went wrong');
+  await expect(body).not.toContainText('MatchDay could not load');
 }
 
 /**

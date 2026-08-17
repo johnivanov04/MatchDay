@@ -40,11 +40,24 @@ async function uploadAvatar(page: Page, file: string): Promise<string> {
   await page.getByRole('button', { name: 'Save photo' }).click();
   await expect(page.getByText('Photo saved.')).toBeVisible();
 
-  const src = await page.getByTestId('avatar-picker').locator('img').getAttribute('src');
-  expect(src, 'the saved avatar should be a managed Storage object').toContain(
-    '/storage/v1/object/public/avatars/',
-  );
-  return src ?? '';
+  // "Photo saved." means the object is stored and the profile points at it. It
+  // does not mean this page is rendering that object's URL yet: the picker
+  // holds its local `blob:` preview — the same bytes — until `router.refresh()`
+  // brings the new server prop down, precisely so the previous photo never
+  // flashes back under the success message.
+  //
+  // This used to read the attribute the moment the notice appeared and get the
+  // managed URL anyway, but only by accident: before the picker held its
+  // preview there was no `<img>` at all in that window, so `getAttribute` was
+  // really waiting for the element to exist. Waiting for the URL itself is the
+  // condition this helper actually means.
+  const image = page.getByTestId('avatar-picker').locator('img');
+  await expect(
+    image,
+    'the saved avatar should settle on a managed Storage object',
+  ).toHaveAttribute('src', /\/storage\/v1\/object\/public\/avatars\/[0-9a-f-]{36}\/[0-9a-f-]{36}\.jpg$/);
+
+  return (await image.getAttribute('src')) ?? '';
 }
 
 /** The confirmed-roster list item for one player. */

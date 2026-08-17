@@ -11,6 +11,14 @@ import { createRoot, type Root } from 'react-dom/client';
  */
 export interface Rendered {
   readonly container: HTMLElement;
+  /**
+   * Renders the same tree again with new props, into the same root.
+   *
+   * For components whose props come from a Server Component and therefore
+   * *change underneath them* — a `router.refresh()` landing, say. Mounting a
+   * second root would reset the state that behaviour is about.
+   */
+  rerender(node: ReactNode): Promise<void>;
   unmount(): void;
 }
 
@@ -26,6 +34,11 @@ export async function render(node: ReactNode): Promise<Rendered> {
 
   return {
     container,
+    async rerender(next: ReactNode) {
+      await act(async () => {
+        root?.render(next);
+      });
+    },
     unmount() {
       act(() => {
         root?.unmount();

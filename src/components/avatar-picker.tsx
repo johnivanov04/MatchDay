@@ -59,6 +59,34 @@ export function AvatarPicker({ currentSrc, initials, label }: AvatarPickerProps)
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
+  /**
+   * What the client knows about the stored photo that `currentSrc` does not yet.
+   *
+   * ── THE BUG THIS EXISTS FOR ────────────────────────────────────────────────
+   *
+   * `currentSrc` is a server prop. A save writes the new object, then calls
+   * `router.refresh()`, and the prop only carries the new URL once that RSC
+   * round trip lands — around 50ms locally and appreciably longer on a loaded
+   * CI runner. The old code dropped the local preview the instant the action
+   * resolved, in the same commit that rendered "Photo saved.", so for the whole
+   * width of that window the avatar fell back to `currentSrc` and **the
+   * previous photo reappeared underneath a success message**.
+   *
+   * Nobody noticed on the first upload, where the fallback is `null` and the
+   * circle merely shows initials for a moment. Changing an existing photo is
+   * where it bites, and the end-to-end suite caught it there: the assertion
+   * that a change produces a different object URL read the old one and failed,
+   * on CI and on 17 of 20 local repetitions.
+   *
+   * `against` records what `currentSrc` was when the write succeeded; the prop
+   * differing from it is how this component learns the refresh has landed.
+   * `src` is what to show until then — the processed preview after a save, and
+   * `null` after a removal, which fixes the same race in the other direction.
+   */
+  const [pending, setPending] = useState<{ src: string | null; against: string | null } | null>(
+    null,
+  );
+
   // Object URLs are held by the document until revoked, so a session of trying
   // six photos would otherwise pin six full-size images in memory.
   const previewRef = useRef<string | null>(null);
@@ -80,15 +108,33 @@ export function AvatarPicker({ currentSrc, initials, label }: AvatarPickerProps)
   );
 
   const busy = phase !== 'idle';
-  const shownSrc = previewUrl ?? currentSrc;
-  const hasStoredPhoto = currentSrc !== null;
 
-  function discard(): void {
-    replacePreview(null);
+  // The prop moving off `against` is the refresh landing, at which point the
+  // server is authoritative again and the local answer is discarded.
+  const refreshLanded = pending !== null && currentSrc !== pending.against;
+  const storedSrc = pending !== null && !refreshLanded ? pending.src : currentSrc;
+
+  const shownSrc = previewUrl ?? storedSrc;
+  const hasStoredPhoto = storedSrc !== null;
+
+  function clearSelection(): void {
     setProcessed(null);
     if (inputRef.current !== null) {
       inputRef.current.value = '';
     }
+  }
+
+  /**
+   * Drop the selection *and* whatever the client was holding.
+   *
+   * Clearing `pending` here is what keeps object-URL ownership honest: the URL
+   * a save handed over is only ever revoked by `replacePreview`, and only once
+   * nothing is rendering it any more.
+   */
+  function discard(): void {
+    replacePreview(null);
+    setPending(null);
+    clearSelection();
   }
 
   async function onFileChosen(event: React.ChangeEvent<HTMLInputElement>): Promise<void> {
@@ -100,6 +146,7 @@ export function AvatarPicker({ currentSrc, initials, label }: AvatarPickerProps)
     setError(null);
     setNotice(null);
     setProcessed(null);
+    setPending(null);
     replacePreview(URL.createObjectURL(file));
     setPhase('processing');
 
@@ -138,7 +185,18 @@ export function AvatarPicker({ currentSrc, initials, label }: AvatarPickerProps)
       void uploadAvatarAction(null, payload).then((result) => {
         setPhase('idle');
         if (result.ok) {
-          discard();
+          // Hand the preview to `pending` instead of dropping it. It is a
+          // re-encode of exactly the bytes that were just stored, so holding it
+          // until the refresh lands means the avatar goes straight from the new
+          // photo to the new photo — never back through the old one.
+          //
+          // `setPreviewUrl` rather than `replacePreview`, deliberately: the
+          // object URL must stay valid while `pending` renders it. `previewRef`
+          // still owns it and `discard`/`replacePreview` still revoke it, so
+          // nothing leaks.
+          setPending({ src: previewRef.current, against: currentSrc });
+          setPreviewUrl(null);
+          clearSelection();
           setNotice('Photo saved.');
           router.refresh();
           return;
@@ -157,6 +215,10 @@ export function AvatarPicker({ currentSrc, initials, label }: AvatarPickerProps)
         setPhase('idle');
         if (result.ok) {
           discard();
+          // The same window, the other way round: without this the deleted
+          // photo stays on screen under "Photo removed." until the refresh
+          // lands. `discard()` cleared `pending`, so this sets it afresh.
+          setPending({ src: null, against: currentSrc });
           setNotice('Photo removed.');
           router.refresh();
           return;
