@@ -1,6 +1,7 @@
 'use client';
 
 import { useActionState, useState } from 'react';
+import { ActionTray, TrayButton } from '@/components/ui/button';
 import { FormError, inputClassName, SubmitButton } from '@/components/ui/field';
 import { PlayerAvatar } from '@/components/ui/player-avatar';
 import {
@@ -12,6 +13,7 @@ import {
   renameTeamAction,
 } from '@/server/actions/teams';
 import type { DraftTeam, TeamBuilderPlayer } from '@/types/database';
+import { pluralize } from '@/lib/format/plural';
 
 /**
  * The administrator's team builder.
@@ -71,7 +73,11 @@ function PlayerRow({
         </div>
       </div>
 
-      <form action={submit} className="flex items-center gap-2">
+      {/* `flex-1` with a floor rather than `min-w-36` on the select: at 320px
+          the fixed 144px select left the Save button about 30px, which wrapped
+          the word onto two lines as "Sa / ve". The select now gives way and the
+          button keeps its text on one line. */}
+      <form action={submit} className="flex w-full min-w-0 items-center gap-2 sm:w-auto">
         <input type="hidden" name="league_id" value={leagueId} />
         <input type="hidden" name="match_id" value={matchId} />
         <input type="hidden" name="membership_id" value={player.membership_id} />
@@ -83,7 +89,7 @@ function PlayerRow({
           id={`team-${player.membership_id}`}
           name="team_id"
           defaultValue={player.team_id ?? ''}
-          className={`${inputClassName} min-w-36`}
+          className={`${inputClassName} min-w-0 flex-1 sm:w-36 sm:flex-none`}
         >
           <option value="">Unassigned</option>
           {teams.map((team) => (
@@ -93,14 +99,18 @@ function PlayerRow({
           ))}
         </select>
 
-        <button
+        {/* Quiet, and deliberately quieter than it was. This fires once per
+            player while teams are being sorted out; "Publish teams" fires once
+            and is the only thing on the screen a player ever sees the result
+            of. A bordered button on every row was competing with it. */}
+        <TrayButton
           type="submit"
           disabled={pending}
-          className="min-h-11 rounded-lg border border-[var(--border-subtle)] px-2.5 py-1 text-xs font-semibold disabled:opacity-60"
+          className="shrink-0 border border-[var(--border-subtle)]"
           title={state?.ok === false ? state.message : undefined}
         >
           {pending ? '…' : 'Save'}
-        </button>
+        </TrayButton>
       </form>
     </li>
   );
@@ -136,26 +146,22 @@ function TeamCard({
           </h3>
           {team.label === null ? null : <p className="text-xs text-muted">{team.label}</p>}
         </div>
-        <div className="flex gap-1.5">
-          <button
-            type="button"
+        <ActionTray>
+          <TrayButton
             onClick={() => setEditing((value) => !value)}
-            className="min-h-11 rounded-lg border border-[var(--border-subtle)] px-2.5 py-1 text-xs font-semibold"
+            aria-expanded={editing}
+            aria-controls={`rename-${team.team_id}`}
           >
             Rename
-          </button>
+          </TrayButton>
           <form action={remove} className="inline">
             <input type="hidden" name="league_id" value={leagueId} />
             <input type="hidden" name="team_id" value={team.team_id} />
-            <button
-              type="submit"
-              disabled={removing}
-              className="min-h-11 rounded-lg border border-[var(--border-subtle)] px-2.5 py-1 text-xs font-semibold disabled:opacity-60"
-            >
+            <TrayButton type="submit" disabled={removing}>
               {removing ? '…' : 'Delete'}
-            </button>
+            </TrayButton>
           </form>
-        </div>
+        </ActionTray>
       </div>
 
       <FormError
@@ -169,7 +175,7 @@ function TeamCard({
       />
 
       {editing ? (
-        <form action={rename} className="flex flex-col gap-2">
+        <form id={`rename-${team.team_id}`} action={rename} className="flex flex-col gap-2">
           <input type="hidden" name="league_id" value={leagueId} />
           <input type="hidden" name="team_id" value={team.team_id} />
           <label className="sr-only" htmlFor={`name-${team.team_id}`}>
@@ -250,7 +256,8 @@ export function TeamBuilder({
   return (
     <div className="flex flex-col gap-4">
       <p className="text-sm text-muted">
-        {players.length} confirmed · {unassigned.length} unassigned · {teams.length} teams
+        {players.length} confirmed · {unassigned.length} unassigned ·{' '}
+        {pluralize(teams.length, 'team')}
         {published ? ` · published revision ${String(teamRevision)}` : ' · not published'}
       </p>
 
@@ -304,9 +311,10 @@ export function TeamBuilder({
           Confirmed players <span className="text-muted">({players.length})</span>
         </h3>
         {unassigned.length > 0 ? (
-          <p className="text-sm text-amber-700 dark:text-amber-300">
-            {unassigned.length} player{unassigned.length === 1 ? '' : 's'} still need a team
-            before you can publish.
+          <p className="text-sm text-flag-700 dark:text-flag-200">
+            {pluralize(unassigned.length, 'player')}{' '}
+            {unassigned.length === 1 ? 'still needs' : 'still need'} a team before you can
+            publish.
           </p>
         ) : null}
         {players.length === 0 ? (

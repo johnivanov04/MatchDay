@@ -1,5 +1,4 @@
 import type { Metadata } from 'next';
-import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { TeamBuilder } from '@/components/team-builder';
 import { StartTeamsButton } from '@/components/team-builder-start';
@@ -11,6 +10,9 @@ import {
 } from '@/lib/auth/page-guards';
 import { getMatch } from '@/lib/matches/matches';
 import { getDraftTeams, getTeamBuilderPlayers } from '@/lib/matches/teams';
+import { ShieldIcon } from '@/components/ui/icon';
+import { PageHeader } from '@/components/ui/page-header';
+import { pluralize } from '@/lib/format/plural';
 
 export const metadata: Metadata = { title: 'Teams' };
 
@@ -46,19 +48,18 @@ export default async function MatchTeamsPage({
 
   return (
     <>
-      <header className="flex flex-col gap-1">
-        <p className="text-xs uppercase tracking-wide text-muted">{league.name}</p>
-        <h1 className="text-2xl font-bold">Teams</h1>
-        <p className="text-sm text-muted">{match.title}</p>
-        <Link href={matchPath(slug, matchId)} className="mt-1 text-sm underline underline-offset-4">
-          Back to the match
-        </Link>
-      </header>
+      <PageHeader
+        eyebrow={league.name}
+        icon={<ShieldIcon size={13} />}
+        title="Teams"
+        description={match.title}
+        back={{ href: matchPath(slug, matchId), label: 'Back to the match' }}
+      />
 
       {match.status === 'canceled' ? (
         <p
           role="status"
-          className="rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-900 dark:bg-red-950/50 dark:text-red-200"
+          className="rounded-lg border border-whistle-200 bg-whistle-50 px-3 py-2 text-sm text-red-800 dark:border-whistle-900 dark:bg-whistle-900/25 dark:text-red-200"
         >
           This match was canceled. Teams are shown for reference only.
         </p>
@@ -67,7 +68,7 @@ export default async function MatchTeamsPage({
         // of teams rather than silently creating them on a GET.
         <section className="surface-card p-4">
           <p className="text-sm text-muted">
-            No teams yet. This match is configured for {match.team_count} teams.
+            No teams yet. This match is configured for {pluralize(match.team_count, 'team')}.
           </p>
           <StartTeamsButton leagueId={league.id} matchId={matchId} />
         </section>

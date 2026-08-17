@@ -2,6 +2,8 @@ import type { Metadata } from 'next';
 import { CreateMatchForm } from '@/components/create-match-form';
 import { requireLeagueAdminPage } from '@/lib/auth/page-guards';
 import { getLeagueMatchTemplates } from '@/lib/matches/matches';
+import { BallIcon } from '@/components/ui/icon';
+import { PageHeader } from '@/components/ui/page-header';
 
 export const metadata: Metadata = { title: 'Create a match' };
 
@@ -16,13 +18,13 @@ export default async function NewMatchPage({
 
   return (
     <>
-      <header className="flex flex-col gap-1">
-        <p className="text-xs uppercase tracking-wide text-muted">{league.name}</p>
-        <h1 className="text-2xl font-bold">Create a match</h1>
-        <p className="text-sm text-muted">
-          Start from a template or from scratch. Everything stays editable until you publish.
-        </p>
-      </header>
+      <PageHeader
+        eyebrow={league.name}
+        icon={<BallIcon size={13} />}
+        title="Create a match"
+        description="Start from a template or from scratch. Everything stays editable until you publish."
+        back={{ href: `/leagues/${league.slug}/matches`, label: 'Back to matches' }}
+      />
 
       <CreateMatchForm league={league} templates={templates} />
     </>

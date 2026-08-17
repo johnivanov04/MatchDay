@@ -44,12 +44,20 @@ function attendanceRow(page: Page, player: TestUser) {
 /**
  * The recorded-outcome summary for a row.
  *
- * Scoped to the `<p>` deliberately: every outcome label also appears as an
- * `<option>` inside the same row's select, so a plain text match is ambiguous
- * by construction rather than by accident.
+ * Scoped deliberately: every outcome label also appears as an `<option>` inside
+ * the same row's select, so an unscoped text match is ambiguous by construction
+ * rather than by accident.
+ *
+ * ── WHY A TEST ID AND NOT `locator('p')` ───────────────────────────────────
+ *
+ * It used to mean "the paragraph in this row", which pinned the design to a
+ * `<p>`. The outcome is now a `Badge` beside its timestamp, matching how every
+ * other state in the product is shown — and a structural selector would have
+ * made that improvement look like a regression. A test identity is the right
+ * anchor for something a test needs to find; the markup can move underneath it.
  */
 function recordedSummary(page: Page, player: TestUser) {
-  return attendanceRow(page, player).locator('p');
+  return attendanceRow(page, player).getByTestId('attendance-summary');
 }
 
 /** Locates a member-management row by the membership it controls. */
@@ -92,13 +100,13 @@ test.describe('recording attendance', () => {
       .getByLabel(`Attendance for ${alice!.firstName} Tester`)
       .selectOption('attended');
     await attendanceRow(admin, alice!).getByRole('button', { name: 'Save' }).click();
-    await expect(recordedSummary(admin, alice!).getByText(/^Attended ·/)).toBeVisible();
+    await expect(recordedSummary(admin, alice!)).toContainText('Attended');
 
     await attendanceRow(admin, bob!)
       .getByLabel(`Attendance for ${bob!.firstName} Tester`)
       .selectOption('no_show');
     await attendanceRow(admin, bob!).getByRole('button', { name: 'Save' }).click();
-    await expect(recordedSummary(admin, bob!).getByText(/^Did not attend ·/)).toBeVisible();
+    await expect(recordedSummary(admin, bob!)).toContainText('Did not attend');
 
     expect(await recordedOutcome(factory, match.id, alice!)).toBe('attended');
     expect(await recordedOutcome(factory, match.id, bob!)).toBe('no_show');
@@ -129,7 +137,7 @@ test.describe('recording attendance', () => {
       .getByLabel(`Attendance for ${alice!.firstName} Tester`)
       .selectOption('attended');
     await attendanceRow(admin, alice!).getByRole('button', { name: 'Save' }).click();
-    await expect(recordedSummary(admin, alice!).getByText(/^Attended ·/)).toBeVisible();
+    await expect(recordedSummary(admin, alice!)).toContainText('Attended');
 
     await expect(admin.getByText('1 player still needs an outcome')).toBeVisible();
     await admin.getByRole('button', { name: 'Complete match' }).click();
@@ -170,12 +178,12 @@ test.describe('recording attendance', () => {
     const row = attendanceRow(admin, player!);
     await row.getByLabel(`Attendance for ${player!.firstName} Tester`).selectOption('no_show');
     await row.getByRole('button', { name: 'Save' }).click();
-    await expect(recordedSummary(admin, player!).getByText(/^Did not attend ·/)).toBeVisible();
+    await expect(recordedSummary(admin, player!)).toContainText('Did not attend');
 
     // They turned up after all, and the administrator puts it right.
     await row.getByLabel(`Attendance for ${player!.firstName} Tester`).selectOption('attended');
     await row.getByRole('button', { name: 'Update' }).click();
-    await expect(recordedSummary(admin, player!).getByText(/^Attended ·/)).toBeVisible();
+    await expect(recordedSummary(admin, player!)).toContainText('Attended');
     await expect(recordedSummary(admin, player!).getByText(/corrected 1/)).toBeVisible();
 
     expect(await recordedOutcome(factory, match.id, player!)).toBe('attended');

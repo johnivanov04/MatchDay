@@ -1,5 +1,8 @@
 import type { Metadata } from 'next';
 import { MarkAllReadButton, NotificationRowItem } from '@/components/notification-inbox';
+import { BellIcon } from '@/components/ui/icon';
+import { PageHeader } from '@/components/ui/page-header';
+import { EmptyState } from '@/components/ui/status';
 import { requireOnboardedUser } from '@/lib/auth/page-guards';
 import { getMyNotifications, getUnreadNotificationCount } from '@/lib/notifications/notifications';
 
@@ -22,20 +25,24 @@ export default async function NotificationsPage() {
 
   return (
     <>
-      <header className="flex flex-col gap-2">
-        <h1 className="text-2xl font-bold">Notifications</h1>
-        <p className="text-sm text-muted">
-          {unreadCount === 0
+      <PageHeader
+        title="Notifications"
+        description={
+          unreadCount === 0
             ? 'You are all caught up.'
-            : `${unreadCount} unread ${unreadCount === 1 ? 'notification' : 'notifications'}.`}
-        </p>
-        <MarkAllReadButton unreadCount={unreadCount} />
-      </header>
+            : `${unreadCount} unread ${unreadCount === 1 ? 'notification' : 'notifications'}.`
+        }
+        actions={<MarkAllReadButton unreadCount={unreadCount} />}
+      />
 
       {notifications.length === 0 ? (
-        <p className="text-sm text-muted">Nothing here yet.</p>
+        <EmptyState
+          icon={<BellIcon size={22} />}
+          title="No notifications yet"
+          description="Match reminders, roster decisions and team sheets land here. Everything stays in this inbox even if you turn phone alerts off."
+        />
       ) : (
-        <ul className="flex flex-col gap-3">
+        <ul className="stagger flex flex-col gap-3">
           {notifications.map((notification) => (
             <NotificationRowItem key={notification.id} notification={notification} />
           ))}

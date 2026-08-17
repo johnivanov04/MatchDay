@@ -1,6 +1,6 @@
 'use client';
 
-import { useActionState } from 'react';
+import { useActionState, useState } from 'react';
 import { Field, FormError, inputClassName, SubmitButton } from '@/components/ui/field';
 import { PlayerAvatar } from '@/components/ui/player-avatar';
 import { createInviteAction, revokeInviteAction } from '@/server/actions/invites';
@@ -10,7 +10,8 @@ import {
   transferAdministrationAction,
   updateMembershipStatusAction,
 } from '@/server/actions/membership';
-import type { LeagueInviteRow } from '@/types/database';
+import { Badge, type BadgeTone } from '@/components/ui/badge';
+import type { LeagueInviteRow, MembershipStatus } from '@/types/database';
 import type {
   InviteState,
   JoinRequestSummary,
@@ -24,6 +25,21 @@ function displayName(
   return profile === null ? fallback : `${profile.first_name} ${profile.last_name}`;
 }
 
+/**
+ * Membership status, as a tone.
+ *
+ * `active` is the good state, `pending` needs a decision from the person
+ * reading this screen, and both `suspended` and `removed` are refusals. A
+ * `Record` rather than a chain of ternaries so a new status added to the enum
+ * fails to compile here rather than silently rendering grey.
+ */
+const STATUS_TONES: Record<MembershipStatus, BadgeTone> = {
+  active: 'live',
+  pending: 'pending',
+  suspended: 'off',
+  removed: 'off',
+};
+
 /** Approve / reject a pending request. Both calls are idempotent server-side. */
 export function JoinRequestRow({ entry }: { entry: JoinRequestSummary }) {
   const [state, submit, pending] = useActionState(decideJoinRequestAction, null);
@@ -32,7 +48,7 @@ export function JoinRequestRow({ entry }: { entry: JoinRequestSummary }) {
     <li className="surface-card flex flex-col gap-2 p-3">
       <div>
         <p className="text-sm font-semibold">
-          {displayName(entry.profile, 'A Matchday member')}
+          {displayName(entry.profile, 'A MatchDay member')}
         </p>
         <p className="text-xs text-muted">{entry.profile?.email_normalized ?? ''}</p>
       </div>
@@ -48,7 +64,7 @@ export function JoinRequestRow({ entry }: { entry: JoinRequestSummary }) {
           <button
             type="submit"
             disabled={pending}
-            className="min-h-11 rounded-lg bg-pitch-600 px-3 py-2 text-sm font-semibold text-white hover:bg-pitch-700 disabled:opacity-60"
+            className="min-h-control rounded-lg bg-pitch-600 px-3 py-2 text-sm font-semibold text-white hover:bg-pitch-700 disabled:opacity-55"
           >
             Approve
           </button>
@@ -59,7 +75,7 @@ export function JoinRequestRow({ entry }: { entry: JoinRequestSummary }) {
           <button
             type="submit"
             disabled={pending}
-            className="min-h-11 rounded-lg border border-[var(--border-subtle)] px-3 py-2 text-sm font-semibold disabled:opacity-60"
+            className="min-h-control rounded-[var(--radius-md)] border border-[var(--border-subtle)] px-3 py-2 text-sm font-semibold disabled:opacity-55"
           >
             Reject
           </button>
@@ -67,7 +83,7 @@ export function JoinRequestRow({ entry }: { entry: JoinRequestSummary }) {
       </div>
 
       {state?.ok === false ? (
-        <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+        <p role="alert" className="text-sm text-whistle-600 dark:text-whistle-300">
           {state.message}
         </p>
       ) : null}
@@ -87,6 +103,14 @@ export function MemberRow({
   const [state, submit, pending] = useActionState(updateMembershipStatusAction, null);
   const { membership } = entry;
 
+  // Which status the administrator currently has selected, so the suspend-until
+  // date can appear only when it means something. Seeded from the stored value;
+  // "pending" is not an option in the select, so a pending membership opens on
+  // "active" exactly as it did before.
+  const [draftStatus, setDraftStatus] = useState<MembershipStatus>(
+    membership.status === 'pending' ? 'active' : membership.status,
+  );
+
   return (
     <li className="surface-card flex flex-col gap-2 p-3">
       <div className="flex items-start justify-between gap-3">
@@ -98,7 +122,7 @@ export function MemberRow({
           )}
           <div className="min-w-0">
             <p className="truncate text-sm font-semibold">
-              {displayName(entry.profile, 'A Matchday member')}
+              {displayName(entry.profile, 'A MatchDay member')}
               {isSelf ? ' (you)' : ''}
             </p>
             <p className="truncate text-xs text-muted">
@@ -106,13 +130,16 @@ export function MemberRow({
             </p>
           </div>
         </div>
-        <div className="flex shrink-0 flex-col items-end gap-1">
-          {membership.role === 'league_admin' ? (
-            <span className="rounded-full border border-pitch-500/50 px-2 py-0.5 text-xs font-medium">
-              Administrator
-            </span>
-          ) : null}
-          <span className="text-xs capitalize text-muted">{membership.status}</span>
+        <div className="flex shrink-0 flex-col items-end gap-1.5">
+          {membership.role === 'league_admin' ? <Badge tone="live">Administrator</Badge> : null}
+          {/* Status was `capitalize` grey text in the same size as everything
+              around it, so telling an active member from a suspended one meant
+              reading a twenty-row list. Tone maps to meaning and the label is
+              always present, so colour is a second channel rather than the
+              only one. */}
+          <Badge tone={STATUS_TONES[membership.status]} dot>
+            <span className="capitalize">{membership.status}</span>
+          </Badge>
         </div>
       </div>
 
@@ -137,8 +164,23 @@ export function MemberRow({
           would leave the league with no administrator, which the database
           refuses outright with ADMIN_TRANSFER_INVALID. Transfer administration
           first. */}
+      {/*
+        ── THE ROW USED TO BE A FORM WITH A NAME ON TOP ────────────────────────
+
+        Every member carried a status select, a reason field, a date field and
+        **two paragraphs of explanatory prose** — the same two paragraphs, on
+        every row. A nine-member league was a 4,900px page of repeated
+        instructions, and the screenshot review made it obvious that this read
+        as a database table rather than as a screen.
+
+        Both explanations are now stated once, at the top of the section. The
+        controls stay exactly as they were — same names, same ids, same
+        semantics, so nothing about how a suspension is recorded changes — but
+        they sit on a sunken strip that reads as one control group, and the
+        three fields share two rows instead of six.
+      */}
       {isSelf ? null : (
-        <form action={submit} className="flex flex-col gap-2">
+        <form action={submit} className="surface-sunken flex flex-col gap-2 p-2.5">
           <input type="hidden" name="league_id" value={leagueId} />
           <input type="hidden" name="membership_id" value={membership.id} />
 
@@ -149,8 +191,11 @@ export function MemberRow({
             <select
               id={`status-${membership.id}`}
               name="status"
-              defaultValue={membership.status === 'pending' ? 'active' : membership.status}
-              className="min-h-11 flex-1 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-raised)] px-2 py-1.5 text-sm"
+              value={draftStatus}
+              onChange={(event) => {
+                setDraftStatus(event.target.value as MembershipStatus);
+              }}
+              className="min-h-control min-w-0 flex-1 rounded-[var(--radius-sm)] border border-[var(--border-subtle)] bg-[var(--surface-raised)] px-2 py-1.5 text-sm"
             >
               {/* No `pending` option. It is a state a join request or an
                   invitation puts somebody in, not a decision an administrator
@@ -159,14 +204,58 @@ export function MemberRow({
               <option value="suspended">Suspended</option>
               <option value="removed">Removed</option>
             </select>
+
             <button
               type="submit"
               disabled={pending}
-              className="min-h-11 rounded-lg border border-[var(--border-subtle)] px-3 py-1.5 text-sm font-semibold disabled:opacity-60"
+              className="press min-h-control shrink-0 whitespace-nowrap rounded-[var(--radius-sm)] border border-[var(--border-strong)] bg-[var(--surface-raised)] px-3 py-1.5 text-sm font-semibold hover:bg-[var(--surface-hover)] disabled:opacity-55"
             >
               Update
             </button>
           </div>
+
+          {/*
+            ── THE DATE ONLY EXISTS FOR A SUSPENSION ──────────────────────────
+
+            It was rendered on every row regardless of status, which is both
+            noise — a "suspend until" date means nothing for Active or Removed —
+            and the reason the control strip would not fit. Three controls need
+            322px and the strip is 314px inside a card inside the page's
+            padding; two fit comfortably at any width this product supports.
+
+            Two earlier attempts at this were worse and are worth recording:
+            shaving the widths until they just fit reproduced the exact
+            sub-pixel knife-edge that broke the touch-target check elsewhere,
+            and forcing the wrap with `basis-full` pushed "Update" onto a third
+            line of its own. Removing a control that should not have been there
+            beats arranging one that should not.
+          */}
+          {draftStatus === 'suspended' ? (
+            <div className="flex flex-col gap-1">
+              <label
+                htmlFor={`until-${membership.id}`}
+                className="text-xs font-medium text-muted"
+              >
+                Suspend until (optional)
+              </label>
+              <input
+                id={`until-${membership.id}`}
+                name="suspended_until"
+                type="date"
+                defaultValue={
+                  membership.suspended_until === null
+                    ? ''
+                    : (membership.suspended_until.slice(0, 10) ?? '')
+                }
+                className="min-h-control rounded-[var(--radius-sm)] border border-[var(--border-subtle)] bg-[var(--surface-raised)] px-2 py-1.5 text-sm"
+                aria-describedby={`until-hint-${membership.id}`}
+              />
+              <span id={`until-hint-${membership.id}`} className="sr-only">
+                A note of when you intend to lift the suspension. Nothing happens automatically on
+                that date — reactivating somebody is always your decision.
+              </span>
+            </div>
+          ) : null}
 
           <label htmlFor={`reason-${membership.id}`} className="sr-only">
             Reason for the change
@@ -177,7 +266,7 @@ export function MemberRow({
             type="text"
             maxLength={500}
             placeholder="Reason (required to suspend or remove)"
-            className="min-h-11 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-raised)] px-2 py-1.5 text-sm"
+            className="min-h-control rounded-[var(--radius-sm)] border border-[var(--border-subtle)] bg-[var(--surface-raised)] px-2 py-1.5 text-sm"
             aria-describedby={`reason-hint-${membership.id}`}
             aria-invalid={state?.ok === false && state.fieldErrors['reason'] !== undefined}
           />
@@ -185,34 +274,26 @@ export function MemberRow({
               the generic "check the highlighted fields", with nothing
               highlighted and nothing said about which field. */}
           {state?.ok === false && state.fieldErrors['reason'] !== undefined ? (
-            <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+            <p role="alert" className="text-sm font-medium text-whistle-600 dark:text-whistle-300">
               {state.fieldErrors['reason']}
             </p>
           ) : null}
-          <p id={`reason-hint-${membership.id}`} className="text-xs text-muted">
+
+          {/* Visually hidden, not deleted. The reason field still points at this
+              through `aria-describedby`, so a screen reader hears the
+              explanation on the field where it matters — while a sighted
+              administrator reads it once at the top of the section instead of
+              once per member. Removing it outright would have left a dangling
+              `aria-describedby`, which is both an axe violation and a control
+              that describes itself as nothing.
+
+              The matching until-hint lives inside the date field's own block,
+              because that field only exists for a suspension and an id pointed
+              at by nothing is the same defect in reverse. */}
+          <span id={`reason-hint-${membership.id}`} className="sr-only">
             Only administrators can see this. Suspending or removing somebody also releases the
             spots they hold in matches that have not been played yet.
-          </p>
-
-          <label htmlFor={`until-${membership.id}`} className="text-xs text-muted">
-            Suspend until (optional)
-          </label>
-          <input
-            id={`until-${membership.id}`}
-            name="suspended_until"
-            type="date"
-            defaultValue={
-              membership.suspended_until === null
-                ? ''
-                : (membership.suspended_until.slice(0, 10) ?? '')
-            }
-            className="min-h-11 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-raised)] px-2 py-1.5 text-sm"
-            aria-describedby={`until-hint-${membership.id}`}
-          />
-          <p id={`until-hint-${membership.id}`} className="text-xs text-muted">
-            A note of when you intend to lift it. Nothing happens automatically on that date —
-            reactivating somebody is always your decision.
-          </p>
+          </span>
         </form>
       )}
 
@@ -222,7 +303,7 @@ export function MemberRow({
           highlighted fields" — the second saying less than the first and
           contradicting its specificity. */}
       {state?.ok === false && Object.keys(state.fieldErrors).length === 0 ? (
-        <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+        <p role="alert" className="text-sm text-whistle-600 dark:text-whistle-300">
           {state.message}
         </p>
       ) : null}
@@ -246,7 +327,7 @@ export function AddMemberForm({ leagueId }: { leagueId: string }) {
       <Field
         label="Email address"
         htmlFor="member-email"
-        hint="The person needs an existing Matchday account."
+        hint="The person needs an existing MatchDay account."
         error={state?.ok === false ? state.fieldErrors['email'] : undefined}
       >
         <input
@@ -407,12 +488,12 @@ export function InviteRow({
           <button
             type="submit"
             disabled={pending}
-            className="min-h-11 rounded-lg border border-[var(--border-subtle)] px-3 py-1.5 text-sm font-semibold disabled:opacity-60"
+            className="min-h-control rounded-[var(--radius-md)] border border-[var(--border-subtle)] px-3 py-1.5 text-sm font-semibold disabled:opacity-55"
           >
             {pending ? 'Revoking…' : 'Revoke'}
           </button>
           {state?.ok === false ? (
-            <p role="alert" className="mt-1 text-xs text-red-600 dark:text-red-400">
+            <p role="alert" className="mt-1 text-xs text-whistle-600 dark:text-whistle-300">
               {state.message}
             </p>
           ) : null}
@@ -448,7 +529,7 @@ export function TransferAdministrationForm({
         <select id="transfer-target" name="membership_id" required className={inputClassName}>
           {candidates.map((candidate) => (
             <option key={candidate.membership.id} value={candidate.membership.id}>
-              {displayName(candidate.profile, 'A Matchday member')}
+              {displayName(candidate.profile, 'A MatchDay member')}
             </option>
           ))}
         </select>

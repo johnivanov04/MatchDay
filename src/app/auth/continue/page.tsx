@@ -59,7 +59,7 @@ export default async function AuthContinuePage({
         className="mx-auto flex min-h-dvh w-full max-w-md flex-col justify-center gap-6 px-5 py-12"
       >
         <header className="flex flex-col gap-2">
-          <p className="text-sm font-semibold uppercase tracking-wide text-pitch-600">Matchday</p>
+          <p className="text-sm font-semibold uppercase tracking-wide text-pitch-600">MatchDay</p>
           <h1 className="text-2xl font-bold">This sign-in link is not valid</h1>
         </header>
 
@@ -69,7 +69,7 @@ export default async function AuthContinuePage({
             parameter is echoed back. */}
         <p
           role="alert"
-          className="rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-900 dark:bg-red-950/50 dark:text-red-200"
+          className="rounded-lg border border-whistle-200 bg-whistle-50 px-3 py-2 text-sm text-red-800 dark:border-whistle-900 dark:bg-whistle-900/25 dark:text-red-200"
         >
           We could not read the sign-in link from your email. It may have been altered in transit,
           or the address may have been copied incompletely.
@@ -81,7 +81,7 @@ export default async function AuthContinuePage({
 
         <Link
           href="/sign-in"
-          className="inline-flex min-h-11 w-fit items-center justify-center rounded-lg bg-pitch-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-pitch-700"
+          className="inline-flex min-h-control w-fit items-center justify-center rounded-lg bg-pitch-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-pitch-700"
         >
           Back to sign in
         </Link>
@@ -95,7 +95,7 @@ export default async function AuthContinuePage({
       className="mx-auto flex min-h-dvh w-full max-w-md flex-col justify-center gap-6 px-5 py-12"
     >
       <header className="flex flex-col gap-2">
-        <p className="text-sm font-semibold uppercase tracking-wide text-pitch-600">Matchday</p>
+        <p className="text-sm font-semibold uppercase tracking-wide text-pitch-600">MatchDay</p>
         <h1 className="text-2xl font-bold">Continue sign in</h1>
         <p className="text-sm text-muted">
           One more tap and you are in. We ask for this because sign-in links can only be used once,
@@ -113,7 +113,7 @@ export default async function AuthContinuePage({
       <a
         href={result.url}
         rel="nofollow noopener"
-        className="inline-flex min-h-11 w-full items-center justify-center rounded-lg bg-pitch-600 px-4 py-3 text-base font-semibold text-white hover:bg-pitch-700"
+        className="inline-flex min-h-control w-full items-center justify-center rounded-lg bg-pitch-600 px-4 py-3 text-base font-semibold text-white hover:bg-pitch-700"
       >
         Continue sign in
       </a>

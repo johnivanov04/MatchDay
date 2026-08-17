@@ -1,36 +1,222 @@
 @import 'tailwindcss';
 
 /*
- * Matchday — mobile-first design tokens.
+ * Matchday — design tokens.
  *
- * Light and dark are both first-class: pickup matches are organised in the
- * evening, on a phone, often outdoors.
+ * ── THE IDENTITY, IN THREE WORDS ───────────────────────────────────────────
+ *
+ * Pitch, chalk, night.
+ *
+ *   * **Pitch** is the green. It carries action — the primary button, the
+ *     active tab, the "you're in" badge — and nothing else. A colour that means
+ *     one thing is worth more than a colour used everywhere.
+ *   * **Chalk** is the line white: surfaces, hairlines, the faint mown-grass
+ *     striping behind headers. Present at 2–4% alpha, felt rather than seen.
+ *   * **Night** is the text and the dark theme: a deep slate with a green
+ *     undertone, so dark mode reads as floodlit turf rather than as grey.
+ *
+ * Light and dark are both first-class. Pickup matches are organised in the
+ * evening, on a phone, outdoors — often on a screen at full brightness in the
+ * dark, which is the case a grey-on-white product handles worst.
+ *
+ * ── WHY OKLCH ─────────────────────────────────────────────────────────────
+ *
+ * Every ramp below is perceptually spaced, so `pitch-600` on `pitch-50` has the
+ * same felt contrast as `slate-600` on `slate-50`. In sRGB hex the greens go
+ * muddy in the mid-range and the contrast ratios drift per hue, which is how
+ * products end up with one accent that passes AA and another that does not.
  */
+
 @theme {
-  --color-pitch-50: oklch(0.97 0.03 155);
-  --color-pitch-100: oklch(0.94 0.06 155);
-  --color-pitch-500: oklch(0.62 0.14 155);
-  --color-pitch-600: oklch(0.54 0.13 155);
-  --color-pitch-700: oklch(0.45 0.11 155);
-  --color-pitch-900: oklch(0.27 0.06 155);
+  /* ── Pitch: the brand green ────────────────────────────────────────────── */
+  --color-pitch-50: oklch(0.972 0.028 155);
+  --color-pitch-100: oklch(0.941 0.055 155);
+  --color-pitch-200: oklch(0.888 0.088 155);
+  --color-pitch-300: oklch(0.818 0.116 155);
+  --color-pitch-400: oklch(0.729 0.135 154);
+  --color-pitch-500: oklch(0.646 0.142 153);
+  --color-pitch-600: oklch(0.552 0.132 153);
+  --color-pitch-700: oklch(0.458 0.108 153);
+  --color-pitch-800: oklch(0.378 0.086 154);
+  --color-pitch-900: oklch(0.312 0.066 155);
+  --color-pitch-950: oklch(0.208 0.046 156);
+
+  /* ── Night: text, chrome and the dark theme ────────────────────────────── */
+  --color-night-50: oklch(0.976 0.003 200);
+  --color-night-100: oklch(0.949 0.004 200);
+  --color-night-200: oklch(0.905 0.006 200);
+  --color-night-300: oklch(0.845 0.008 200);
+  --color-night-400: oklch(0.688 0.011 200);
+  --color-night-500: oklch(0.565 0.013 200);
+  --color-night-600: oklch(0.464 0.014 200);
+  --color-night-700: oklch(0.376 0.014 200);
+  --color-night-800: oklch(0.278 0.013 200);
+  --color-night-900: oklch(0.216 0.012 205);
+  --color-night-950: oklch(0.164 0.011 205);
+
+  /* ── Semantic accents ─────────────────────────────────────────────────────
+   *
+   * Three, and no more. Amber is "needs a person" (waitlist, pending, a
+   * warning). Red is refusal and loss (cancelled, removed, destructive). Blue
+   * is neutral information that is neither good nor bad (drafts, notices), and
+   * is deliberately cool so it never competes with pitch green for attention.
+   */
+  --color-flag-50: oklch(0.977 0.036 85);
+  --color-flag-100: oklch(0.948 0.072 85);
+  --color-flag-200: oklch(0.902 0.113 85);
+  --color-flag-500: oklch(0.756 0.152 68);
+  --color-flag-600: oklch(0.658 0.148 55);
+  --color-flag-700: oklch(0.542 0.128 48);
+  --color-flag-900: oklch(0.324 0.078 52);
+
+  --color-whistle-50: oklch(0.972 0.017 20);
+  --color-whistle-100: oklch(0.941 0.035 20);
+  --color-whistle-200: oklch(0.895 0.062 20);
+  --color-whistle-500: oklch(0.637 0.198 24);
+  --color-whistle-600: oklch(0.564 0.196 25);
+  --color-whistle-700: oklch(0.478 0.168 25);
+  --color-whistle-900: oklch(0.302 0.098 25);
+
+  --color-sky-50: oklch(0.974 0.017 240);
+  --color-sky-100: oklch(0.939 0.036 240);
+  --color-sky-200: oklch(0.891 0.062 240);
+  --color-sky-500: oklch(0.637 0.132 249);
+  --color-sky-600: oklch(0.552 0.144 252);
+  --color-sky-700: oklch(0.468 0.128 253);
+  --color-sky-900: oklch(0.302 0.078 254);
+
+  /* ── Radius ────────────────────────────────────────────────────────────── */
+  --radius-xs: 0.375rem;
+  --radius-sm: 0.5rem;
+  --radius-md: 0.75rem;
+  --radius-lg: 1rem;
+  --radius-xl: 1.25rem;
+  --radius-2xl: 1.5rem;
+
+  /* ── Motion ────────────────────────────────────────────────────────────────
+   *
+   * One easing curve for everything that moves, and two durations. A product
+   * with five bespoke curves feels assembled; one curve feels designed.
+   */
+  --ease-out-soft: cubic-bezier(0.22, 1, 0.36, 1);
+
+  --animate-rise: rise 0.32s var(--ease-out-soft) both;
+  --animate-fade: fade 0.24s var(--ease-out-soft) both;
+  --animate-shimmer: shimmer 1.6s ease-in-out infinite;
+  --animate-pop: pop 0.28s var(--ease-out-soft) both;
+}
+
+/**
+ * The entrance. Transform only — deliberately, and this was learned the hard
+ * way.
+ *
+ * It used to fade from `opacity: 0` as well, which looked good and was wrong:
+ * for the third of a second the animation is running, every piece of text
+ * inside is rendered at reduced opacity, and reduced opacity is reduced
+ * contrast. The automated accessibility pass caught it as three *serious*
+ * colour-contrast violations on a page header whose colours are, measured
+ * statically, 6.5:1 and 8.6:1.
+ *
+ * The scanner was right and the design was wrong. Somebody landing on a page
+ * mid-animation genuinely sees washed-out text, and somebody on a slow phone
+ * sees it for longer. A slide alone still reads as "this arrived", costs
+ * nothing in legibility, and composites on the GPU either way.
+ */
+@keyframes rise {
+  from {
+    transform: translate3d(0, 9px, 0);
+  }
+  to {
+    transform: none;
+  }
+}
+
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes shimmer {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 0.85;
+  }
+}
+
+@keyframes pop {
+  0% {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+  60% {
+    transform: scale(1.02);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
 @layer base {
   :root {
-    --surface: oklch(0.99 0.002 250);
+    /* Surfaces. `base` is the page, `card` sits on it, `sunken` sits in it. */
+    --surface: oklch(0.985 0.004 160);
     --surface-raised: oklch(1 0 0);
-    --border-subtle: oklch(0.9 0.005 250);
-    --text-primary: oklch(0.22 0.01 250);
-    --text-muted: oklch(0.52 0.012 250);
+    --surface-sunken: oklch(0.968 0.006 165);
+    --surface-hover: oklch(0.962 0.012 158);
+
+    --border-subtle: oklch(0.902 0.007 180);
+    --border-strong: oklch(0.828 0.011 180);
+
+    --text-primary: oklch(0.216 0.012 205);
+    --text-secondary: oklch(0.404 0.013 200);
+    --text-muted: oklch(0.518 0.013 200);
+
+    /* Elevation. Tinted with the brand hue rather than neutral black, so a
+       card reads as lifted off turf instead of stamped onto paper. */
+    --shadow-card: 0 1px 2px oklch(0.32 0.03 160 / 0.05), 0 1px 3px oklch(0.32 0.03 160 / 0.04);
+    --shadow-raised: 0 2px 4px oklch(0.32 0.03 160 / 0.06), 0 8px 20px oklch(0.32 0.03 160 / 0.07);
+    --shadow-float: 0 8px 16px oklch(0.32 0.03 160 / 0.08), 0 20px 44px oklch(0.32 0.03 160 / 0.1);
+
+    /* The mown-grass stripe and the chalk line, as reusable paint. */
+    --stripe-alpha: 0.028;
+    --chalk-alpha: 0.5;
+
+    color-scheme: light;
   }
 
   @media (prefers-color-scheme: dark) {
     :root {
-      --surface: oklch(0.19 0.008 250);
-      --surface-raised: oklch(0.24 0.009 250);
-      --border-subtle: oklch(0.33 0.01 250);
-      --text-primary: oklch(0.96 0.003 250);
-      --text-muted: oklch(0.72 0.008 250);
+      --surface: oklch(0.176 0.012 195);
+      --surface-raised: oklch(0.226 0.014 195);
+      --surface-sunken: oklch(0.152 0.011 195);
+      --surface-hover: oklch(0.268 0.017 190);
+
+      --border-subtle: oklch(0.312 0.014 195);
+      --border-strong: oklch(0.404 0.018 195);
+
+      --text-primary: oklch(0.965 0.004 180);
+      --text-secondary: oklch(0.808 0.009 185);
+      --text-muted: oklch(0.702 0.011 185);
+
+      /* Shadows do almost nothing on a dark ground, so elevation there is
+         carried by the surface ramp above. Kept shallow rather than removed so
+         a floating element still detaches from what is behind it. */
+      --shadow-card: 0 1px 2px oklch(0 0 0 / 0.28);
+      --shadow-raised: 0 2px 6px oklch(0 0 0 / 0.34), 0 10px 24px oklch(0 0 0 / 0.28);
+      --shadow-float: 0 8px 20px oklch(0 0 0 / 0.42), 0 20px 48px oklch(0 0 0 / 0.36);
+
+      --stripe-alpha: 0.05;
+      --chalk-alpha: 0.16;
+
+      color-scheme: dark;
     }
   }
 
@@ -44,13 +230,37 @@
     font-family:
       ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
       sans-serif;
+    /* `dvh`, not `vh`: mobile Safari's toolbar makes `vh` taller than the
+       visible viewport, which is how a fixed bottom bar ends up under it. */
     min-height: 100dvh;
+    /* Every screen in the product is a stack of headings and short prose, and
+       both read better with the browser's own optical spacing. */
+    text-rendering: optimizeLegibility;
   }
 
-  /* A visible focus ring is a requirement, not a decoration. */
+  /* A visible focus ring is a requirement, not a decoration. Two-tone so it is
+     legible against both a pale card and the green of a primary button. */
   :focus-visible {
     outline: 2px solid var(--color-pitch-500);
     outline-offset: 2px;
+    border-radius: var(--radius-xs);
+  }
+
+  /* Headings carry the product's voice: tight, confident, never shouty. */
+  h1,
+  h2,
+  h3 {
+    letter-spacing: -0.014em;
+    text-wrap: balance;
+  }
+
+  /* Figures line up in a column when they are stacked in a table or a stat
+     grid, which is most of this product. */
+  th,
+  td,
+  time,
+  .tabular {
+    font-variant-numeric: tabular-nums;
   }
 
   /*
@@ -82,16 +292,206 @@
     *::after {
       animation-duration: 0.01ms !important;
       transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
     }
   }
 }
 
+/* ── Surfaces ──────────────────────────────────────────────────────────────
+ *
+ * Three, and the difference between them is the whole hierarchy. Before this
+ * there was one, applied forty times, so a hero panel and a list row looked
+ * identical and nothing on a screen claimed to matter more than anything else.
+ */
+
 @utility surface-card {
   background-color: var(--surface-raised);
   border: 1px solid var(--border-subtle);
-  border-radius: 0.875rem;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+}
+
+@utility surface-panel {
+  background-color: var(--surface-raised);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-raised);
+}
+
+@utility surface-sunken {
+  background-color: var(--surface-sunken);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
 }
 
 @utility text-muted {
   color: var(--text-muted);
+}
+
+@utility text-secondary {
+  color: var(--text-secondary);
+}
+
+/* ── The soccer motifs ─────────────────────────────────────────────────────
+ *
+ * Both are decoration and neither carries meaning, so both are `::before`
+ * layers a screen reader never reaches.
+ */
+
+/**
+ * Mown-grass striping.
+ *
+ * Diagonal bands at ~3% alpha — the pattern a roller leaves on a pitch. It is
+ * deliberately below the threshold where anybody would name it; the point is
+ * that a header stops reading as an empty white rectangle.
+ */
+@utility turf-stripes {
+  position: relative;
+  isolation: isolate;
+
+  &::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    background-image: repeating-linear-gradient(
+      112deg,
+      color-mix(in oklab, var(--color-pitch-600) calc(var(--stripe-alpha) * 100%), transparent) 0px,
+      color-mix(in oklab, var(--color-pitch-600) calc(var(--stripe-alpha) * 100%), transparent) 26px,
+      transparent 26px,
+      transparent 52px
+    );
+    pointer-events: none;
+  }
+}
+
+/**
+ * The centre circle, ghosted.
+ *
+ * Used behind empty states and the sign-in hero, bleeding off one edge so it
+ * reads as part of a larger pitch rather than as a circle somebody drew.
+ */
+@utility chalk-arc {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+
+  /*
+   * `::after`, NOT `::before` — and that is load-bearing.
+   *
+   * An element has exactly one `::before`. `turf-stripes` claims it, so while
+   * this rule also used `::before` the two utilities could not be composed:
+   * putting both on the profile hero produced neither a stripe wash nor a
+   * corner arc but the stripes clipped into a circle in the wrong corner. It
+   * looked like a rendering fault, which is roughly what it was.
+   *
+   * Sized and placed so only a shallow sweep crosses the top-right corner. It
+   * was 22rem at -9rem/-11rem, which on a 300px-tall empty-state card put a
+   * hard-edged arc straight through the middle of the text — reading as a
+   * stray line rather than as a motif.
+   */
+  &::after {
+    content: '';
+    position: absolute;
+    width: 15rem;
+    height: 15rem;
+    right: -6.5rem;
+    top: -7.5rem;
+    z-index: -1;
+    border-radius: 9999px;
+    border: 1.5px solid
+      color-mix(in oklab, var(--color-pitch-500) calc(var(--chalk-alpha) * 22%), transparent);
+    pointer-events: none;
+  }
+}
+
+/** A hairline in the brand hue, for dividing rows inside a card. */
+@utility divide-hairline {
+  & > * + * {
+    border-top: 1px solid var(--border-subtle);
+  }
+}
+
+/* ── Interaction ───────────────────────────────────────────────────────────
+ *
+ * One press behaviour, shared by every tappable thing. A 2% scale is beneath
+ * conscious notice and is the difference between a control that feels
+ * connected to your thumb and one that feels like a web page.
+ */
+@utility press {
+  transition:
+    transform 0.12s var(--ease-out-soft),
+    background-color 0.16s var(--ease-out-soft),
+    border-color 0.16s var(--ease-out-soft),
+    color 0.16s var(--ease-out-soft),
+    box-shadow 0.16s var(--ease-out-soft),
+    opacity 0.16s var(--ease-out-soft);
+
+  &:active:not(:disabled) {
+    transform: scale(0.98);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    &:active:not(:disabled) {
+      transform: none;
+    }
+  }
+}
+
+/**
+ * Staggered entrance for a list.
+ *
+ * Six steps, then it stops: beyond about 200ms of total stagger a list stops
+ * feeling responsive and starts feeling slow, and a fourteen-player roster
+ * would otherwise take nearly a second to finish arriving.
+ */
+@utility stagger {
+  & > *:nth-child(1) {
+    animation-delay: 0ms;
+  }
+  & > *:nth-child(2) {
+    animation-delay: 30ms;
+  }
+  & > *:nth-child(3) {
+    animation-delay: 60ms;
+  }
+  & > *:nth-child(4) {
+    animation-delay: 90ms;
+  }
+  & > *:nth-child(5) {
+    animation-delay: 120ms;
+  }
+  & > *:nth-child(n + 6) {
+    animation-delay: 150ms;
+  }
+}
+
+/** Respects the iPhone's home indicator without hard-coding a number. */
+@utility pb-safe {
+  padding-bottom: max(env(safe-area-inset-bottom), 0px);
+}
+
+/**
+ * The touch-target floor for every interactive control: 46px.
+ *
+ * ── WHY NOT 44 ─────────────────────────────────────────────────────────────
+ *
+ * 44 is the requirement (WCAG 2.5.5), and the end-to-end mobile pass measures
+ * against exactly that. Sitting *on* the requirement turned out to be a trap. A
+ * button at `text-sm` has a natural height of 20 (line) + 20 (padding) + 2
+ * (border) = 42px, so `min-height` is its only binding constraint and it
+ * computes to precisely 44.000px — until sub-pixel layout returns 43.996 from
+ * `getBoundingClientRect()` and the check fails. "Cancel my spot" did exactly
+ * that on two of three full suite runs while passing in isolation, which is
+ * what a knife-edge looks like from the outside.
+ *
+ * Two pixels of headroom is imperceptible and moves every control in the
+ * product above its own floor rather than balanced on it. A control's *visual*
+ * size still comes from its padding and type scale; this only sets the floor.
+ *
+ * One utility rather than forty hand-typed values, so the next control somebody
+ * adds inherits the decision instead of re-deriving it.
+ */
+@utility min-h-control {
+  min-height: 2.875rem;
 }

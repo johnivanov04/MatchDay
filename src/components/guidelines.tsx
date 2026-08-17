@@ -27,14 +27,14 @@ export function AcceptGuidelinesForm({ version }: { version: GuidelineVersionRow
       <input type="hidden" name="guideline_version_id" value={version.id} />
       <FormError message={state?.ok === false ? state.message : undefined} />
 
-      <label className="flex items-start gap-2.5 text-sm">
-        <input type="checkbox" name="confirm" value="accept" className="mt-0.5 size-4" />
+      <label className="flex min-h-control cursor-pointer items-start gap-2.5 text-sm">
+        <input type="checkbox" name="confirm" value="accept" className="mt-0.5 size-5 shrink-0 accent-pitch-600" />
         <span>
           I have read and accept <strong>{version.title}</strong> ({version.version_label}).
         </span>
       </label>
       {state?.ok === false && state.fieldErrors['confirm'] !== undefined ? (
-        <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+        <p role="alert" className="text-sm text-whistle-600 dark:text-whistle-300">
           {state.fieldErrors['confirm']}
         </p>
       ) : null}
@@ -140,12 +140,12 @@ export function GuidelineDraftForm({
         />
       </Field>
 
-      <label className="flex items-start gap-2.5 text-sm">
+      <label className="flex min-h-control cursor-pointer items-start gap-2.5 text-sm">
         <input
           type="checkbox"
           name="requires_acceptance"
           defaultChecked={version?.requires_acceptance ?? true}
-          className="mt-0.5 size-4"
+          className="mt-0.5 size-5 shrink-0 accent-pitch-600"
         />
         <span>
           Members must accept this version before they can sign up for matches.
@@ -179,12 +179,12 @@ export function PublishGuidelineButton({
       <button
         type="submit"
         disabled={pending}
-        className="min-h-11 rounded-lg bg-pitch-600 px-3 py-2 text-sm font-semibold text-white hover:bg-pitch-700 disabled:opacity-60"
+        className="min-h-control rounded-lg bg-pitch-600 px-3 py-2 text-sm font-semibold text-white hover:bg-pitch-700 disabled:opacity-55"
       >
         {pending ? 'Publishing…' : 'Publish'}
       </button>
       {state?.ok === false ? (
-        <span role="alert" className="ml-2 text-sm text-red-600 dark:text-red-400">
+        <span role="alert" className="ml-2 text-sm text-whistle-600 dark:text-whistle-300">
           {state.message}
         </span>
       ) : null}
@@ -208,12 +208,12 @@ export function ArchiveGuidelineButton({
       <button
         type="submit"
         disabled={pending}
-        className="min-h-11 rounded-lg border border-[var(--border-subtle)] px-3 py-2 text-sm font-semibold disabled:opacity-60"
+        className="min-h-control rounded-[var(--radius-md)] border border-[var(--border-subtle)] px-3 py-2 text-sm font-semibold disabled:opacity-55"
       >
         {pending ? 'Archiving…' : 'Archive'}
       </button>
       {state?.ok === false ? (
-        <span role="alert" className="ml-2 text-sm text-red-600 dark:text-red-400">
+        <span role="alert" className="ml-2 text-sm text-whistle-600 dark:text-whistle-300">
           {state.message}
         </span>
       ) : null}

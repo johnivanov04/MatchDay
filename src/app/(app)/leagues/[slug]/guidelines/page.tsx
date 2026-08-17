@@ -1,8 +1,11 @@
 import type { Metadata } from 'next';
-import Link from 'next/link';
 import { AcceptGuidelinesForm } from '@/components/guidelines';
 import { requireLeagueMemberPage } from '@/lib/auth/page-guards';
 import { getMemberGuidelineView } from '@/lib/guidelines/guidelines';
+import { ButtonLink } from '@/components/ui/button';
+import { CheckIcon, ClipboardIcon, PlusIcon, SettingsIcon } from '@/components/ui/icon';
+import { PageHeader } from '@/components/ui/page-header';
+import { EmptyState } from '@/components/ui/status';
 
 export const metadata: Metadata = { title: 'Guidelines' };
 
@@ -25,45 +28,73 @@ export default async function LeagueGuidelinesPage({
 
   return (
     <>
-      <header className="flex flex-col gap-1">
-        <p className="text-xs uppercase tracking-wide text-muted">{league.name}</p>
-        <h1 className="text-2xl font-bold">Guidelines</h1>
-        {isAdmin ? (
-          <Link
-            href={`/leagues/${league.slug}/guidelines/manage`}
-            className="mt-1 text-sm font-semibold underline underline-offset-4"
-          >
-            Manage guideline versions
-          </Link>
-        ) : null}
-      </header>
+      <PageHeader
+        eyebrow={league.name}
+        icon={<ClipboardIcon size={13} />}
+        title="Guidelines"
+        description="What this league asks of the people who play in it."
+        actions={
+          isAdmin ? (
+            <ButtonLink
+              href={`/leagues/${league.slug}/guidelines/manage`}
+              icon={<SettingsIcon size={16} />}
+            >
+              Manage guideline versions
+            </ButtonLink>
+          ) : undefined
+        }
+      />
 
       {view.required === null ? (
-        <section className="surface-card p-4">
-          <h2 className="text-base font-semibold">Nothing to accept</h2>
-          <p className="mt-1 text-sm text-muted">
-            This league does not currently require you to accept any guidelines.
-          </p>
-        </section>
+        <EmptyState
+          icon={<ClipboardIcon size={22} />}
+          title="Nothing to accept"
+          description={
+            isAdmin
+              ? 'This league has not published any guidelines that require acceptance. Publish a version and every active member is asked to agree to it once.'
+              : 'This league does not currently ask you to accept any guidelines. If that changes you will get a notification.'
+          }
+          action={
+            isAdmin ? (
+              <ButtonLink
+                href={`/leagues/${league.slug}/guidelines/manage`}
+                variant="primary"
+                icon={<PlusIcon size={17} />}
+              >
+                Write the first version
+              </ButtonLink>
+            ) : undefined
+          }
+        />
       ) : view.accepted ? (
-        <section className="surface-card p-4">
-          <h2 className="text-base font-semibold">You are up to date</h2>
-          <p className="mt-1 text-sm text-muted">
-            You accepted <strong>{view.required.version_label}</strong>. If the league publishes a
-            new version you will be asked again.
-          </p>
+        // Still a heading, not an EmptyState: this is a *state*, not an absence,
+        // and the end-to-end suite navigates to it by heading.
+        <section className="surface-card flex items-start gap-3 p-4">
+          <span
+            aria-hidden="true"
+            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-pitch-50 text-pitch-600 dark:bg-pitch-900/50 dark:text-pitch-300"
+          >
+            <CheckIcon size={19} />
+          </span>
+          <div className="flex min-w-0 flex-col gap-1">
+            <h2 className="text-[0.9375rem] font-semibold">You are up to date</h2>
+            <p className="text-sm leading-relaxed text-secondary">
+              You accepted <strong>{view.required.version_label}</strong>. If the league publishes a
+              new version you will be asked again.
+            </p>
+          </div>
         </section>
       ) : (
         <section className="surface-card flex flex-col gap-4 p-4">
           <div>
-            <h2 className="text-base font-semibold">Acceptance needed</h2>
+            <h2 className="text-[0.9375rem] font-semibold">Acceptance needed</h2>
             <p className="mt-1 text-sm text-muted">
               You need to accept these guidelines before you can sign up for matches in this
               league. This does not affect any other league you belong to.
             </p>
           </div>
 
-          <article className="whitespace-pre-wrap rounded-lg border border-[var(--border-subtle)] p-3 text-sm">
+          <article className="whitespace-pre-wrap rounded-[var(--radius-md)] border border-[var(--border-subtle)] p-3 text-sm">
             {view.required.body}
           </article>
 
@@ -84,7 +115,7 @@ export default async function LeagueGuidelinesPage({
 
       {view.published.length === 0 ? null : (
         <section className="flex flex-col gap-3">
-          <h2 className="text-base font-semibold">All published versions</h2>
+          <h2 className="text-[0.9375rem] font-semibold">All published versions</h2>
           <ul className="flex flex-col gap-2">
             {view.published.map((version) => (
               <li key={version.id} className="surface-card p-3">

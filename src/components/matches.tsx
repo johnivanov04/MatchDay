@@ -1,7 +1,13 @@
 'use client';
 
 import { useActionState } from 'react';
-import { Field, FormError, inputClassName, SubmitButton } from '@/components/ui/field';
+import {
+  Field,
+  FormError,
+  inputClassName,
+  SubmitButton,
+  timeInputClassName,
+} from '@/components/ui/field';
 import {
   cancelMatchAction,
   publishMatchAction,
@@ -77,7 +83,7 @@ export function MatchTemplateForm({
         </select>
       </Field>
 
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-3 gap-2">
         <Field label="Arrive" htmlFor="arrival_time" error={fieldError('arrival_time')}>
           <input
             id="arrival_time"
@@ -85,7 +91,7 @@ export function MatchTemplateForm({
             type="time"
             required
             defaultValue={template?.arrival_time?.slice(0, 5) ?? '18:30'}
-            className={inputClassName}
+            className={timeInputClassName}
           />
         </Field>
         <Field label="Kickoff" htmlFor="kickoff_time" error={fieldError('kickoff_time')}>
@@ -95,7 +101,7 @@ export function MatchTemplateForm({
             type="time"
             required
             defaultValue={template?.kickoff_time?.slice(0, 5) ?? '19:00'}
-            className={inputClassName}
+            className={timeInputClassName}
           />
         </Field>
         <Field label="Ends" htmlFor="end_time" error={fieldError('end_time')}>
@@ -105,7 +111,7 @@ export function MatchTemplateForm({
             type="time"
             required
             defaultValue={template?.end_time?.slice(0, 5) ?? '20:30'}
-            className={inputClassName}
+            className={timeInputClassName}
           />
         </Field>
       </div>
@@ -131,7 +137,7 @@ export function MatchTemplateForm({
         />
       </Field>
 
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-3 gap-2">
         <Field label="Capacity" htmlFor="capacity" error={fieldError('capacity')}>
           <input
             id="capacity"
@@ -244,12 +250,12 @@ export function MatchTemplateForm({
         </Field>
       </fieldset>
 
-      <label className="flex items-center gap-2.5 text-sm">
+      <label className="flex min-h-control cursor-pointer items-center gap-2.5 text-sm">
         <input
           type="checkbox"
           name="is_active"
           defaultChecked={template?.is_active ?? true}
-          className="size-4"
+          className="size-5 shrink-0 accent-pitch-600"
         />
         Available when creating matches
       </label>
@@ -277,7 +283,7 @@ export function PublishMatchButton({
       <button
         type="submit"
         disabled={pending}
-        className="min-h-11 rounded-lg bg-pitch-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-pitch-700 disabled:opacity-60"
+        className="min-h-control rounded-lg bg-pitch-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-pitch-700 disabled:opacity-55"
       >
         {pending ? 'Publishing…' : 'Publish to members'}
       </button>
@@ -285,7 +291,7 @@ export function PublishMatchButton({
         Publishing notifies every active member once. Publishing again changes nothing.
       </p>
       {state?.ok === false ? (
-        <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+        <p role="alert" className="text-sm text-whistle-600 dark:text-whistle-300">
           {state.message}
         </p>
       ) : null}
@@ -306,12 +312,12 @@ export function CancelMatchForm({ leagueId, matchId }: { leagueId: string; match
       <button
         type="submit"
         disabled={pending}
-        className="min-h-11 rounded-lg border border-red-400 px-4 py-2.5 text-sm font-semibold text-red-700 disabled:opacity-60 dark:text-red-300"
+        className="min-h-control rounded-lg border border-whistle-300 px-4 py-2.5 text-sm font-semibold text-red-700 disabled:opacity-55 dark:text-red-300"
       >
         {pending ? 'Cancelling…' : 'Cancel this match'}
       </button>
       {state?.ok === false ? (
-        <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+        <p role="alert" className="text-sm text-whistle-600 dark:text-whistle-300">
           {state.message}
         </p>
       ) : null}

@@ -2,6 +2,7 @@
 
 import { useEffect } from 'react';
 import { SupportContact } from '@/components/support-contact';
+import { Button } from '@/components/ui/button';
 import { ErrorState } from '@/components/ui/status';
 
 /**
@@ -44,13 +45,9 @@ export default function AuthenticatedError({
     <ErrorState
       action={
         <div className="flex flex-col gap-2">
-          <button
-            type="button"
-            onClick={reset}
-            className="inline-flex min-h-11 items-center justify-center rounded-lg bg-pitch-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-pitch-700"
-          >
+          <Button variant="primary" onClick={reset}>
             Try again
-          </button>
+          </Button>
           {error.digest === undefined ? null : (
             <p className="text-xs opacity-80">Reference: {error.digest}</p>
           )}

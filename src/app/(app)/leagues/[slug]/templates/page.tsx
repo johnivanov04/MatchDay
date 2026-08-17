@@ -1,8 +1,9 @@
 import type { Metadata } from 'next';
-import Link from 'next/link';
 import { MatchTemplateForm } from '@/components/matches';
 import { requireLeagueAdminPage } from '@/lib/auth/page-guards';
 import { getLeagueMatchTemplates } from '@/lib/matches/matches';
+import { ClipboardIcon } from '@/components/ui/icon';
+import { PageHeader } from '@/components/ui/page-header';
 
 export const metadata: Metadata = { title: 'Match templates' };
 
@@ -19,25 +20,18 @@ export default async function MatchTemplatesPage({
 
   return (
     <>
-      <header className="flex flex-col gap-1">
-        <p className="text-xs uppercase tracking-wide text-muted">{league.name}</p>
-        <h1 className="text-2xl font-bold">Match templates</h1>
-        <p className="text-sm text-muted">
-          Recurring settings for the matches this league runs. Editing a template never changes a
-          match that has already been created from it.
-        </p>
-        <Link
-          href={`/leagues/${league.slug}/matches`}
-          className="mt-1 text-sm font-semibold underline underline-offset-4"
-        >
-          Back to matches
-        </Link>
-      </header>
+      <PageHeader
+        eyebrow={league.name}
+        icon={<ClipboardIcon size={13} />}
+        title="Match templates"
+        description="Recurring settings for the matches this league runs. Editing a template never changes a match that has already been created from it."
+        back={{ href: `/leagues/${league.slug}/matches`, label: 'Back to matches' }}
+      />
 
       {templates.map((template) => (
         <section key={template.id} className="surface-card flex flex-col gap-3 p-4">
           <div className="flex items-start justify-between gap-3">
-            <h2 className="text-base font-semibold">{template.name}</h2>
+            <h2 className="text-[0.9375rem] font-semibold">{template.name}</h2>
             <span className="shrink-0 text-xs text-muted">
               {template.day_of_week === null
                 ? 'No fixed day'
@@ -50,7 +44,7 @@ export default async function MatchTemplatesPage({
       ))}
 
       <section className="surface-card flex flex-col gap-3 p-4">
-        <h2 className="text-base font-semibold">New template</h2>
+        <h2 className="text-[0.9375rem] font-semibold">New template</h2>
         <MatchTemplateForm leagueId={league.id} />
       </section>
     </>

@@ -1,7 +1,16 @@
 'use client';
 
+import type { ReactNode } from 'react';
 import { useActionState, useState } from 'react';
-import { Field, FormError, inputClassName, SubmitButton } from '@/components/ui/field';
+import {
+  Field,
+  FieldGroup,
+  FormError,
+  inputClassName,
+  StepChip,
+  SubmitButton,
+} from '@/components/ui/field';
+import { pluralize } from '@/lib/format/plural';
 import { slugifyLeagueName } from '@/lib/validation/league';
 import { createLeagueAction, updateLeagueSettingsAction } from '@/server/actions/leagues';
 import type { LeagueRow } from '@/types/database';
@@ -16,6 +25,23 @@ import type { LeagueRow } from '@/types/database';
  * Visibility is absent from both modes. New leagues are private by product
  * decision, and switching to searchable is its own confirmed, separately
  * audited action.
+ *
+ * ── WHY CREATE AND SETTINGS LOOK DIFFERENT ─────────────────────────────────
+ *
+ * Same fields, same action shapes, two different jobs. Creating a league is
+ * somebody's first act in the product and they have no idea what a "waitlist
+ * mode" is yet, so `create` renders as four numbered steps — three groups of
+ * inputs and a review — inside cards. Settings is a person changing one thing
+ * they already understand, so it stays a flat list where the field they came
+ * for is one scroll away rather than three steps in.
+ *
+ * ── WHY IT IS NOT A WIZARD ─────────────────────────────────────────────────
+ *
+ * Every field stays mounted on one page. A stepper that unmounts steps has to
+ * re-implement value retention, validation ordering and focus management, and
+ * it hides the field somebody wants to fix behind a Back button. Numbering the
+ * sequence gets the guidance; keeping it on one page keeps the browser's own
+ * `required` handling, autofill, and "find on page" working.
  */
 export function LeagueForm({
   mode,
@@ -34,6 +60,17 @@ export function LeagueForm({
   const [slug, setSlug] = useState(league?.slug ?? '');
   const [slugEdited, setSlugEdited] = useState(mode === 'settings');
 
+  // Controlled only because the review step reads them back. Everything the
+  // review does not mention stays uncontrolled — there is no reason to make
+  // React re-render a fifteen-field form on every keystroke in a field nobody
+  // is going to see again two inches lower.
+  const [sportLabel, setSportLabel] = useState(league?.sport_label ?? '');
+  const [generalArea, setGeneralArea] = useState(league?.general_area ?? '');
+  const [capacity, setCapacity] = useState(String(league?.default_capacity ?? 10));
+  const [teamCount, setTeamCount] = useState(String(league?.default_team_count ?? 2));
+
+  const guided = mode === 'create';
+
   const fieldError = (field: string): string | undefined =>
     state?.ok === false ? state.fieldErrors[field] : undefined;
 
@@ -51,9 +88,12 @@ export function LeagueForm({
         </p>
       ) : null}
 
-      <fieldset className="flex flex-col gap-4">
-        <legend className="mb-1 text-sm font-semibold">Identity</legend>
-
+      <Group
+        guided={guided}
+        step={1}
+        legend="League details"
+        description="What this league is called and where it plays."
+      >
         <Field label="League name" htmlFor="name" error={fieldError('name')}>
           <input
             id="name"
@@ -121,7 +161,8 @@ export function LeagueForm({
             name="general_area"
             required
             maxLength={120}
-            defaultValue={league?.general_area ?? ''}
+            value={generalArea}
+            onChange={(event) => setGeneralArea(event.target.value)}
             className={inputClassName}
           />
         </Field>
@@ -132,7 +173,8 @@ export function LeagueForm({
             name="sport_label"
             required
             maxLength={60}
-            defaultValue={league?.sport_label ?? ''}
+            value={sportLabel}
+            onChange={(event) => setSportLabel(event.target.value)}
             className={inputClassName}
             placeholder="Soccer 5v5"
           />
@@ -156,14 +198,14 @@ export function LeagueForm({
             ))}
           </select>
         </Field>
-      </fieldset>
+      </Group>
 
-      <fieldset className="flex flex-col gap-4">
-        <legend className="mb-1 text-sm font-semibold">Match defaults</legend>
-        <p className="-mt-2 text-xs text-muted">
-          Starting points for each match. Individual matches can override them later.
-        </p>
-
+      <Group
+        guided={guided}
+        step={2}
+        legend="Match setup"
+        description="Starting points for each match. Individual matches can override them later."
+      >
         <div className="grid grid-cols-2 gap-3">
           <Field
             label="Capacity"
@@ -178,7 +220,8 @@ export function LeagueForm({
               min={2}
               max={200}
               required
-              defaultValue={league?.default_capacity ?? 10}
+              value={capacity}
+              onChange={(event) => setCapacity(event.target.value)}
               className={inputClassName}
             />
           </Field>
@@ -211,7 +254,8 @@ export function LeagueForm({
             min={2}
             max={20}
             required
-            defaultValue={league?.default_team_count ?? 2}
+            value={teamCount}
+            onChange={(event) => setTeamCount(event.target.value)}
             className={inputClassName}
           />
         </Field>
@@ -270,45 +314,140 @@ export function LeagueForm({
             placeholder="Thursdays, evenings"
           />
         </Field>
-      </fieldset>
+      </Group>
 
-      <fieldset className="flex flex-col gap-3">
-        <legend className="mb-1 text-sm font-semibold">Profile fields</legend>
-        <p className="-mt-2 text-xs text-muted">
-          Ask members for these when they join. Visible only to you.
-        </p>
-
-        <label className="flex items-center gap-2.5 text-sm">
+      <Group
+        guided={guided}
+        step={3}
+        legend="Player preferences"
+        description="Ask members for these when they join. Visible only to you."
+      >
+        <label className="flex min-h-control cursor-pointer items-center gap-2.5 text-sm">
           <input
             type="checkbox"
             name="gender_field_enabled"
             defaultChecked={league?.gender_field_enabled ?? false}
-            className="size-4"
+            className="size-5 shrink-0 accent-pitch-600"
           />
           Collect gender
         </label>
 
-        <label className="flex items-center gap-2.5 text-sm">
+        <label className="flex min-h-control cursor-pointer items-center gap-2.5 text-sm">
           <input
             type="checkbox"
             name="goalkeeper_field_enabled"
             defaultChecked={league?.goalkeeper_field_enabled ?? false}
-            className="size-4"
+            className="size-5 shrink-0 accent-pitch-600"
           />
           Ask who is willing to play in goal
         </label>
-      </fieldset>
+      </Group>
 
-      <SubmitButton pending={pending}>
-        {mode === 'create' ? 'Create league' : 'Save settings'}
-      </SubmitButton>
+      {guided ? (
+        <div className="surface-card flex flex-col gap-4 p-4">
+          <div className="flex items-start gap-3">
+            <StepChip step={4} />
+            <div className="flex min-w-0 flex-col gap-0.5">
+              <h2 className="text-[0.9375rem] font-semibold">Review</h2>
+              <p className="text-sm text-muted">
+                Everything here can be changed later from the league&rsquo;s settings.
+              </p>
+            </div>
+          </div>
 
-      {mode === 'create' ? (
-        <p className="text-xs text-muted">
-          Your league starts private. You can make it searchable from its settings once you are
-          ready.
-        </p>
-      ) : null}
+          {/* Reads back what was typed rather than repeating the labels above.
+              The point of a review step is the sentence "this is the league you
+              are about to make" — a second copy of the form would not be one. */}
+          <dl className="flex flex-col gap-2.5 border-t border-[var(--border-subtle)] pt-4 text-sm">
+            <SummaryRow label="Name" value={name} />
+            <SummaryRow label="Address" value={slug === '' ? '' : `/leagues/${slug}`} />
+            <SummaryRow
+              label="Format"
+              value={[sportLabel, generalArea].filter((part) => part !== '').join(' · ')}
+            />
+            <SummaryRow label="Each match" value={matchSummary(capacity, teamCount)} />
+          </dl>
+
+          <SubmitButton pending={pending}>Create league</SubmitButton>
+
+          <p className="text-xs text-muted">
+            Your league starts private. You can make it searchable from its settings once you are
+            ready.
+          </p>
+        </div>
+      ) : (
+        <SubmitButton pending={pending}>Save settings</SubmitButton>
+      )}
     </form>
   );
+}
+
+/**
+ * A group of fields, numbered on the create screen and plain in settings.
+ *
+ * One component rather than two branches at each call site: the fields inside
+ * are identical in both modes and duplicating them is how the two screens
+ * would drift apart.
+ */
+function Group({
+  guided,
+  step,
+  legend,
+  description,
+  children,
+}: {
+  guided: boolean;
+  step: number;
+  legend: string;
+  description: string;
+  children: ReactNode;
+}) {
+  if (guided) {
+    return (
+      <FieldGroup legend={legend} description={description} step={step}>
+        {children}
+      </FieldGroup>
+    );
+  }
+
+  return (
+    <fieldset className="flex flex-col gap-4">
+      <legend className="mb-1 text-sm font-semibold">{legend}</legend>
+      <p className="-mt-2 text-xs text-muted">{description}</p>
+      {children}
+    </fieldset>
+  );
+}
+
+/** One line of the review list. Blank values say so rather than showing a gap. */
+function SummaryRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-baseline justify-between gap-4">
+      <dt className="shrink-0 text-muted">{label}</dt>
+      {/* Wraps rather than truncates: at 320px "Up to 10 players, 2 teams"
+          became "Up to 10 players, 2 tea…", and a review that hides what it is
+          reviewing is not one. `break-words` keeps a long unbroken slug inside
+          the card. */}
+      <dd
+        className={`min-w-0 break-words text-right font-medium ${value === '' ? 'text-muted' : ''}`}
+      >
+        {value === '' ? 'Not set yet' : value}
+      </dd>
+    </div>
+  );
+}
+
+/**
+ * "Up to 10 players, 2 teams" — from the two number inputs, which are strings
+ * and can be mid-edit or empty, so both are parsed defensively.
+ */
+function matchSummary(capacity: string, teamCount: string): string {
+  const players = Number.parseInt(capacity, 10);
+  const teams = Number.parseInt(teamCount, 10);
+  const parts: string[] = [];
+
+  if (Number.isFinite(players)) parts.push(`Up to ${pluralize(players, 'player')}`);
+  if (Number.isFinite(teams)) parts.push(pluralize(teams, 'team'));
+
+  return parts.join(', ');
 }

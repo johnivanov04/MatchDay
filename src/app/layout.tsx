@@ -3,11 +3,11 @@ import './globals.css';
 
 export const metadata: Metadata = {
   title: {
-    default: 'Matchday',
-    template: '%s · Matchday',
+    default: 'MatchDay',
+    template: '%s · MatchDay',
   },
   description:
-    'Matchday organises pickup matches for multiple leagues: membership, signup, rosters, waitlists and teams in one place.',
+    'MatchDay organises pickup matches for multiple leagues: membership, signup, rosters, waitlists and teams in one place.',
   // iOS reads this rather than the manifest's icon list when somebody adds the
   // site to their home screen. Without it iOS uses a screenshot of the page as
   // the icon, which is the difference between an installed app and something
@@ -16,7 +16,7 @@ export const metadata: Metadata = {
   icons: { apple: '/apple-touch-icon.png' },
   appleWebApp: {
     capable: true,
-    title: 'Matchday',
+    title: 'MatchDay',
     // The header sits under the status bar in standalone mode, so a translucent
     // bar would put the status text on top of it.
     statusBarStyle: 'default',

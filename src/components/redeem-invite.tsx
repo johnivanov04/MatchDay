@@ -1,7 +1,7 @@
 'use client';
 
 import { useActionState } from 'react';
-import Link from 'next/link';
+import { Button, ButtonLink } from '@/components/ui/button';
 import { redeemInviteAction } from '@/server/actions/invites';
 
 /**
@@ -17,7 +17,7 @@ export function RedeemInviteForm({ token }: { token: string }) {
   if (state?.ok === true) {
     return (
       <div className="surface-card flex flex-col gap-3 p-4">
-        <h2 className="text-base font-semibold">
+        <h2 className="text-[0.9375rem] font-semibold">
           {state.data.joined ? 'You are in.' : 'You already belong to this league.'}
         </h2>
         <p className="text-sm text-muted">
@@ -25,12 +25,9 @@ export function RedeemInviteForm({ token }: { token: string }) {
             ? 'The administrator needs to approve your membership before you can take part.'
             : 'Your membership is active.'}
         </p>
-        <Link
-          href="/dashboard"
-          className="inline-flex min-h-11 items-center justify-center rounded-lg bg-pitch-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-pitch-700"
-        >
+        <ButtonLink href="/dashboard" variant="primary">
           Go to your dashboard
-        </Link>
+        </ButtonLink>
       </div>
     );
   }
@@ -42,19 +39,15 @@ export function RedeemInviteForm({ token }: { token: string }) {
       {state?.ok === false ? (
         <p
           role="alert"
-          className="rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-900 dark:bg-red-950/50 dark:text-red-200"
+          className="rounded-lg border border-whistle-200 bg-whistle-50 px-3 py-2 text-sm text-red-800 dark:border-whistle-900 dark:bg-whistle-900/25 dark:text-red-200"
         >
           {state.message}
         </p>
       ) : null}
 
-      <button
-        type="submit"
-        disabled={pending}
-        className="inline-flex min-h-11 items-center justify-center rounded-lg bg-pitch-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-pitch-700 disabled:opacity-60"
-      >
+      <Button type="submit" variant="primary" disabled={pending} aria-busy={pending}>
         {pending ? 'Joining…' : 'Accept invitation'}
-      </button>
+      </Button>
     </form>
   );
 }

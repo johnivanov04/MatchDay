@@ -1,6 +1,7 @@
 'use client';
 
 import { useActionState, useState } from 'react';
+import { ActionTray, TrayButton } from '@/components/ui/button';
 import { FormError, inputClassName, SubmitButton } from '@/components/ui/field';
 import { PlayerAvatar } from '@/components/ui/player-avatar';
 import {
@@ -46,19 +47,28 @@ function respondedLabel(iso: string): string {
   });
 }
 
-/** One decision button. Every administrator action is a form post, never a fetch. */
+/**
+ * One decision button. Every administrator action is a form post, never a fetch.
+ *
+ * Borderless, grouped into a single `ActionTray` — see that component for why
+ * a per-button border was costing this screen its legibility. `emphasis` gives
+ * the affirmative decision the only colour in the tray, which is enough to find
+ * it without a filled green button on every row.
+ */
 function DecisionButton({
   leagueId,
   matchId,
   membershipId,
   status,
   label,
+  emphasis = false,
 }: {
   leagueId: string;
   matchId: string;
   membershipId: string;
   status: SignupStatus;
   label: string;
+  emphasis?: boolean;
 }) {
   const [state, submit, pending] = useActionState(setSignupDecisionAction, null);
 
@@ -68,14 +78,14 @@ function DecisionButton({
       <input type="hidden" name="match_id" value={matchId} />
       <input type="hidden" name="membership_id" value={membershipId} />
       <input type="hidden" name="status" value={status} />
-      <button
+      <TrayButton
         type="submit"
         disabled={pending}
-        className="inline-flex min-h-11 items-center rounded-lg border border-[var(--border-subtle)] px-2.5 py-1 text-xs font-semibold disabled:opacity-60"
+        tone={emphasis ? 'affirm' : 'neutral'}
         title={state?.ok === false ? state.message : undefined}
       >
         {pending ? '…' : label}
-      </button>
+      </TrayButton>
     </form>
   );
 }
@@ -116,7 +126,7 @@ function AttendanceContext({ summary }: { summary: MembershipAttendanceSummary |
         });
 
   return (
-    <p className="text-xs text-amber-700 dark:text-amber-300">
+    <p className="text-xs text-flag-700 dark:text-flag-200">
       Did not attend {summary.no_show_count} of {summary.recorded_count} recorded{' '}
       {summary.recorded_count === 1 ? 'match' : 'matches'}
       {last === null ? '' : `, most recently ${last}`}
@@ -145,7 +155,10 @@ function PlayerRow({
   ].filter((value): value is string => value !== null && value !== '');
 
   return (
-    <li className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--border-subtle)] py-2 last:border-b-0">
+    // Stacked on a phone, side by side from `sm`. Wrapping the two blocks into
+    // one line was putting a name and a three-button tray in the same 320px,
+    // which left roughly nine characters for the name.
+    <li className="flex flex-col gap-2 border-b border-[var(--border-subtle)] py-2.5 last:border-b-0 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
       {/* 32px sits inside the row's existing height: the block beside it is
           already two lines of text. The avatar is `shrink-0` and the text block
           keeps `min-w-0`, so a long name truncates rather than widening the
@@ -154,19 +167,22 @@ function PlayerRow({
         <PlayerAvatar player={entry} size={32} />
         <div className="min-w-0">
           <p className="truncate text-sm font-medium">{fullName(entry)}</p>
+          {/* Context first, "Responded" last. What the administrator is
+              deciding on is that this player is a goalkeeper in the priority
+              window; the timestamp is a tiebreak, and it was leading the line. */}
           <p className="text-xs text-muted">
+            {context.length > 0 ? `${context.join(' · ')} · ` : ''}
             Responded {respondedLabel(entry.responded_at)}
-            {context.length > 0 ? ` · ${context.join(' · ')}` : ''}
           </p>
           {entry.override_reason === null ? null : (
-            <p className="text-xs text-amber-700 dark:text-amber-300">
+            <p className="text-xs text-flag-700 dark:text-flag-200">
               Override: {entry.override_reason}
             </p>
           )}
           <AttendanceContext summary={summary} />
         </div>
       </div>
-      <div className="flex flex-wrap gap-1.5">
+      <ActionTray className="self-end sm:self-auto">
         {entry.status === 'confirmed' ? null : (
           <DecisionButton
             leagueId={leagueId}
@@ -174,6 +190,7 @@ function PlayerRow({
             membershipId={entry.membership_id}
             status="confirmed"
             label="Confirm"
+            emphasis
           />
         )}
         {entry.status === 'waitlisted' ? null : (
@@ -194,11 +211,27 @@ function PlayerRow({
             label="Not selected"
           />
         )}
-      </div>
+      </ActionTray>
     </li>
   );
 }
 
+/**
+ * One outcome bucket in the workspace.
+ *
+ * ── EMPTY BUCKETS COLLAPSE ─────────────────────────────────────────────────
+ *
+ * There are six of these, and on a healthy roster four of them are empty. The
+ * screenshot review showed the result plainly: four full-width cards in a row
+ * reading "Waitlist (0) — The waitlist is empty", "Not selected (0) — Nobody
+ * has been passed over", and so on. That is four cards of chrome to say nothing
+ * happened, between the administrator and the publish button.
+ *
+ * An empty bucket now renders as one quiet line instead of a card. It still
+ * appears — knowing the waitlist is empty is worth something, and a section
+ * that vanishes entirely makes people wonder where it went — but it no longer
+ * costs the same visual weight as a bucket with eight people in it.
+ */
 function Group({
   title,
   entries,
@@ -214,26 +247,31 @@ function Group({
   empty: string;
   summaries: Record<string, MembershipAttendanceSummary>;
 }) {
+  if (entries.length === 0) {
+    return (
+      <p className="flex flex-wrap items-baseline gap-x-2 px-1 text-sm text-muted">
+        <span className="font-semibold text-secondary">{title}</span>
+        <span>{empty}</span>
+      </p>
+    );
+  }
+
   return (
     <section className="surface-card p-4">
       <h3 className="text-sm font-semibold">
         {title} <span className="text-muted">({entries.length})</span>
       </h3>
-      {entries.length === 0 ? (
-        <p className="mt-2 text-sm text-muted">{empty}</p>
-      ) : (
-        <ul className="mt-2">
-          {entries.map((entry) => (
-            <PlayerRow
-              key={entry.signup_id}
-              entry={entry}
-              leagueId={leagueId}
-              matchId={matchId}
-              summary={summaries[entry.membership_id]}
-            />
-          ))}
-        </ul>
-      )}
+      <ul className="mt-2">
+        {entries.map((entry) => (
+          <PlayerRow
+            key={entry.signup_id}
+            entry={entry}
+            leagueId={leagueId}
+            matchId={matchId}
+            summary={summaries[entry.membership_id]}
+          />
+        ))}
+      </ul>
     </section>
   );
 }
@@ -311,7 +349,7 @@ function WaitlistOrder({
                   onClick={() => move(index, -1)}
                   disabled={index === 0}
                   aria-label={`Move ${fullName(entry)} up`}
-                  className="min-h-11 rounded-lg border border-[var(--border-subtle)] px-2 text-xs disabled:opacity-40"
+                  className="min-h-control rounded-[var(--radius-md)] border border-[var(--border-subtle)] px-2 text-xs disabled:opacity-40"
                 >
                   ↑
                 </button>
@@ -320,7 +358,7 @@ function WaitlistOrder({
                   onClick={() => move(index, 1)}
                   disabled={index === order.length - 1}
                   aria-label={`Move ${fullName(entry)} down`}
-                  className="min-h-11 rounded-lg border border-[var(--border-subtle)] px-2 text-xs disabled:opacity-40"
+                  className="min-h-control rounded-[var(--radius-md)] border border-[var(--border-subtle)] px-2 text-xs disabled:opacity-40"
                 >
                   ↓
                 </button>

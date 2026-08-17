@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useActionState } from 'react';
+import { CheckIcon, ChevronRightIcon } from '@/components/ui/icon';
 import {
   archiveNotificationAction,
   markAllNotificationsReadAction,
@@ -47,26 +48,30 @@ export function NotificationRowItem({ notification }: { notification: Notificati
 
   return (
     <li
-      className={`surface-card flex flex-col gap-2 p-4 ${
-        unread ? 'border-pitch-500/50' : 'opacity-80'
+      className={`surface-card animate-rise relative flex flex-col gap-3 p-4 ${
+        unread ? 'border-pitch-300 dark:border-pitch-800' : ''
       }`}
     >
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="text-sm font-semibold">
-            {unread ? (
-              <span aria-label="Unread" className="mr-1.5 text-pitch-600">
-                ●
-              </span>
-            ) : null}
+      {/* Unread is a rail down the leading edge rather than a bullet glued to
+          the title. It survives a long title wrapping, it does not shift the
+          text, and it is the one thing on the card that can be scanned down a
+          column of twenty. */}
+      {unread ? (
+        <span
+          aria-hidden="true"
+          className="absolute inset-y-3 left-0 w-1 rounded-r-full bg-pitch-500"
+        />
+      ) : null}
+
+      <div className={`flex items-start justify-between gap-3 ${unread ? 'pl-2' : ''}`}>
+        <div className="flex min-w-0 flex-col gap-1">
+          <p className="text-sm font-semibold leading-snug">
+            {unread ? <span className="sr-only">Unread. </span> : null}
             {notification.title}
           </p>
-          <p className="mt-0.5 text-sm text-muted">{notification.body}</p>
+          <p className="text-sm leading-relaxed text-secondary">{notification.body}</p>
         </div>
-        <time
-          dateTime={notification.created_at}
-          className="shrink-0 text-xs text-muted"
-        >
+        <time dateTime={notification.created_at} className="shrink-0 text-xs text-muted">
           {new Date(notification.created_at).toLocaleDateString('en-GB', {
             day: 'numeric',
             month: 'short',
@@ -74,12 +79,13 @@ export function NotificationRowItem({ notification }: { notification: Notificati
         </time>
       </div>
 
-      <div className="flex items-center gap-3">
+      <div className={`flex flex-wrap items-center gap-2 ${unread ? 'pl-2' : ''}`}>
         <Link
           href={notification.deep_link}
-          className="text-sm font-semibold underline underline-offset-4"
+          className="press inline-flex min-h-control items-center gap-1.5 rounded-[var(--radius-md)] bg-pitch-600 px-3.5 py-2 text-sm font-semibold text-white shadow-[var(--shadow-card)] hover:bg-pitch-700 dark:bg-pitch-500 dark:text-pitch-950 dark:hover:bg-pitch-400"
         >
           Open
+          <ChevronRightIcon size={15} />
         </Link>
 
         <form action={unread ? markRead : markUnread} className="inline">
@@ -87,7 +93,7 @@ export function NotificationRowItem({ notification }: { notification: Notificati
           <button
             type="submit"
             disabled={markingRead || markingUnread}
-            className="inline-flex min-h-11 items-center text-sm underline underline-offset-4 disabled:opacity-60"
+            className="press inline-flex min-h-control items-center rounded-[var(--radius-md)] px-2.5 py-2 text-sm font-medium text-secondary hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)] disabled:opacity-55"
           >
             {markingRead || markingUnread
               ? 'Working…'
@@ -102,7 +108,7 @@ export function NotificationRowItem({ notification }: { notification: Notificati
           <button
             type="submit"
             disabled={archiving || restoring}
-            className="inline-flex min-h-11 items-center text-sm underline underline-offset-4 disabled:opacity-60"
+            className="press inline-flex min-h-control items-center rounded-[var(--radius-md)] px-2.5 py-2 text-sm font-medium text-secondary hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)] disabled:opacity-55"
           >
             {archiving || restoring ? 'Working…' : archived ? 'Restore' : 'Archive'}
           </button>
@@ -110,7 +116,7 @@ export function NotificationRowItem({ notification }: { notification: Notificati
       </div>
 
       {state?.ok === false ? (
-        <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+        <p role="alert" className="text-sm font-medium text-whistle-600 dark:text-whistle-300">
           {state.message}
         </p>
       ) : null}
@@ -130,12 +136,14 @@ export function MarkAllReadButton({ unreadCount }: { unreadCount: number }) {
       <button
         type="submit"
         disabled={pending}
-        className="min-h-11 rounded-lg border border-[var(--border-subtle)] px-3 py-2 text-sm font-semibold disabled:opacity-60"
+        aria-busy={pending}
+        className="press inline-flex min-h-control items-center gap-2 rounded-[var(--radius-md)] border border-[var(--border-strong)] bg-[var(--surface-raised)] px-3.5 py-2 text-sm font-semibold hover:bg-[var(--surface-hover)] disabled:pointer-events-none disabled:opacity-55"
       >
+        <CheckIcon size={16} />
         {pending ? 'Marking…' : `Mark all ${unreadCount} as read`}
       </button>
       {state?.ok === false ? (
-        <p role="alert" className="mt-1 text-sm text-red-600 dark:text-red-400">
+        <p role="alert" className="mt-1 text-sm font-medium text-whistle-600 dark:text-whistle-300">
           {state.message}
         </p>
       ) : null}

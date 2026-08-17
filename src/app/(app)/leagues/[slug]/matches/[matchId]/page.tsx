@@ -1,5 +1,4 @@
 import type { Metadata } from 'next';
-import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { CancelMatchForm, PublishMatchButton } from '@/components/matches';
 import {
@@ -11,8 +10,23 @@ import {
   type MatchNotice,
 } from '@/lib/auth/page-guards';
 import { SignupControls, SignupStatusBadge } from '@/components/signup';
+import { Badge } from '@/components/ui/badge';
+import { ButtonLink } from '@/components/ui/button';
+import { Panel, Stat, StatGrid } from '@/components/ui/card';
+import {
+  AlertIcon,
+  BallIcon,
+  ClipboardIcon,
+  InfoIcon,
+  PinIcon,
+  SettingsIcon,
+  ShieldIcon,
+  UsersIcon,
+} from '@/components/ui/icon';
+import { PageHeader } from '@/components/ui/page-header';
 import { PlayerAvatar } from '@/components/ui/player-avatar';
-import { formatMatchDate, formatMatchTime } from '@/lib/matches/match-timing';
+import { Notice } from '@/components/ui/status';
+import { formatMatchClock, formatMatchDate, formatMatchTime } from '@/lib/matches/match-timing';
 import { getMatch, getMatchAdminNotes } from '@/lib/matches/matches';
 import { canEditMatch } from '@/lib/matches/match-permissions';
 import {
@@ -29,6 +43,7 @@ import {
   participationStateLabel,
   remainingSpots,
 } from '@/lib/matches/threshold-state';
+import { pluralize } from '@/lib/format/plural';
 
 export const metadata: Metadata = { title: 'Match' };
 
@@ -104,145 +119,151 @@ export default async function MatchDetailPage({
 
   return (
     <>
-      <header className="flex flex-col gap-1">
-        <p className="text-xs uppercase tracking-wide text-muted">{league.name}</p>
-        <h1 className="text-2xl font-bold">{match.title}</h1>
-        <p className="text-sm text-muted">{formatMatchDate(kickoff, match.timezone)}</p>
-        <div className="mt-1 flex flex-wrap items-center gap-4">
-          <Link
-            href={`/leagues/${league.slug}/matches`}
-            className="text-sm underline underline-offset-4"
-          >
-            All matches
-          </Link>
-          {canEdit ? (
-            <Link
+      <PageHeader
+        eyebrow={league.name}
+        icon={<BallIcon size={13} />}
+        title={match.title}
+        description={formatMatchDate(kickoff, match.timezone)}
+        back={{ href: `/leagues/${league.slug}/matches`, label: 'All matches' }}
+        actions={
+          canEdit ? (
+            <ButtonLink
               href={`/leagues/${league.slug}/matches/${match.id}/edit`}
-              className="inline-flex min-h-11 items-center rounded-lg border border-[var(--border-subtle)] px-3 py-1.5 text-sm font-semibold"
+              icon={<SettingsIcon size={16} />}
             >
               Edit match
-            </Link>
-          ) : null}
-        </div>
-      </header>
+            </ButtonLink>
+          ) : undefined
+        }
+      />
 
-      {notice === null ? null : (
-        <p
-          role="status"
-          className="rounded-lg border border-pitch-500/40 bg-pitch-50 px-3 py-2 text-sm text-pitch-900 dark:bg-pitch-900/40 dark:text-pitch-50"
-        >
-          {NOTICE_MESSAGES[notice]}
-        </p>
-      )}
+      {notice === null ? null : <Notice tone="success">{NOTICE_MESSAGES[notice]}</Notice>}
 
       {match.status === 'canceled' ? (
-        <p
-          role="status"
-          className="rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-900 dark:bg-red-950/50 dark:text-red-200"
-        >
+        <Notice tone="danger" icon={<AlertIcon size={17} />}>
           This match was canceled
           {match.cancellation_reason === null ? '.' : `: ${match.cancellation_reason}`}
-        </p>
+        </Notice>
       ) : match.status === 'draft' ? (
-        <p
-          role="status"
-          className="rounded-lg border border-[var(--border-subtle)] px-3 py-2 text-sm"
-        >
+        <Notice tone="info" icon={<InfoIcon size={17} />}>
           Draft — members cannot see this match yet.
-        </p>
+        </Notice>
       ) : null}
 
-      <section className="surface-card flex flex-col gap-3 p-4">
-        <dl className="grid grid-cols-2 gap-3 text-sm">
-          <div>
-            <dt className="text-xs uppercase tracking-wide text-muted">Arrive</dt>
-            <dd className="font-semibold">
-              {formatMatchTime(new Date(match.arrival_at), match.timezone)}
-            </dd>
-          </div>
-          <div>
-            <dt className="text-xs uppercase tracking-wide text-muted">Kickoff</dt>
-            <dd className="font-semibold">{formatMatchTime(kickoff, match.timezone)}</dd>
-          </div>
-          <div>
-            <dt className="text-xs uppercase tracking-wide text-muted">Ends</dt>
-            <dd className="font-semibold">
-              {formatMatchTime(new Date(match.end_at), match.timezone)}
-            </dd>
-          </div>
-          <div>
-            <dt className="text-xs uppercase tracking-wide text-muted">Timezone</dt>
-            <dd className="font-semibold">{match.timezone}</dd>
-          </div>
-          <div>
-            <dt className="text-xs uppercase tracking-wide text-muted">Location</dt>
-            <dd className="font-semibold">{match.location_name}</dd>
-          </div>
-          <div>
-            <dt className="text-xs uppercase tracking-wide text-muted">Teams</dt>
-            <dd className="font-semibold">{match.team_count}</dd>
-          </div>
-          <div>
-            <dt className="text-xs uppercase tracking-wide text-muted">Capacity</dt>
-            <dd className="font-semibold">{match.capacity} players</dd>
-          </div>
-          <div>
-            <dt className="text-xs uppercase tracking-wide text-muted">Minimum</dt>
-            <dd className="font-semibold">{match.min_players} players</dd>
-          </div>
-          <div>
-            <dt className="text-xs uppercase tracking-wide text-muted">Spots filled by</dt>
-            <dd className="font-semibold">
-              {match.selection_mode === 'first_come' ? 'First come' : 'Administrator approval'}
-            </dd>
-          </div>
-          <div>
-            <dt className="text-xs uppercase tracking-wide text-muted">Waitlist</dt>
-            <dd className="font-semibold">
-              {match.waitlist_mode === 'automatic' ? 'Automatic' : 'Administrator controlled'}
-            </dd>
-          </div>
-          <div>
-            <dt className="text-xs uppercase tracking-wide text-muted">Signup closes</dt>
-            <dd className="font-semibold">
-              {formatMatchTime(new Date(match.signup_closes_at), match.timezone)}
-            </dd>
-          </div>
-          <div>
-            <dt className="text-xs uppercase tracking-wide text-muted">Cancellation cutoff</dt>
-            <dd className="font-semibold">
-              {formatMatchTime(new Date(match.cancellation_cutoff_at), match.timezone)}
-            </dd>
-          </div>
-        </dl>
+      {/*
+        The three times that decide whether somebody turns up, pulled out of the
+        twelve-cell definition list they used to be buried in. Arrive, kickoff
+        and end were previously the same size and weight as "Waitlist mode".
+      */}
+      <Panel className="animate-rise">
+        {/* Clock times only. The date is in the page header directly above and
+            the zone is named once in the stats below, so repeating both in each
+            of three narrow columns wrapped every cell onto three lines. */}
+        <div className="grid grid-cols-3 divide-x divide-[var(--border-subtle)]">
+          {[
+            { label: 'Arrive', value: new Date(match.arrival_at) },
+            { label: 'Kickoff', value: kickoff },
+            { label: 'Ends', value: new Date(match.end_at) },
+          ].map(({ label, value }) => (
+            <div key={label} className="flex flex-col items-center gap-1.5 px-2 py-4">
+              <span className="text-[0.625rem] font-bold uppercase tracking-[0.09em] text-muted">
+                {label}
+              </span>
+              <span className="tabular text-xl font-bold leading-none">
+                {formatMatchClock(value, match.timezone)}
+              </span>
+            </div>
+          ))}
+        </div>
 
-        {match.location_map_url === null ? null : (
-          <a
-            href={match.location_map_url}
-            rel="noopener noreferrer"
-            target="_blank"
-            className="text-sm underline underline-offset-4"
-          >
-            Open the map
-          </a>
-        )}
+        <div className="flex flex-col gap-4 border-t border-[var(--border-subtle)] bg-[var(--surface-raised)] p-4">
+          <div className="flex items-start gap-2.5">
+            <PinIcon size={17} className="mt-0.5 text-muted" />
+            <div className="flex min-w-0 flex-col gap-0.5">
+              <p className="text-sm font-semibold">{match.location_name}</p>
+              {match.location_map_url === null ? null : (
+                <a
+                  href={match.location_map_url}
+                  rel="noopener noreferrer"
+                  target="_blank"
+                  className="w-fit text-sm font-medium text-pitch-700 underline decoration-pitch-500/40 underline-offset-4 hover:decoration-pitch-500 dark:text-pitch-300"
+                >
+                  Open the map
+                </a>
+              )}
+            </div>
+          </div>
 
-        {match.public_notes === null ? null : (
-          <p className="whitespace-pre-wrap text-sm">{match.public_notes}</p>
-        )}
-      </section>
+          <StatGrid>
+            <Stat label="Capacity" value={pluralize(match.capacity, 'player')} />
+            <Stat label="Minimum" value={pluralize(match.min_players, 'player')} />
+            <Stat label="Teams" value={match.team_count} />
+            <Stat label="Timezone" value={match.timezone} />
+            <Stat
+              label="Spots filled by"
+              value={match.selection_mode === 'first_come' ? 'First come' : 'Administrator approval'}
+            />
+            <Stat
+              label="Waitlist"
+              value={match.waitlist_mode === 'automatic' ? 'Automatic' : 'Administrator controlled'}
+            />
+            <Stat
+              label="Signup closes"
+              value={formatMatchTime(new Date(match.signup_closes_at), match.timezone)}
+            />
+            <Stat
+              label="Cancellation cutoff"
+              value={formatMatchTime(new Date(match.cancellation_cutoff_at), match.timezone)}
+            />
+          </StatGrid>
 
-      <section className="surface-card flex flex-col gap-3 p-4">
-        <div>
-          <h2 className="text-base font-semibold">Signup</h2>
-          <p className="mt-1 text-sm text-muted">
-            {participationStateLabel(state)}
-            {counts === null ? '' : ` · ${counts.confirmed} of ${counts.capacity} confirmed`}
-            {openSpots === null || openSpots === 0 ? '' : ` · ${openSpots} open`}
-            {counts === null || counts.waitlisted === 0
-              ? ''
-              : ` · ${counts.waitlisted} waitlisted`}
-          </p>
+          {match.public_notes === null ? null : (
+            <p className="surface-sunken whitespace-pre-wrap p-3 text-sm leading-relaxed">
+              {match.public_notes}
+            </p>
+          )}
+        </div>
+      </Panel>
+
+      <section className="surface-card animate-rise flex flex-col gap-3 p-4">
+        <div className="flex flex-col gap-2">
+          <h2 className="text-[0.9375rem] font-semibold">Signup</h2>
+
+          {/*
+            A capacity bar. The old line read "Filling up · 8 of 14 confirmed ·
+            6 open · 2 waitlisted" in 14px grey, which is four facts in one
+            sentence and none of them answerable at a glance. The bar answers
+            the only one anybody scans for — is there room — and the numbers
+            stay underneath for the rest.
+          */}
+          {counts === null ? null : (
+            <div className="flex flex-col gap-1.5">
+              <div
+                className="surface-sunken h-2 w-full overflow-hidden rounded-full p-0"
+                role="img"
+                aria-label={`${counts.confirmed} of ${counts.capacity} places confirmed`}
+              >
+                <div
+                  className="h-full rounded-full bg-pitch-500 transition-[width] duration-500"
+                  style={{
+                    width: `${String(
+                      Math.min(100, Math.round((counts.confirmed / Math.max(counts.capacity, 1)) * 100)),
+                    )}%`,
+                  }}
+                />
+              </div>
+              <p className="tabular text-sm text-secondary">
+                <span className="font-semibold text-[var(--text-primary)]">
+                  {counts.confirmed} of {counts.capacity}
+                </span>{' '}
+                confirmed
+                {openSpots === null || openSpots === 0 ? '' : ` · ${openSpots} open`}
+                {counts.waitlisted === 0 ? '' : ` · ${counts.waitlisted} waitlisted`}
+              </p>
+            </div>
+          )}
+
+          <p className="text-sm text-muted">{participationStateLabel(state)}</p>
         </div>
 
         <SignupStatusBadge outcome={mySignup} />
@@ -273,10 +294,14 @@ export default async function MatchDetailPage({
         visible rather than of it being emphasised.
       */}
       {myAttendance === null ? null : (
-        <section className="surface-card p-4">
-          <h2 className="text-base font-semibold">Your attendance</h2>
-          <p className="mt-1 text-sm">{ATTENDANCE_OUTCOME_LABELS[myAttendance.outcome]}</p>
-          <p className="mt-1 text-xs text-muted">
+        <section className="surface-card flex flex-col gap-2 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-[0.9375rem] font-semibold">Your attendance</h2>
+            <Badge tone={myAttendance.outcome === 'attended' ? 'live' : 'neutral'} dot>
+              {ATTENDANCE_OUTCOME_LABELS[myAttendance.outcome]}
+            </Badge>
+          </div>
+          <p className="text-xs leading-relaxed text-muted">
             Recorded by your league administrator on{' '}
             {new Date(myAttendance.recorded_at).toLocaleDateString('en-GB', {
               day: '2-digit',
@@ -289,11 +314,14 @@ export default async function MatchDetailPage({
       )}
 
       <section className="surface-card p-4">
-        <h2 className="text-base font-semibold">
-          Confirmed roster <span className="text-muted">({roster.length})</span>
+        <h2 className="flex items-center gap-2 text-[0.9375rem] font-semibold">
+          Confirmed roster
+          <Badge tone="neutral">{roster.length}</Badge>
         </h2>
         {roster.length === 0 ? (
-          <p className="mt-1 text-sm text-muted">Nobody is confirmed yet.</p>
+          <p className="mt-2 text-sm text-muted">
+            Nobody is confirmed yet. The first player to sign up appears here.
+          </p>
         ) : (
           // Names only. The waitlist is deliberately absent: a member sees the
           // size of the queue in the line above, never who is in it or where.
@@ -323,7 +351,7 @@ export default async function MatchDetailPage({
       */}
       {isConfirmed && match.status !== 'canceled' ? (
         <section className="surface-card flex flex-col gap-3 p-4">
-          <h2 className="text-base font-semibold">Teams</h2>
+          <h2 className="text-[0.9375rem] font-semibold">Teams</h2>
 
           {publishedTeams.length === 0 ? (
             <p className="text-sm text-muted">
@@ -334,7 +362,7 @@ export default async function MatchDetailPage({
               {publishedTeams.some((team) =>
                 team.players.some((player) => player.is_self),
               ) ? null : (
-                <p className="text-sm text-amber-700 dark:text-amber-300">
+                <p className="text-sm text-flag-700 dark:text-flag-200">
                   You have not been assigned to a team yet.
                 </p>
               )}
@@ -409,41 +437,46 @@ export default async function MatchDetailPage({
 
       {isAdmin ? (
         <section className="surface-card flex flex-col gap-4 p-4">
-          <h2 className="text-base font-semibold">Administrator</h2>
+          <h2 className="flex items-center gap-2 text-[0.9375rem] font-semibold">
+            <ShieldIcon size={16} className="text-pitch-600 dark:text-pitch-300" />
+            Administrator
+          </h2>
 
           {adminNotes === null ? null : (
-            <div>
-              <p className="text-xs uppercase tracking-wide text-muted">Private notes</p>
-              <p className="mt-1 whitespace-pre-wrap text-sm">{adminNotes.notes}</p>
-              <p className="mt-1 text-xs text-muted">Members cannot see these.</p>
+            <div className="surface-sunken flex flex-col gap-1 p-3">
+              <p className="text-[0.6875rem] font-bold uppercase tracking-[0.07em] text-muted">
+                Private notes
+              </p>
+              <p className="whitespace-pre-wrap text-sm leading-relaxed">{adminNotes.notes}</p>
+              <p className="text-xs text-muted">Members cannot see these.</p>
             </div>
           )}
 
           {match.status === 'draft' ? null : (
             <div className="flex flex-wrap gap-2">
-              <Link
+              <ButtonLink
                 href={`/leagues/${league.slug}/matches/${match.id}/roster`}
-                className="inline-flex min-h-11 w-fit items-center rounded-lg border border-[var(--border-subtle)] px-3 py-2 text-sm font-semibold"
+                icon={<UsersIcon size={16} />}
               >
                 Manage roster
-              </Link>
-              <Link
+              </ButtonLink>
+              <ButtonLink
                 href={`/leagues/${league.slug}/matches/${match.id}/teams`}
-                className="inline-flex min-h-11 w-fit items-center rounded-lg border border-[var(--border-subtle)] px-3 py-2 text-sm font-semibold"
+                icon={<ShieldIcon size={16} />}
               >
                 Manage teams
-              </Link>
+              </ButtonLink>
               {/* Offered from the moment a match is published rather than only
                   after it ends: the register is where an administrator goes
                   after the final whistle, and a link that appears out of
                   nowhere is harder to find than one that has always been
                   there. The page itself explains that it is not open yet. */}
-              <Link
+              <ButtonLink
                 href={`/leagues/${league.slug}/matches/${match.id}/attendance`}
-                className="inline-flex min-h-11 w-fit items-center rounded-lg border border-[var(--border-subtle)] px-3 py-2 text-sm font-semibold"
+                icon={<ClipboardIcon size={16} />}
               >
                 Attendance
-              </Link>
+              </ButtonLink>
             </div>
           )}
 
