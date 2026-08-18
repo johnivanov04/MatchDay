@@ -210,7 +210,7 @@ describe('the token-hash link renders a form, not a navigation', () => {
   });
 
   const rejected: Array<[string, Record<string, string>]> = [
-    ['an unsupported type', { token_hash: TOKEN_HASH, type: 'recovery' }],
+    ['an unsupported type', { token_hash: TOKEN_HASH, type: 'invite' }],
     ['an invented type', { token_hash: TOKEN_HASH, type: 'admin' }],
     ['a missing type', { token_hash: TOKEN_HASH }],
     ['a malformed token', { token_hash: '../../etc/passwd', type: 'signup' }],
@@ -233,10 +233,10 @@ describe('the token-hash link renders a form, not a navigation', () => {
     expect(markup).not.toContain('xxxxxxxxxx');
   });
 
-  it('refuses a valid token carrying an unsupported type, even with a legacy URL alongside', async () => {
-    // Belt and braces: a crafted link cannot smuggle `recovery` through by
-    // pairing it with something the page does accept.
-    const markup = await tokenHashHtml({ token_hash: TOKEN_HASH, type: 'recovery' });
+  it('refuses a valid token carrying an unsupported type', async () => {
+    // `invite` is a real Supabase EmailOtpType that MatchDay does not send. A
+    // crafted link must not be able to drive a flow that does not exist.
+    const markup = await tokenHashHtml({ token_hash: TOKEN_HASH, type: 'invite' });
 
     expect(markup).toContain('expired');
     expect(markup).not.toContain(TOKEN_HASH);

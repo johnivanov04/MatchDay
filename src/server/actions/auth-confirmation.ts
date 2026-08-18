@@ -1,7 +1,7 @@
 'use server';
 
 import { redirect } from 'next/navigation';
-import { parseConfirmationParams } from '@/lib/auth/email-confirmation';
+import { parseConfirmationParams, RESET_PASSWORD_PATH } from '@/lib/auth/email-confirmation';
 import { ONBOARDING_PATH } from '@/lib/auth/page-guards';
 import { safeRedirectPath } from '@/lib/auth/safe-redirect';
 import { getCurrentProfile } from '@/lib/auth/session';
@@ -71,6 +71,15 @@ export async function confirmEmailAction(formData: FormData): Promise<void> {
   // is not something an anonymous caller is entitled to learn.
   if (error !== null) {
     redirect('/auth/continue?error=invalid');
+  }
+
+  // A recovery session exists for one purpose: choosing a new password. It goes
+  // to the screen that asks for one rather than into the app — including for a
+  // historical passwordless account, which has a profile and memberships but no
+  // password, and would otherwise land on the dashboard with nothing changed
+  // and no idea what to do next.
+  if (parsed.type === 'recovery') {
+    redirect(RESET_PASSWORD_PATH);
   }
 
   // Where they were going. A brand-new account has no profile row yet, and the

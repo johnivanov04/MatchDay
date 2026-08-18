@@ -141,8 +141,114 @@ jobs:
       - name: Storage API tests (real Supabase Storage)
         run: npm run test:storage
 
-      - name: Install Playwright browsers
-        run: npx playwright install --with-deps chromium
+      # ── Chromium, without betting the job on an Ubuntu mirror ─────────────
+      #
+      # This was `npx playwright install --with-deps chromium`, and it stalled
+      # for twenty minutes on two consecutive runs. `--with-deps` runs
+      # `apt-get update` first, and the runner's configured mirror —
+      # `azure.archive.ubuntu.com` — was answering with `Ign:` lines and
+      # crawling through a fallback. The tests never started. Nothing was wrong
+      # with MatchDay, Playwright, or the tests: an external package mirror had
+      # a bad day and consumed the entire job.
+      #
+      # The fix is to stop asking apt anything on the ordinary path, and to
+      # *prove* that is safe rather than assume it — see the verification step
+      # below, which runs on every build.
+      #
+      # `playwright_version` is read from the lockfile so the cache key follows
+      # the pinned browser build. Playwright downloads a browser revision tied
+      # to its own version, so two runs on one version want the identical
+      # binary, and a version bump misses the cache and fetches a fresh one.
+      - name: Resolve the pinned Playwright version
+        id: playwright
+        run: |
+          version="$(node -p "require('./package-lock.json').packages['node_modules/@playwright/test'].version")"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Playwright $version"
+
+      - name: Cache the Chromium build
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+
+      # No `--with-deps`: this fetches the browser from Playwright's own CDN and
+      # touches apt not at all. Bounded, because a download is the one thing
+      # here that can still hang on somebody else's infrastructure — and five
+      # minutes is generous for ~170MB that is usually already cached.
+      - name: Install Chromium
+        timeout-minutes: 5
+        run: npx playwright install chromium
+
+      # ── Proving the system libraries are there ───────────────────────────
+      #
+      # Dropping `--with-deps` is only honest if something checks. The runner
+      # image ships Google Chrome, Chromium and Microsoft Edge, whose Debian
+      # packages depend on exactly the set Playwright lists for chromium
+      # (libnss3, libgbm1, libatk*, libasound2t64, libdrm2, libxkbcommon0 …), so
+      # in practice they are all present — but "in practice" is not a thing to
+      # build a pipeline on, and GitHub rolls new images regularly.
+      #
+      # So this asks the linker instead of trusting a manifest. `ldd` over the
+      # browser binary and the shared objects beside it is the same signal
+      # Playwright's own `validateDependenciesLinux` uses, and it needs no
+      # network at all. `install-deps --dry-run` would have been the obvious
+      # probe and is deliberately not used: on Linux it simulates the install
+      # *through apt-get*, which is the very thing that hangs.
+      #
+      # If anything is genuinely missing, apt runs — but only then, only for
+      # what is missing, with retries and a real timeout so a sick mirror fails
+      # in minutes instead of idling until the job is killed.
+      - name: Verify Chromium's system dependencies
+        timeout-minutes: 6
+        run: |
+          set -euo pipefail
+
+          binary="$(node -e "console.log(require('playwright-core').chromium.executablePath())")"
+          echo "Chromium: $binary"
+
+          # `|| true` on every ldd: a binary that cannot be read is not a reason
+          # to fail the check, and under `set -o pipefail` an unguarded failure
+          # inside the group would take the whole pipeline down.
+          missing_libraries() {
+            {
+              ldd "$binary" || true
+              find "$(dirname "$binary")" \( -name '*.so' -o -name '*.so.*' \) -print 2>/dev/null \
+                | while read -r object; do ldd "$object" 2>/dev/null || true; done
+            } | awk '/not found/ { print $1 }' | sort -u
+          }
+
+          missing="$(missing_libraries)"
+          if [ -z "$missing" ]; then
+            echo "Every shared library Chromium links against resolves. apt not needed."
+            exit 0
+          fi
+
+          echo "::warning::Chromium is missing shared libraries; installing system dependencies."
+          printf '%s\n' "$missing"
+
+          # Ubuntu 24.04 keeps its sources in deb822 format; older layouts kept
+          # the one-line file. Rewrite whichever exists, so the known-flaky
+          # Azure mirror is not the one apt is waiting on.
+          # `if` rather than `[ -f … ] && …`: under `set -e` a false test as the
+          # last command of the loop body would exit the step, and this branch
+          # only runs when something is already wrong.
+          for sources in /etc/apt/sources.list.d/ubuntu.sources /etc/apt/sources.list; do
+            if [ -f "$sources" ]; then
+              sudo sed -i 's|azure.archive.ubuntu.com|archive.ubuntu.com|g' "$sources"
+            fi
+          done
+
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=25 update
+          npx playwright install-deps chromium
+
+          missing="$(missing_libraries)"
+          if [ -n "$missing" ]; then
+            echo "::error::Chromium still cannot resolve its libraries after installing dependencies."
+            printf '%s\n' "$missing"
+            exit 1
+          fi
+          echo "System dependencies installed; Chromium now resolves cleanly."
 
       - name: Run end-to-end tests
         env:
