@@ -1,8 +1,11 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { validateConfirmationUrl } from '@/lib/auth/confirmation-url';
+import { parseConfirmationParams } from '@/lib/auth/email-confirmation';
+import { safeRedirectPath } from '@/lib/auth/safe-redirect';
+import { confirmEmailAction } from '@/server/actions/auth-confirmation';
 
-export const metadata: Metadata = { title: 'Continue sign in' };
+export const metadata: Metadata = { title: 'Confirm your email' };
 
 /**
  * The second click that stops a sign-in link being spent before the human sees
@@ -13,35 +16,41 @@ export const metadata: Metadata = { title: 'Continue sign in' };
  * click-tracking redirect, corporate mail scanners fetch links to inspect them,
  * and some clients prefetch for previews. Any of those consumes the token, and
  * the person is then told their brand-new link is invalid. Supabase's
- * documented mitigation is to point the email at a page on our own origin and
- * require a real click before the confirmation URL is followed. This is that
- * page.
+ * documented mitigation is to require a real click before the token is spent.
+ * This is that page.
  *
  * ── THE RULE THIS PAGE MUST NEVER BREAK ────────────────────────────────────
  *
  * Rendering it must not consume the token. There is therefore:
  *
  *   * no `verifyOtp`, no `exchangeCodeForSession`, no Supabase client at all;
- *   * no fetch of the confirmation URL;
+ *   * no fetch of anything;
  *   * no `redirect()`, no `<meta http-equiv="refresh">`, no `router.push`;
  *   * no `useEffect` — this is a server component with no client bundle, so
  *     there is no effect that *could* fire;
- *   * no prefetch: the anchor is a plain `<a>`, deliberately not next/link,
- *     which prefetches on hover and viewport entry. Prefetching this href
- *     would recreate the exact bug the page exists to fix.
+ *   * no prefetch on the legacy anchor: it is a plain `<a>`, deliberately not
+ *     next/link, which prefetches on hover and viewport entry.
  *
- * The only thing that follows the confirmation URL is a human pressing the
- * button. Everything after that is unchanged: Supabase verifies the token and
- * redirects to `/auth/callback`, which exchanges it for a session exactly as
- * it does today.
+ * The only thing that spends a token is a human submitting the form, which
+ * posts to `confirmEmailAction`. Scanners do not POST.
+ *
+ * ── TWO LINK SHAPES, ON PURPOSE ────────────────────────────────────────────
+ *
+ * **New** — `?token_hash=…&type=signup|magiclink`. Our own POST verifies the
+ * token, so it works in whichever browser opened the email. This is what the
+ * production templates will carry.
+ *
+ * **Legacy** — `?confirmation_url=<supabase verify url>`. The shape currently
+ * in production. It still renders and still works for the browser that
+ * requested it, because links already sitting in people's inboxes must not
+ * break the moment this deploys. It goes when those links have aged out; see
+ * the note in `confirmation-url.ts`.
  *
  * ── WHAT IS DELIBERATELY NOT LOGGED ────────────────────────────────────────
  *
- * The confirmation URL contains a live credential. It is never logged, never
- * placed in an observability event, and never sent anywhere — not even on the
- * rejection paths, where only the reason code is available and it too stays on
- * the server. `src/lib/observability/log.ts` would refuse a `token` key
- * anyway; this page simply never offers one.
+ * Both shapes carry a live credential. Neither is logged, placed in an
+ * observability event, or sent anywhere — not even on the rejection paths,
+ * where only a reason code exists and it too stays on the server.
  */
 export default async function AuthContinuePage({
   searchParams,
@@ -49,41 +58,49 @@ export default async function AuthContinuePage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const params = await searchParams;
-  const raw = params['confirmation_url'];
-  const result = validateConfirmationUrl(typeof raw === 'string' ? raw : null);
 
-  if (!result.ok) {
+  // Set by `confirmEmailAction` when verification fails. Carries no detail —
+  // its presence is the whole message.
+  const failed = params['error'] !== undefined;
+
+  const confirmation = parseConfirmationParams(params['token_hash'], params['type']);
+  const legacy = validateConfirmationUrl(
+    typeof params['confirmation_url'] === 'string' ? params['confirmation_url'] : null,
+  );
+
+  // Sanitised here as well as in the action: it travels through an emailed
+  // link, so it must be safe at every hop rather than only the last one.
+  const next = safeRedirectPath(typeof params['next'] === 'string' ? params['next'] : null);
+
+  if (failed || (!confirmation.ok && !legacy.ok)) {
     return (
       <main
         id="main"
-        className="mx-auto flex min-h-dvh w-full max-w-md flex-col justify-center gap-6 px-5 py-12"
+        className="chalk-arc turf-stripes relative mx-auto flex min-h-dvh w-full max-w-md flex-col justify-center gap-6 px-6 py-12"
       >
-        <header className="flex flex-col gap-2">
+        <header className="animate-rise flex flex-col gap-2">
           <p className="text-sm font-semibold uppercase tracking-wide text-pitch-600">MatchDay</p>
-          <h1 className="text-2xl font-bold">This sign-in link is not valid</h1>
+          <h1 className="text-[1.75rem] font-bold leading-tight">This link has expired</h1>
         </header>
 
         {/* One message for every rejection. A missing parameter, a malformed
-            one and a link pointing somewhere else are all reported identically,
-            so the page cannot be used to probe what we accept. Nothing from the
-            parameter is echoed back. */}
+            one, an unsupported type, a token that was already used and a token
+            that never existed are all reported identically, so the page cannot
+            be used to probe what we accept or whether an address is registered.
+            Nothing from the parameters is echoed back. */}
         <p
           role="alert"
-          className="rounded-lg border border-whistle-200 bg-whistle-50 px-3 py-2 text-sm text-red-800 dark:border-whistle-900 dark:bg-whistle-900/25 dark:text-red-200"
+          className="surface-card px-4 py-3 text-sm leading-relaxed text-secondary"
         >
-          We could not read the sign-in link from your email. It may have been altered in transit,
-          or the address may have been copied incompletely.
-        </p>
-
-        <p className="text-sm text-muted">
-          Request a new link and open it directly from the email — sign-in links are single-use.
+          Sign-in links can only be used once, and they expire after a while. Ask for a new one and
+          open it from the email — it will work straight away.
         </p>
 
         <Link
           href="/sign-in"
-          className="inline-flex min-h-control w-fit items-center justify-center rounded-lg bg-pitch-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-pitch-700"
+          className="press inline-flex min-h-control w-full items-center justify-center rounded-[var(--radius-md)] bg-pitch-600 px-4 py-3 text-base font-semibold text-white shadow-[var(--shadow-card)] hover:bg-pitch-700 dark:bg-pitch-500 dark:text-pitch-950 dark:hover:bg-pitch-400"
         >
-          Back to sign in
+          Get a new link
         </Link>
       </main>
     );
@@ -92,31 +109,45 @@ export default async function AuthContinuePage({
   return (
     <main
       id="main"
-      className="mx-auto flex min-h-dvh w-full max-w-md flex-col justify-center gap-6 px-5 py-12"
+      className="chalk-arc turf-stripes relative mx-auto flex min-h-dvh w-full max-w-md flex-col justify-center gap-6 px-6 py-12"
     >
-      <header className="flex flex-col gap-2">
+      <header className="animate-rise flex flex-col gap-2">
         <p className="text-sm font-semibold uppercase tracking-wide text-pitch-600">MatchDay</p>
-        <h1 className="text-2xl font-bold">Continue sign in</h1>
-        <p className="text-sm text-muted">
+        <h1 className="text-[1.75rem] font-bold leading-tight">Confirm your email</h1>
+        <p className="text-sm leading-relaxed text-secondary">
           One more tap and you are in. We ask for this because sign-in links can only be used once,
           and some email apps open links automatically before you get to them.
         </p>
       </header>
 
-      {/*
-        A plain anchor, on purpose.
-
-        `next/link` prefetches, which would open the confirmation URL before
-        anybody pressed anything — the precise failure this page prevents.
-        `rel="nofollow"` asks crawlers and scanners not to follow it either.
-      */}
-      <a
-        href={result.url}
-        rel="nofollow noopener"
-        className="inline-flex min-h-control w-full items-center justify-center rounded-lg bg-pitch-600 px-4 py-3 text-base font-semibold text-white hover:bg-pitch-700"
-      >
-        Continue sign in
-      </a>
+      {confirmation.ok ? (
+        // The new flow. A form, because only an explicit submission may spend
+        // the token — and because this posts to our own origin, the session
+        // cookie is written for the browser actually being used.
+        <form action={confirmEmailAction} className="animate-rise flex flex-col gap-4">
+          <input type="hidden" name="token_hash" value={confirmation.tokenHash} />
+          <input type="hidden" name="type" value={confirmation.type} />
+          <input type="hidden" name="next" value={next} />
+          <button
+            type="submit"
+            className="press inline-flex min-h-[3.125rem] w-full items-center justify-center rounded-[var(--radius-md)] bg-pitch-600 px-5 py-3 text-base font-semibold text-white shadow-[var(--shadow-card)] hover:bg-pitch-700 dark:bg-pitch-500 dark:text-pitch-950 dark:hover:bg-pitch-400"
+          >
+            Continue to MatchDay
+          </button>
+        </form>
+      ) : (
+        // The legacy flow, for links already in inboxes. A plain anchor, on
+        // purpose: `next/link` prefetches, which would open the confirmation
+        // URL before anybody pressed anything — the precise failure this page
+        // prevents. `rel="nofollow"` asks crawlers not to follow it either.
+        <a
+          href={legacy.ok ? legacy.url : '/sign-in'}
+          rel="nofollow noopener"
+          className="press animate-rise inline-flex min-h-[3.125rem] w-full items-center justify-center rounded-[var(--radius-md)] bg-pitch-600 px-5 py-3 text-base font-semibold text-white shadow-[var(--shadow-card)] hover:bg-pitch-700 dark:bg-pitch-500 dark:text-pitch-950 dark:hover:bg-pitch-400"
+        >
+          Continue to MatchDay
+        </a>
+      )}
 
       <p className="text-sm text-muted">
         Did not request this? You can close this page — nothing happens until you tap the button.

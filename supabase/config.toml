@@ -48,6 +48,21 @@ secure_password_change = false
 otp_length = 6
 otp_expiry = 3600
 
+# ── Local email templates ──────────────────────────────────────────────────
+#
+# These mirror the templates production will carry once the confirmation flow
+# is switched over, so the end-to-end suite exercises the real link shape —
+# `/auth/continue?token_hash=…&type=…` on our own origin — rather than a URL a
+# test composed for itself. Production templates are edited by hand in the
+# Supabase dashboard; this is the rehearsal.
+[auth.email.template.confirmation]
+subject = "Confirm your email address"
+content_path = "./supabase/templates/confirm-signup.html"
+
+[auth.email.template.magic_link]
+subject = "Your sign-in link"
+content_path = "./supabase/templates/magic-link.html"
+
 [auth.sms]
 enable_signup = false
 enable_confirmations = false

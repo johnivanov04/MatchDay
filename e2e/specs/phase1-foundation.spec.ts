@@ -118,7 +118,7 @@ test.describe('the one-time code field', () => {
   });
 });
 
-test.describe('the magic-link interstitial', () => {
+test.describe('the magic-link interstitial, legacy link shape', () => {
   /**
    * `/auth/continue` exists because a one-time sign-in link is often opened by
    * something other than its recipient — Brevo rewrites every link through its
@@ -147,7 +147,7 @@ test.describe('the magic-link interstitial', () => {
     });
 
     await page.goto(`/auth/continue?confirmation_url=${encodeURIComponent(target)}`);
-    await expect(page.getByRole('link', { name: 'Continue sign in' })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Continue to MatchDay' })).toBeVisible();
 
     // Give any effect, timer, meta refresh or prefetch a generous chance to
     // fire. Nothing should.
@@ -173,7 +173,7 @@ test.describe('the magic-link interstitial', () => {
     await page.waitForLoadState('networkidle');
     expect(requested).toEqual([]);
 
-    await page.getByRole('link', { name: 'Continue sign in' }).click();
+    await page.getByRole('link', { name: 'Continue to MatchDay' }).click();
     await expect.poll(() => requested.length).toBeGreaterThan(0);
   });
 
@@ -186,18 +186,18 @@ test.describe('the magic-link interstitial', () => {
       )}`,
     );
 
-    await expect(page.getByText(/not valid/i)).toBeVisible();
-    await expect(page.getByRole('link', { name: 'Continue sign in' })).toHaveCount(0);
+    await expect(page.getByText(/expired/i)).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Continue to MatchDay' })).toHaveCount(0);
     // The rejected destination must not be rendered as a link anywhere.
     await expect(page.locator('a[href*="evil.example"]')).toHaveCount(0);
-    await expect(page.getByRole('link', { name: 'Back to sign in' })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Get a new link' })).toBeVisible();
   });
 
   test('shows the same error when the parameter is missing entirely', async ({ page }) => {
     await page.goto('/auth/continue');
 
-    await expect(page.getByText(/not valid/i)).toBeVisible();
-    await expect(page.getByRole('link', { name: 'Back to sign in' })).toBeVisible();
+    await expect(page.getByText(/expired/i)).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Get a new link' })).toBeVisible();
   });
 
   test('still sends a signed-out visitor to sign in from protected routes', async ({ page }) => {

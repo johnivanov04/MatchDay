@@ -1,6 +1,33 @@
 import { getPublicEnv } from '@/lib/env';
 
 /**
+ * ⚠️ ROLLOUT-ONLY — DELETE ONCE THE OLD LINKS HAVE AGED OUT.
+ *
+ * This module, `/auth/callback`, and the legacy branch of `/auth/continue`
+ * exist only to keep working the emails that were already in people's inboxes
+ * when the token-hash flow deployed. They are the *broken* flow: they bounce
+ * through Supabase to `/auth/callback?code=…`, and that exchange needs a PKCE
+ * verifier cookie which only exists in the browser that requested the email —
+ * which is why opening a link on a second device failed.
+ *
+ * Safe to remove once **both** are true:
+ *
+ *   1. the production Confirm signup and Magic Link templates point at
+ *      `/auth/continue?token_hash=…&type=…`; and
+ *   2. every link sent under the old templates has expired — one OTP expiry
+ *      window after the switch, which is `otp_expiry` in `supabase/config.toml`
+ *      (currently one hour) plus a margin for clock skew. A day is ample.
+ *
+ * What goes with it: this file, `tests/unit/confirmation-url.test.ts`,
+ * `src/app/auth/callback/route.ts`, the `legacy` branch and its anchor in
+ * `src/app/auth/continue/page.tsx`, the legacy describe block in
+ * `e2e/specs/phase10-email-confirmation.spec.ts`, the `magic-link interstitial,
+ * legacy link shape` block in `e2e/specs/phase1-foundation.spec.ts`, and the
+ * `emailRedirectTo` option in `requestSignInEmailAction`, which only the old
+ * templates read.
+ *
+ * ── WHAT IT DOES ───────────────────────────────────────────────────────────
+ *
  * Validates the Supabase confirmation URL carried by a sign-in email.
  *
  * ── WHY THIS EXISTS ────────────────────────────────────────────────────────

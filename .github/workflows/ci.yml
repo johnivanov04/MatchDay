@@ -112,6 +112,11 @@ jobs:
             echo "E2E_DATABASE_URL=$(supabase status -o json | jq -r '.DB_URL')"
             echo "E2E_SUPABASE_ANON_KEY=$(supabase status -o json | jq -r '.ANON_KEY')"
             echo "E2E_SUPABASE_SERVICE_ROLE_KEY=$(supabase status -o json | jq -r '.SERVICE_ROLE_KEY')"
+            # The mail catcher. The email-confirmation spec reads the real
+            # message out of it rather than composing the link it is meant to
+            # be testing, so a missing value must fail the job rather than
+            # quietly skip the one test that covers the cross-browser flow.
+            echo "E2E_MAILPIT_URL=$(supabase status -o json | jq -r '.MAILPIT_URL // .INBUCKET_URL')"
           } >> "$GITHUB_ENV"
 
       # ── The only place the Storage service is exercised ───────────────────
