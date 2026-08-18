@@ -337,6 +337,27 @@ test.describe('signing in with a password', () => {
 // ══ The code fallback ══════════════════════════════════════════════════════
 
 test.describe('signing in with a code instead', () => {
+  /**
+   * ── WHY THIS ASKS FOR EXACTLY ONE CODE ─────────────────────────────────
+   *
+   * It used to request a code twice for the same address — once in each of two
+   * browser contexts — to dramatise "the code is not tied to the browser that
+   * asked". That is not a property a one-time code has to begin with (no cookie
+   * is involved), and asking twice is actively wrong: a second
+   * `signInWithOtp` issues a new code and **invalidates the previous one**.
+   * Verified directly against the stack — `verifyOtp` on the first code answers
+   * `Token has expired or is invalid`.
+   *
+   * The test then read "the newest email for this address", which under CI
+   * timing was still the *first* message, because the second had not landed in
+   * Mailpit yet. So it typed a code that had just been revoked, the sign-in
+   * legitimately refused it, and the test timed out waiting for a dashboard it
+   * was never going to reach. Green locally, red on CI, twice.
+   *
+   * One request, one live code, entered where it was asked for — which is what
+   * a person actually does. The cross-device property belongs to the emailed
+   * *link*, and the test below owns it.
+   */
   test('works for a real member, and creates nothing for a stranger', async ({
     browser,
     factory,
@@ -352,24 +373,61 @@ test.describe('signing in with a code instead', () => {
     await page.getByRole('button', { name: 'Email me a sign-in link' }).click();
     await expect(page.getByRole('heading', { name: 'Check your email' })).toBeVisible();
 
-    const { html } = await waitForEmail(member.email);
-    const code = codeFrom(html);
+    // The only code this address will ever be sent during this test.
+    const code = codeFrom((await waitForEmail(member.email)).html);
 
-    // The code goes in on a *different* browser, proving it is not tied to the
-    // one that asked.
-    const other = await freshContext(browser);
-    await other.goto('/sign-in');
-    await other.waitForLoadState('networkidle');
-    await other.getByRole('button', { name: 'Sign in with a code instead' }).click();
-    await other.getByLabel('Email address').fill(member.email);
-    await other.getByRole('button', { name: 'Email me a sign-in link' }).click();
-    const second = codeFrom((await waitForEmail(member.email)).html);
-    await other.getByLabel('One-time code').fill(second);
-    await other.getByRole('button', { name: 'Sign in', exact: true }).click();
-    await other.waitForURL(/\/dashboard/);
-    expect(await hasSessionCookie(other)).toBe(true);
+    await page.getByLabel('One-time code').fill(code);
+    await page.getByRole('button', { name: 'Sign in', exact: true }).click();
 
-    expect(code).toBeTruthy();
+    await page.waitForURL(/\/dashboard/);
+    expect(await hasSessionCookie(page)).toBe(true);
+    await expect(page.getByRole('heading', { name: `Hello, ${member.firstName}` })).toBeVisible();
+    await expectNoServerError(page);
+  });
+
+  /**
+   * The refusal path, tested deterministically.
+   *
+   * A *superseded* code would be the more evocative fixture — asking twice
+   * invalidates the first, which is what the bug above turned on — but forcing
+   * a second send depends on Supabase's per-address frequency limit choosing to
+   * cooperate, and a test that needs that is the same flake wearing a different
+   * hat. A code that was never valid exercises the identical path through
+   * MatchDay: `verifyOtp` refuses, and the form has to say so rather than
+   * appearing to do nothing.
+   */
+  test('a code that is not the emailed one is refused, and says so', async ({
+    browser,
+    factory,
+  }) => {
+    const league = await factory.createLeague();
+    const member = await factory.createMember(league);
+
+    const page = await freshContext(browser);
+    await page.goto('/sign-in');
+    await page.waitForLoadState('networkidle');
+    await page.getByRole('button', { name: 'Sign in with a code instead' }).click();
+    await page.getByLabel('Email address').fill(member.email);
+    await page.getByRole('button', { name: 'Email me a sign-in link' }).click();
+    await expect(page.getByRole('heading', { name: 'Check your email' })).toBeVisible();
+
+    const real = codeFrom((await waitForEmail(member.email)).html);
+    // Well-formed and the right length, so it reaches Supabase rather than
+    // being turned away by the client-side pattern.
+    const wrong = real === '000000' ? '111111' : '000000';
+
+    await page.getByLabel('One-time code').fill(wrong);
+    await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+
+    await expect(page.getByText('That code is not valid or has expired.')).toBeVisible();
+    expect(await hasSessionCookie(page)).toBe(false);
+    await expectNoServerError(page);
+
+    // And the real one still works afterwards: a wrong guess does not burn it.
+    await page.getByLabel('One-time code').fill(real);
+    await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+    await page.waitForURL(/\/dashboard/);
+    expect(await hasSessionCookie(page)).toBe(true);
   });
 
   test('an unknown address creates no account and says nothing about it', async ({
