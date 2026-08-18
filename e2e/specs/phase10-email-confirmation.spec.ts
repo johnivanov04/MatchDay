@@ -1,6 +1,6 @@
 import type { Browser, Page } from '@playwright/test';
 import { expect, expectNoServerError, test } from '../support/fixtures';
-import { confirmationLinkFrom, waitForEmail } from '../support/mailbox';
+import { waitForConfirmationLink } from '../support/mailbox';
 
 /**
  * The email confirmation flow, driven through a real inbox.
@@ -34,25 +34,47 @@ function freshAddress(label: string): string {
 }
 
 /**
- * Asks for a sign-in email from `page`, and returns the link that arrives.
+ * Creates an account and returns the confirmation link that arrives.
+ *
+ * ── WHY THIS GOES THROUGH SIGN-UP AND NOT SIGN-IN ──────────────────────────
+ *
+ * It used to ask for a sign-in email for a brand-new address, which worked only
+ * because the code flow created accounts as a side effect. It no longer does —
+ * `shouldCreateUser: false` — because silently minting an `auth.users` row for
+ * a mistyped address left half-made accounts nobody could use. Creating the
+ * account explicitly is what a person now does, so it is what this does.
  *
  * The origin is re-pointed at the harness because the local stack's Site URL is
  * the dev server's port and the suite runs a production build on another one.
  * The path, `token_hash` and `type` are exactly as the template rendered them —
  * which is the part under test.
  */
+const SIGN_UP_PASSWORD = 'correct horse battery staple';
+
 async function requestConfirmationLink(page: Page, email: string): Promise<URL> {
+  await page.goto('/sign-up');
+  await page.waitForLoadState('networkidle');
+  await page.getByLabel('Email address').fill(email);
+  await page.getByLabel('Password', { exact: true }).fill(SIGN_UP_PASSWORD);
+  await page.getByLabel('Confirm password').fill(SIGN_UP_PASSWORD);
+  await page.getByRole('button', { name: 'Create account' }).click();
+  await expect(page.getByText('Check your email')).toBeVisible();
+
+  const emailed = await waitForConfirmationLink(email, 'signup');
+  return new URL(`${emailed.pathname}${emailed.search}`, page.url());
+}
+
+/** The same, for an address that already has an account: a magic link. */
+async function requestSignInLink(page: Page, email: string): Promise<URL> {
   await page.goto('/sign-in');
   await page.waitForLoadState('networkidle');
+  await page.getByRole('button', { name: 'Sign in with a code instead' }).click();
   await page.getByLabel('Email address').fill(email);
   await page.getByRole('button', { name: 'Email me a sign-in link' }).click();
   await expect(page.getByText('Check your email')).toBeVisible();
 
-  const { html } = await waitForEmail(email);
-  const emailed = confirmationLinkFrom(html);
-
-  const local = new URL(`${emailed.pathname}${emailed.search}`, page.url());
-  return local;
+  const emailed = await waitForConfirmationLink(email, 'magiclink');
+  return new URL(`${emailed.pathname}${emailed.search}`, page.url());
 }
 
 /** A browser context with nothing in it — no cookies, no storage, no verifier. */
@@ -131,7 +153,7 @@ test.describe('confirming an email address', () => {
     const member = await factory.createMember(league);
 
     const asking = await freshContext(browser);
-    const link = await requestConfirmationLink(asking, member.email);
+    const link = await requestSignInLink(asking, member.email);
 
     // An address that already exists gets the sign-in template, not the signup
     // one — the other half of the allowlist.
@@ -214,7 +236,10 @@ test.describe('rejecting links that are not ours', () => {
     { label: 'a malformed token hash', query: '?token_hash=../../etc/passwd&type=signup' },
     { label: 'an empty token hash', query: '?token_hash=&type=signup' },
     { label: 'a token with no type', query: `?token_hash=${'a'.repeat(40)}` },
-    { label: 'an unsupported type', query: `?token_hash=${'a'.repeat(40)}&type=recovery` },
+    // `invite` is a real Supabase EmailOtpType that MatchDay does not send.
+    // `recovery` used to be here and is now supported — the allowlist grew when
+    // the reset-password flow shipped, and not before.
+    { label: 'an unsupported type', query: `?token_hash=${'a'.repeat(40)}&type=invite` },
     { label: 'a made-up type', query: `?token_hash=${'a'.repeat(40)}&type=admin` },
   ];
 
@@ -250,7 +275,7 @@ test.describe('rejecting links that are not ours', () => {
     const member = await factory.createMember(league);
 
     const asking = await freshContext(browser);
-    const link = await requestConfirmationLink(asking, member.email);
+    const link = await requestSignInLink(asking, member.email);
     link.searchParams.set('next', 'https://evil.example/steal');
 
     const opening = await freshContext(browser);
@@ -270,7 +295,7 @@ test.describe('rejecting links that are not ours', () => {
     const member = await factory.createMember(league);
 
     const asking = await freshContext(browser);
-    const link = await requestConfirmationLink(asking, member.email);
+    const link = await requestSignInLink(asking, member.email);
     link.searchParams.set('next', '/profile');
 
     const opening = await freshContext(browser);

@@ -64,6 +64,11 @@ test.describe('the one-time code field', () => {
    */
   async function openCodeField(page: Page) {
     await page.goto('/sign-in');
+    await page.waitForLoadState('networkidle');
+    // The code path is secondary to password sign-in now, so it has to be
+    // chosen first. The acknowledgement is deliberately the same whether or not
+    // the address has an account, so no real one is needed to reach the field.
+    await page.getByRole('button', { name: 'Sign in with a code instead' }).click();
     await page.getByLabel('Email address').fill(`otp.probe.${Date.now()}@matchday.test`);
     await page.getByRole('button', { name: 'Email me a sign-in link' }).click();
     const field = page.getByLabel('One-time code');

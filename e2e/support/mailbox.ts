@@ -97,6 +97,52 @@ export function confirmationLinkFrom(emailBody: string): URL {
   return new URL(match[0]);
 }
 
+/**
+ * Waits for a confirmation link of a specific `type`.
+ *
+ * ── WHY "THE NEWEST EMAIL" IS NOT ENOUGH ───────────────────────────────────
+ *
+ * An address can hold several MatchDay emails at once — a signup confirmation
+ * and, moments later, a password recovery. Supabase also applies a per-address
+ * frequency limit, so the second request sometimes sends nothing at all. Taking
+ * whatever arrived most recently then hands back the *previous* email's token,
+ * which is usually already spent, and the test fails somewhere unrelated to
+ * what it was checking.
+ *
+ * Waiting for the type the test actually asked for removes that entirely, and
+ * fails with a useful message when the email genuinely never came.
+ */
+export async function waitForConfirmationLink(
+  address: string,
+  type: 'signup' | 'magiclink' | 'recovery',
+  timeoutMs = 20_000,
+): Promise<URL> {
+  const deadline = Date.now() + timeoutMs;
+  let lastSeen = '(no /auth/continue link at all)';
+
+  while (Date.now() < deadline) {
+    const { html } = await waitForEmail(address, Math.max(1_000, deadline - Date.now()));
+    const links = [...html.matchAll(/https?:\/\/[^"'\s<>]*\/auth\/continue[^"'\s<>]*/g)];
+
+    for (const [href] of links) {
+      const url = new URL(href);
+      const found = url.searchParams.get('type');
+      if (found === type) {
+        return url;
+      }
+      lastSeen = found ?? '(no type parameter)';
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 300));
+  }
+
+  throw new Error(
+    `No ${type} email arrived for ${address} within ${String(timeoutMs)}ms. ` +
+      `The most recent MatchDay link was of type ${lastSeen}. ` +
+      'Supabase applies a per-address frequency limit; give the request room, or use a fresh address.',
+  );
+}
+
 /** Deletes every captured message, so one test cannot read another's mail. */
 export async function clearMailbox(): Promise<void> {
   await fetch(mailpit('/api/v1/messages'), { method: 'DELETE' }).catch(() => null);

@@ -37,12 +37,26 @@ export interface SignInState {
 }
 
 /**
- * Sends a sign-in email containing both a magic link and a one-time code
- * (02 §2: "Supabase Auth using email magic link or one-time code").
+ * Sends a sign-in email containing both a prefetch-safe link and a one-time
+ * code, for somebody who would rather not type a password on a phone.
  *
- * Always reports success. Reporting "no such account" would turn this form into
- * an account-existence oracle, and with `shouldCreateUser` enabled there is no
- * such distinction to leak anyway.
+ * ── IT NO LONGER CREATES ACCOUNTS ──────────────────────────────────────────
+ *
+ * `shouldCreateUser: false`, which is the whole behavioural change here. This
+ * used to be the *only* way in, so it had to create the account as a side
+ * effect of asking to sign in. Now that Create account exists, an address
+ * nobody has registered typing itself into this box is a mistake, not a signup
+ * — and silently minting an `auth.users` row for it left half-made accounts
+ * behind that could never be used.
+ *
+ * Verified against the installed SDK: with the flag off, an unknown address
+ * produces `Signups not allowed for otp` (422), **no user row and no email**.
+ *
+ * ── AND STILL REPORTS SUCCESS ──────────────────────────────────────────────
+ *
+ * That 422 is an account-existence oracle, so it never reaches the caller. Both
+ * a known and an unknown address get the same "check your email" screen; only
+ * the person holding the inbox learns which it was.
  */
 export async function requestSignInEmailAction(
   _previous: ActionResult<SignInState> | null,
@@ -66,19 +80,19 @@ export async function requestSignInEmailAction(
   );
 
   const supabase = await createSupabaseServerClient();
-  const { error } = await supabase.auth.signInWithOtp({
+  await supabase.auth.signInWithOtp({
     email: parsed.data,
     options: {
-      shouldCreateUser: true,
-      // Built from configuration, never from the request Host header.
+      shouldCreateUser: false,
+      // Built from configuration, never from the request Host header. Only the
+      // legacy `{{ .ConfirmationURL }}` templates read it.
       emailRedirectTo: `${getSiteUrl()}/auth/callback?next=${encodeURIComponent(next)}`,
     },
   });
 
-  if (error !== null) {
-    return actionFailure(new DomainError('AUTH_REQUIRED', { cause: error }));
-  }
-
+  // The result is deliberately discarded. `Signups not allowed for otp` means
+  // the address has no account, and saying so would answer a question this form
+  // must not answer.
   return actionSuccess({ email: parsed.data });
 }
 

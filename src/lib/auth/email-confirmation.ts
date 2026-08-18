@@ -31,18 +31,30 @@
  */
 
 /**
- * The only confirmation types MatchDay sends today.
+ * The only confirmation types MatchDay sends.
  *
- * `signup` is a brand-new account confirming its address; `magiclink` is an
- * existing account signing in. Both come from `signInWithOtp`, which chooses
- * between them by whether the address already exists — verified against the
- * local stack rather than assumed.
+ *   * `signup`    — a new account confirming its address, from `signUp`.
+ *   * `magiclink` — an existing account signing in with a code or link.
+ *   * `recovery`  — a password reset, from `resetPasswordForEmail`.
  *
- * `recovery`, `invite` and `email_change` are deliberately absent. Password
- * recovery is a later stage, and a type this application does not send is a
- * type a crafted link must not be able to drive.
+ * `recovery` was deliberately absent until the reset flow existed: a type this
+ * application cannot handle is a type a crafted link must not be able to drive.
+ * It is here now because `/reset-password` is here now.
+ *
+ * `invite`, `email_change` and `phone_change` remain absent for the same
+ * reason. The list grows only when a flow that consumes the type ships.
  */
-export const CONFIRMATION_TYPES = ['signup', 'magiclink'] as const;
+export const CONFIRMATION_TYPES = ['signup', 'magiclink', 'recovery'] as const;
+
+/**
+ * Where each type lands once its token has been verified.
+ *
+ * Recovery is the one that differs: the session it establishes exists so that
+ * somebody can choose a new password, so it goes to the screen that asks for
+ * one rather than into the app. Everything else takes the ordinary post-auth
+ * destination.
+ */
+export const RESET_PASSWORD_PATH = '/reset-password';
 
 export type ConfirmationType = (typeof CONFIRMATION_TYPES)[number];
 

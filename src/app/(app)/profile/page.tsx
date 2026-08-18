@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import { AvatarPicker } from '@/components/avatar-picker';
+import { ChangePassword } from '@/components/change-password';
 import { ProfileForm } from '@/components/profile-form';
 import { ButtonLink } from '@/components/ui/button';
 import { Card, Section } from '@/components/ui/card';
@@ -65,6 +66,9 @@ export default async function ProfilePage() {
       <Section title="Account">
         <Card className="overflow-hidden p-0">
           <ul className="divide-hairline flex flex-col">
+            <li>
+              <ChangePassword />
+            </li>
             <li>
               <ButtonLink
                 href="/settings/devices"

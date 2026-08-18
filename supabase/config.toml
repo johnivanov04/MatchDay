@@ -38,12 +38,24 @@ enable_refresh_token_rotation = true
 refresh_token_reuse_interval = 10
 enable_signup = true
 enable_anonymous_sign_ins = false
+# Ten, matching `passwordSchema` in src/lib/validation/password.ts. Supabase is
+# the authority — the client-side rule exists so somebody is told before they
+# submit rather than after. No composition requirements: length is what makes a
+# password hard to guess, and forcing a symbol mostly produces "Password1!".
+minimum_password_length = 10
 
 [auth.email]
-# Matchday authenticates with email magic links / one-time codes only.
+# MatchDay authenticates with email + password, keeping the one-time code as a
+# secondary option. `enable_confirmations` is what makes a password signup send
+# a verification email and withhold the session until it is confirmed — the
+# behaviour Stage 3 is built around, and the one setting production must match.
 enable_signup = true
 double_confirm_changes = true
 enable_confirmations = true
+# Left OFF deliberately. Turning it on requires the *current* password for any
+# change, which historical passwordless accounts do not have — it would lock
+# every pre-password member out of setting their first one. See the Stage 3
+# report for the tradeoff and the safe alternative.
 secure_password_change = false
 otp_length = 6
 otp_expiry = 3600
@@ -62,6 +74,10 @@ content_path = "./supabase/templates/confirm-signup.html"
 [auth.email.template.magic_link]
 subject = "Your sign-in link"
 content_path = "./supabase/templates/magic-link.html"
+
+[auth.email.template.recovery]
+subject = "Reset your password"
+content_path = "./supabase/templates/recovery.html"
 
 [auth.sms]
 enable_signup = false
