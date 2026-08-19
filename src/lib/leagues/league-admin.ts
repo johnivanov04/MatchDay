@@ -41,11 +41,29 @@ export async function findMyLeagueBySlug(
 
 export interface LeagueMemberSummary {
   membership: LeagueMembershipRow;
-  /** Only the fields an administrator needs to manage membership. */
+  /**
+   * Only the fields an administrator needs to manage membership — and, for
+   * somebody who is deleting or has deleted their account, not even those.
+   *
+   * ── SCRUBBED HERE, NOT IN THE COMPONENT ──────────────────────────────────
+   *
+   * The four match projections mask a departing member in SQL. This screen
+   * reads `profiles` directly, so the masking has to happen on the way out of
+   * this function instead. Doing it here rather than at the point of render
+   * means the name and email never reach the RSC payload, so no future column
+   * on the members table can leak them by accident.
+   */
   profile: Pick<
     ProfileRow,
     'id' | 'first_name' | 'last_name' | 'email_normalized' | 'profile_photo_path'
   > | null;
+  /**
+   * Whether this person is deleting or has deleted their MatchDay account.
+   *
+   * Derived from the lifecycle columns, never from the scrubbed name — a real
+   * person called Former must not be erased from the members list.
+   */
+  isFormerMember: boolean;
 }
 
 /**
@@ -84,15 +102,46 @@ export async function getLeagueMembers(leagueId: string): Promise<LeagueMemberSu
 
   const { data: profiles } = await supabase
     .from('profiles')
-    .select('id, first_name, last_name, email_normalized, profile_photo_path')
+    .select(
+      'id, first_name, last_name, email_normalized, profile_photo_path, deletion_started_at, deleted_at',
+    )
     .in('id', userIds);
 
   const profilesById = new Map((profiles ?? []).map((profile) => [profile.id, profile]));
 
-  return memberships.map((membership) => ({
-    membership,
-    profile: profilesById.get(membership.user_id) ?? null,
-  }));
+  return memberships.map((membership) => {
+    const profile = profilesById.get(membership.user_id) ?? null;
+
+    if (profile === null) {
+      return { membership, profile: null, isFormerMember: false };
+    }
+
+    const isFormerMember = profile.deletion_started_at !== null || profile.deleted_at !== null;
+
+    return {
+      membership,
+      profile: isFormerMember
+        ? {
+            id: profile.id,
+            first_name: 'Former',
+            last_name: 'member',
+            // Never the synthetic `deleted-…@deleted.invalid` address. It is
+            // not an email anybody can use and showing it would look like a
+            // real one — worse, like the person's real one, to a reader who
+            // does not know the convention.
+            email_normalized: '',
+            profile_photo_path: null,
+          }
+        : {
+            id: profile.id,
+            first_name: profile.first_name,
+            last_name: profile.last_name,
+            email_normalized: profile.email_normalized,
+            profile_photo_path: profile.profile_photo_path,
+          },
+      isFormerMember,
+    };
+  });
 }
 
 export interface JoinRequestSummary {

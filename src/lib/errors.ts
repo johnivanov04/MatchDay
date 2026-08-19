@@ -49,6 +49,11 @@ export const DOMAIN_ERROR_CODES = [
   'ATTENDANCE_OUTCOME_INVALID',
   'ATTENDANCE_REVISION_STALE',
   'ATTENDANCE_INCOMPLETE',
+  // Account deletion. `ACCOUNT_DELETED` is the refusal a departing account gets
+  // from every ordinary surface; `LEAGUE_CLOSED` is what a closed league says
+  // to anything that would treat it as open.
+  'ACCOUNT_DELETED',
+  'LEAGUE_CLOSED',
 ] as const;
 
 export type DomainErrorCode = (typeof DOMAIN_ERROR_CODES)[number];
@@ -81,6 +86,11 @@ const USER_FACING_MESSAGES: Record<DomainErrorCode, string> = {
   NOTIFICATION_NOT_FOUND: 'That notification is no longer available.',
   NOT_AUTHORIZED: 'You do not have permission to do that.',
   VALIDATION_FAILED: 'Please check the highlighted fields and try again.',
+  // Deliberately not "your account is deleted": the person reading this may be
+  // mid-deletion with a retry still to run, and the status screen is where the
+  // full explanation lives.
+  ACCOUNT_DELETED: 'This account is being deleted, so that is no longer available.',
+  LEAGUE_CLOSED: 'That league has been closed.',
   MEMBERSHIP_EXISTS: 'You already belong to that league.',
   // Deliberately identical for a bad, expired, revoked or exhausted link: the
   // distinction would tell a probe that a private league exists.

@@ -51,8 +51,14 @@ export interface LeagueMenuEntry {
   name: string;
   slug: string;
   isAdmin: boolean;
-  /** `pending` and `suspended` are shown but cannot be switched to (PRD §11). */
-  status: 'active' | 'pending' | 'suspended';
+  /**
+   * `pending`, `suspended` and `closed` are shown but cannot be switched to.
+   *
+   * `closed` is the odd one out: the membership is still active, and it is the
+   * *league* that has ended. It appears so somebody can see where their history
+   * went rather than watching a league silently vanish from the list.
+   */
+  status: 'active' | 'pending' | 'suspended' | 'closed';
 }
 
 const TITLE_ID = 'league-menu-title';
@@ -307,7 +313,11 @@ export function LeagueMenu({
                       {entry.name}
                     </span>
                     <Badge tone={entry.status === 'pending' ? 'pending' : 'off'} dot>
-                      {entry.status === 'pending' ? 'Awaiting approval' : 'Suspended'}
+                      {entry.status === 'pending'
+                        ? 'Awaiting approval'
+                        : entry.status === 'closed'
+                          ? 'Closed'
+                          : 'Suspended'}
                     </Badge>
                     {/* A suspension stops somebody playing. It must not also
                         trap them: being told to sit out is a restriction, and

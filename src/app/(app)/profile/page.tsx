@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { AvatarPicker } from '@/components/avatar-picker';
 import { ChangePassword } from '@/components/change-password';
+import { DeleteAccount } from '@/components/delete-account';
 import { ProfileForm } from '@/components/profile-form';
 import { ButtonLink } from '@/components/ui/button';
 import { Card, Section } from '@/components/ui/card';
@@ -8,6 +9,8 @@ import { BellIcon, ChevronRightIcon, LogOutIcon } from '@/components/ui/icon';
 import { PageHeader } from '@/components/ui/page-header';
 import { requireOnboardedUser } from '@/lib/auth/page-guards';
 import { avatarImageUrl, avatarInitials, avatarLabel } from '@/lib/profile/avatar';
+import { createSupabaseServerClient } from '@/lib/supabase/server';
+import type { AccountDeletionBlocker } from '@/types/database';
 
 export const metadata: Metadata = { title: 'Your profile' };
 
@@ -26,6 +29,15 @@ export const metadata: Metadata = { title: 'Your profile' };
  */
 export default async function ProfilePage() {
   const { user, profile } = await requireOnboardedUser();
+
+  // The open leagues this person administers, and therefore cannot delete their
+  // account while they run. Fetched here rather than inside the dialog so the
+  // blocked case is decided on the server — the client never gets to conclude
+  // it is allowed to proceed, and `begin_my_account_deletion` re-derives the
+  // same fact inside its own transaction regardless.
+  const supabase = await createSupabaseServerClient();
+  const { data: blockerRows } = await supabase.rpc('my_account_deletion_blockers');
+  const blockers: AccountDeletionBlocker[] = blockerRows ?? [];
 
   // Resolved on the server so the correct face is in the first HTML response
   // rather than appearing after hydration.
@@ -113,6 +125,23 @@ export default async function ProfilePage() {
               </form>
             </li>
           </ul>
+        </Card>
+      </Section>
+
+      {/* ── Deleting the account ──────────────────────────────────────────────
+          Its own section below the rest, separated rather than sitting as a
+          fifth row under Sign out. Everything above is reversible; this is not,
+          and the two should not read as the same kind of thing.
+
+          Apple requires an app that creates accounts to offer deletion from
+          inside the app — not an instruction to email support — which is why
+          this is a control and not a paragraph. */}
+      <Section
+        title="Delete account"
+        description="Permanently remove your MatchDay account and personal details."
+      >
+        <Card className="overflow-hidden p-0">
+          <DeleteAccount blockers={blockers} />
         </Card>
       </Section>
     </>

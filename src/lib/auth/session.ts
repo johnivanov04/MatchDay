@@ -38,12 +38,63 @@ export const getSessionUser = cache(async (): Promise<SessionUser | null> => {
   return { id, email: email.toLowerCase() };
 });
 
-/** The signed-in user, or `AUTH_REQUIRED`. */
+/**
+ * Whether an account has begun, or finished, deleting itself.
+ *
+ * ── DERIVED FROM STATE, NEVER FROM THE SCRUBBED NAME ───────────────────────
+ *
+ * The tombstone stores `first_name = 'Former'` because the column is NOT NULL
+ * and something has to go there. Reading deletion state out of that string
+ * would erase every real person called Former from every roster they ever
+ * played on. The two timestamps are the fact; the name is a consequence.
+ *
+ * Both columns matter, and for different reasons. `deleted_at` alone would miss
+ * the window between starting and finishing — which is exactly the window that
+ * exists because Storage and GoTrue are not in the transaction.
+ */
+export function isProfileDeleting(profile: ProfileRow): boolean {
+  // `?? null` rather than a bare `!== null`. A projection that has not selected
+  // these columns yields `undefined`, which is not `null` — so the strict form
+  // would read every such profile as mid-deletion and lock the entire product
+  // behind the deletion-status screen. Failing towards "live" is right here
+  // precisely because this is not the security boundary: the database refuses a
+  // departing account independently, through `is_live_profile()`.
+  return (profile.deletion_started_at ?? null) !== null || (profile.deleted_at ?? null) !== null;
+}
+
+/**
+ * The signed-in user, or `AUTH_REQUIRED` — or `ACCOUNT_DELETED` if their
+ * account is on its way out.
+ *
+ * ── WHY THE LIVENESS CHECK LIVES HERE ──────────────────────────────────────
+ *
+ * This is the guard seventeen server-action call sites already use, so putting
+ * the check in it covers all of them at once rather than seventeen times, and
+ * covers the eighteenth written next year for free.
+ *
+ * It is not the security boundary. The database refuses a departing account
+ * through `is_live_profile()` in six predicates, five table guards and every
+ * self-scoped policy — this is defence in depth and, more usefully, the thing
+ * that turns a raw refusal into an error the interface can explain.
+ *
+ * The account-deletion actions themselves deliberately do NOT use this: they
+ * call `getSessionUser()`, because refusing to let somebody finish deleting
+ * their account on the grounds that they are deleting their account would be a
+ * trap with no way out.
+ */
 export async function requireSessionUser(): Promise<SessionUser> {
   const user = await getSessionUser();
   if (user === null) {
     throw new DomainError('AUTH_REQUIRED');
   }
+
+  // Free after the first call in a request: `getCurrentProfile` is cached and
+  // most callers load the profile anyway.
+  const profile = await getCurrentProfile();
+  if (profile !== null && isProfileDeleting(profile)) {
+    throw new DomainError('ACCOUNT_DELETED');
+  }
+
   return user;
 }
 

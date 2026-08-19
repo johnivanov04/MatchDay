@@ -48,12 +48,18 @@ vi.mock('next/navigation', () => ({ redirect: mocks.redirect }));
 vi.mock('@/lib/auth/session', () => ({
   getSessionUser: mocks.getSessionUser,
   getCurrentProfile: mocks.getCurrentProfile,
+  // The real implementation, deliberately not a stub: the routing decision this
+  // file is about depends on it giving the right answer, and a mock that always
+  // returned false would make the deletion tests below pass vacuously.
+  isProfileDeleting: (profile: ProfileRow) =>
+    (profile.deletion_started_at ?? null) !== null || (profile.deleted_at ?? null) !== null,
 }));
 vi.mock('@/lib/leagues/league-admin', () => ({
   findMyLeagueBySlug: mocks.findMyLeagueBySlug,
 }));
 
 const {
+  ACCOUNT_DELETED_PATH,
   DASHBOARD_NOTICES,
   DASHBOARD_PATH,
   ONBOARDING_PATH,
@@ -72,6 +78,8 @@ const PROFILE = {
   first_name: 'Jules',
   last_name: 'Okonkwo',
   email_normalized: 'player.multi@matchday.test',
+  deletion_started_at: null,
+  deleted_at: null,
 } as ProfileRow;
 
 /** Captures the redirect a guard performed, failing if it did not redirect. */
@@ -122,6 +130,51 @@ describe('requireOnboardedUser', () => {
 
     expect(await expectRedirect(requireOnboardedUser)).toBe(ONBOARDING_PATH);
     expect(ONBOARDING_PATH).toBe('/onboarding');
+  });
+
+  it('sends an account whose deletion has begun to the deletion-status screen', async () => {
+    mocks.getSessionUser.mockResolvedValue(SESSION_USER);
+    mocks.getCurrentProfile.mockResolvedValue({
+      ...PROFILE,
+      deletion_started_at: '2026-08-23T10:00:00Z',
+    });
+
+    expect(await expectRedirect(requireOnboardedUser)).toBe(ACCOUNT_DELETED_PATH);
+    expect(ACCOUNT_DELETED_PATH).toBe('/account/deleted');
+  });
+
+  it('sends a tombstoned account there too', async () => {
+    mocks.getSessionUser.mockResolvedValue(SESSION_USER);
+    mocks.getCurrentProfile.mockResolvedValue({
+      ...PROFILE,
+      deletion_started_at: '2026-08-23T10:00:00Z',
+      deleted_at: '2026-08-23T10:00:05Z',
+    });
+
+    expect(await expectRedirect(requireOnboardedUser)).toBe(ACCOUNT_DELETED_PATH);
+  });
+
+  it('never sends a departing account to onboarding', async () => {
+    // THE TRAP THIS TEST EXISTS FOR. If `profiles_select_self` were gated on
+    // liveness, `getCurrentProfile()` would return null for somebody
+    // mid-deletion, the no-profile branch would fire, and they would be invited
+    // to create the profile they are in the middle of deleting.
+    mocks.getSessionUser.mockResolvedValue(SESSION_USER);
+    mocks.getCurrentProfile.mockResolvedValue({
+      ...PROFILE,
+      deletion_started_at: '2026-08-23T10:00:00Z',
+    });
+
+    const destination = await expectRedirect(requireOnboardedUser);
+    expect(destination).not.toBe(ONBOARDING_PATH);
+  });
+
+  it('leaves the deletion-status route outside the authenticated group', async () => {
+    // Loop protection, the same rule `/onboarding` follows: the page this
+    // redirects to must not itself run this guard.
+    const { existsSync } = await import('node:fs');
+    expect(existsSync('src/app/account/deleted/page.tsx')).toBe(true);
+    expect(existsSync('src/app/(app)/account/deleted/page.tsx')).toBe(false);
   });
 
   it('does not raise an application error for the un-onboarded state', async () => {
