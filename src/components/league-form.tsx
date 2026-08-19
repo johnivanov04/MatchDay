@@ -11,7 +11,7 @@ import {
   SubmitButton,
 } from '@/components/ui/field';
 import { pluralize } from '@/lib/format/plural';
-import { slugifyLeagueName } from '@/lib/validation/league';
+import { intervalToHoursField, slugifyLeagueName } from '@/lib/validation/league';
 import { createLeagueAction, updateLeagueSettingsAction } from '@/server/actions/leagues';
 import type { LeagueRow } from '@/types/database';
 
@@ -70,6 +70,16 @@ export function LeagueForm({
   const [teamCount, setTeamCount] = useState(String(league?.default_team_count ?? 2));
 
   const guided = mode === 'create';
+
+  // The starting values a brand-new league sees, matching the column defaults
+  // in `20260821120000_league_match_defaults.sql`.
+  //
+  // Chosen by mode rather than with `|| '2'` on the parsed value: zero is a
+  // legitimate setting — "signup closes at kickoff" — and `'0' || '2'` is
+  // `'2'`, so a league that had deliberately set zero would silently render as
+  // two and be saved back that way the next time anybody touched the form.
+  const timingField = (stored: string | null | undefined, whenCreating: string): string =>
+    mode === 'create' ? whenCreating : intervalToHoursField(stored ?? null);
 
   const fieldError = (field: string): string | undefined =>
     state?.ok === false ? state.fieldErrors[field] : undefined;
@@ -316,9 +326,110 @@ export function LeagueForm({
         </Field>
       </Group>
 
+      {/*
+        A group of its own rather than four more fields inside Match setup.
+
+        Match setup is already eight controls; adding four numbers with the
+        same unit turned it into a wall on a phone. These four also answer a
+        different question — *when* things happen rather than *how many* people
+        — and they are the ones that need the "this does not change existing
+        matches" caveat, which needs somewhere to live.
+      */}
       <Group
         guided={guided}
         step={3}
+        legend="Match timing"
+        description="Starting values for new matches, in hours before kickoff."
+      >
+        <div className="grid grid-cols-2 gap-3">
+          <Field
+            label="Signup closes"
+            htmlFor="default_signup_closes_before"
+            error={fieldError('default_signup_closes_before')}
+          >
+            <input
+              id="default_signup_closes_before"
+              name="default_signup_closes_before"
+              type="number"
+              inputMode="numeric"
+              min={0}
+              max={720}
+              required
+              defaultValue={timingField(league?.default_signup_closes_before, '2')}
+              className={inputClassName}
+            />
+          </Field>
+
+          <Field
+            label="Cancellation cutoff"
+            htmlFor="default_cancellation_cutoff_before"
+            error={fieldError('default_cancellation_cutoff_before')}
+          >
+            <input
+              id="default_cancellation_cutoff_before"
+              name="default_cancellation_cutoff_before"
+              type="number"
+              inputMode="numeric"
+              min={0}
+              max={720}
+              required
+              defaultValue={timingField(league?.default_cancellation_cutoff_before, '24')}
+              className={inputClassName}
+            />
+          </Field>
+        </div>
+
+        <Field
+          label="Priority window"
+          htmlFor="default_priority_window"
+          optional
+          hint="How long returning members get first refusal after a match opens. Leave blank for none."
+          error={fieldError('default_priority_window')}
+        >
+          <input
+            id="default_priority_window"
+            name="default_priority_window"
+            type="number"
+            inputMode="numeric"
+            min={0}
+            max={720}
+            defaultValue={timingField(league?.default_priority_window, '')}
+            className={inputClassName}
+          />
+        </Field>
+
+        <Field
+          label="Roster publish target"
+          htmlFor="default_roster_publish_before"
+          optional
+          // Says plainly that nothing happens on its own. A field sitting
+          // beside two enforced deadlines reads as a third enforced deadline
+          // unless it says otherwise, and this one is a note to self.
+          hint="A planning target. MatchDay does not automatically publish the roster at this time."
+          error={fieldError('default_roster_publish_before')}
+        >
+          <input
+            id="default_roster_publish_before"
+            name="default_roster_publish_before"
+            type="number"
+            inputMode="numeric"
+            min={0}
+            max={720}
+            defaultValue={timingField(league?.default_roster_publish_before, '')}
+            className={inputClassName}
+          />
+        </Field>
+
+        <p className="text-xs text-muted">
+          {guided
+            ? 'These are the defaults for new matches. You can change them on an individual match later.'
+            : 'These are the starting values for new matches, and can be changed on an individual match. Changing them here does not change matches that have already been created.'}
+        </p>
+      </Group>
+
+      <Group
+        guided={guided}
+        step={4}
         legend="Player preferences"
         description="Ask members for these when they join. Visible only to you."
       >
@@ -346,7 +457,7 @@ export function LeagueForm({
       {guided ? (
         <div className="surface-card flex flex-col gap-4 p-4">
           <div className="flex items-start gap-3">
-            <StepChip step={4} />
+            <StepChip step={5} />
             <div className="flex min-w-0 flex-col gap-0.5">
               <h2 className="text-[0.9375rem] font-semibold">Review</h2>
               <p className="text-sm text-muted">

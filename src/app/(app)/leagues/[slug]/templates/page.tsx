@@ -39,13 +39,13 @@ export default async function MatchTemplatesPage({
               {template.is_active ? '' : ' · inactive'}
             </span>
           </div>
-          <MatchTemplateForm leagueId={league.id} template={template} />
+          <MatchTemplateForm leagueId={league.id} league={league} template={template} />
         </section>
       ))}
 
       <section className="surface-card flex flex-col gap-3 p-4">
         <h2 className="text-[0.9375rem] font-semibold">New template</h2>
-        <MatchTemplateForm leagueId={league.id} />
+        <MatchTemplateForm leagueId={league.id} league={league} />
       </section>
     </>
   );

@@ -56,8 +56,13 @@ function readTemplateForm(formData: FormData) {
     selection_mode: formData.get('selection_mode') ?? 'first_come',
     waitlist_mode: formData.get('waitlist_mode') ?? 'automatic',
     priority_window_hours: formData.get('priority_window_hours') ?? '',
-    signup_closes_before_hours: formData.get('signup_closes_before_hours') ?? '2',
-    cancellation_cutoff_before_hours: formData.get('cancellation_cutoff_before_hours') ?? '24',
+    // No `?? '2'` / `?? '24'` any more. Every form that posts here renders
+    // these inputs and pre-fills them from the league's own defaults, so a
+    // missing value means a malformed submission — and `hoursSchema` should
+    // say so rather than a constant quietly standing in for a policy the
+    // league has already expressed.
+    signup_closes_before_hours: formData.get('signup_closes_before_hours') ?? '',
+    cancellation_cutoff_before_hours: formData.get('cancellation_cutoff_before_hours') ?? '',
     roster_publish_before_hours: formData.get('roster_publish_before_hours') ?? '',
     is_active: formData.get('is_active') !== 'off',
   };

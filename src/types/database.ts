@@ -90,6 +90,19 @@ export type LeagueRow = {
   goalkeeper_field_enabled: boolean;
   public_contact: string | null;
   settings_json: Record<string, unknown>;
+  /**
+   * Starting values for a new match's timing, as PostgreSQL interval literals
+   * (`"02:00:00"`, `"1 day"`). Copied into a match at creation and resolved
+   * there against the league timezone — changing one never moves a match that
+   * already exists.
+   *
+   * The two nullable ones mean "this league does not use that feature", which
+   * is a different statement from a duration of zero.
+   */
+  default_signup_closes_before: string;
+  default_cancellation_cutoff_before: string;
+  default_priority_window: string | null;
+  default_roster_publish_before: string | null;
   created_by: string | null;
   created_at: string;
   updated_at: string;
@@ -840,6 +853,10 @@ export interface Database {
           p_typical_schedule?: string | null;
           p_gender_field_enabled?: boolean;
           p_goalkeeper_field_enabled?: boolean;
+          p_default_signup_closes_before?: string;
+          p_default_cancellation_cutoff_before?: string;
+          p_default_priority_window?: string | null;
+          p_default_roster_publish_before?: string | null;
         };
         Returns: string;
       };
