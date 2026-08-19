@@ -44,6 +44,7 @@ export const DASHBOARD_NOTICES = {
   administrationTransferred: 'administration-transferred',
   notLeagueAdmin: 'not-league-admin',
   notLeagueMember: 'not-league-member',
+  leftLeague: 'left-league',
 } as const;
 
 export type DashboardNotice = (typeof DASHBOARD_NOTICES)[keyof typeof DASHBOARD_NOTICES];

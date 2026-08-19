@@ -32,10 +32,21 @@ describe('isPushEligible', () => {
     'join_request_submitted',
     'league_invitation_accepted',
     'guideline_version_published',
+    // A player tidying up their leagues. Administrator housekeeping, like
+    // `league_invitation_accepted` from the other direction, and nothing about
+    // it needs a phone to light up.
+    'member_left',
   ] as NotificationType[])('keeps %s in the app', (type) => {
     // Administrator housekeeping and purely informational updates are not
     // worth interrupting somebody's evening for.
     expect(isPushEligible(type)).toBe(false);
+  });
+
+  it('builds no push payload at all for a member leaving', () => {
+    // The stronger statement: not merely "not in the set", but that the
+    // dispatcher — which skips anything `buildPushPayload` returns null for —
+    // has nothing to send.
+    expect(buildPushPayload({ ...BASE, type: 'member_left' })).toBeNull();
   });
 });
 
