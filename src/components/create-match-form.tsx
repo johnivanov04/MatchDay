@@ -66,14 +66,35 @@ export function CreateMatchForm({
     public_notes: '',
   };
 
+  // ── Where the timing values come from ──────────────────────────────────
+  //
+  //     selected template  →  league defaults
+  //
+  // Resolved at the *object* level, not field by field, and that distinction is
+  // the whole point. A template that stores `priority_window = null` is saying
+  // "this kind of match has no priority window" — a deliberate statement, not
+  // an absence. A field-level `template?.priority_window ?? league.default…`
+  // would silently replace that null with the league's value and quietly give
+  // the match a window its template said it should not have.
+  //
+  // So the source is chosen once: if a template is selected it answers for all
+  // four fields, including with nulls. There is no third tier — the league
+  // columns are NOT NULL where a value is always needed, so the hard-coded
+  // '2' and '24' that used to sit at the end of this chain are gone.
+  const timing = template ?? {
+    priority_window: league.default_priority_window,
+    signup_closes_before: league.default_signup_closes_before,
+    cancellation_cutoff_before: league.default_cancellation_cutoff_before,
+    roster_publish_before: league.default_roster_publish_before,
+  };
+
   const policy: MatchPolicyDefaults = {
     selection_mode: template?.selection_mode ?? league.default_selection_mode,
     waitlist_mode: template?.waitlist_mode ?? league.default_waitlist_mode,
-    priority_window_hours: intervalToHours(template?.priority_window ?? null),
-    signup_closes_before_hours: intervalToHours(template?.signup_closes_before ?? null) || '2',
-    cancellation_cutoff_before_hours:
-      intervalToHours(template?.cancellation_cutoff_before ?? null) || '24',
-    roster_publish_before_hours: intervalToHours(template?.roster_publish_before ?? null),
+    priority_window_hours: intervalToHours(timing.priority_window),
+    signup_closes_before_hours: intervalToHours(timing.signup_closes_before),
+    cancellation_cutoff_before_hours: intervalToHours(timing.cancellation_cutoff_before),
+    roster_publish_before_hours: intervalToHours(timing.roster_publish_before),
   };
 
   // `key` forces the uncontrolled inputs to remount with new defaults when the
@@ -110,6 +131,17 @@ export function CreateMatchForm({
       <div key={formKey} className="flex flex-col gap-4">
         <MatchCoreFields defaults={core} timezone={league.timezone} fieldError={fieldError} />
         <MatchPolicyFields defaults={policy} fieldError={fieldError} />
+
+        {/* Where these numbers came from. Without it, an organizer who has set
+            league defaults sees them appear here and cannot tell whether they
+            are inherited or something this form invented — and editing them
+            looks like it might change the league. It does not: anything typed
+            here applies to this match alone. */}
+        <p className="-mt-1 text-xs text-muted">
+          {template === undefined
+            ? 'Using your league defaults. Changes here apply to this match only.'
+            : `Using defaults from ${template.name}. Changes here apply to this match only.`}
+        </p>
 
         <Field
           label="Private notes"

@@ -27,6 +27,75 @@ const optionalText = (max: number) =>
     .refine((value) => value.length <= max, { message: `Use ${max} characters or fewer.` })
     .transform((value): string | null => (value === '' ? null : value));
 
+/**
+ * A league's starting values for match timing.
+ *
+ * ── HOURS IN, INTERVALS OUT ────────────────────────────────────────────────
+ *
+ * The form asks for hours because that is how an organizer thinks about "close
+ * signup the evening before". The columns are `interval`, because that is what
+ * `create_match` subtracts from a kickoff instant. The transform is the seam,
+ * and it lives here so the two league paths — the `create_league` RPC and the
+ * settings UPDATE — cannot disagree about it.
+ *
+ * ── BLANK IS NOT ZERO ──────────────────────────────────────────────────────
+ *
+ * For the two optional fields, an empty input means "this league does not use
+ * that feature" and must reach the database as `null`. A duration of zero is a
+ * different, legitimate statement — a priority window that closes immediately —
+ * so the two cannot be collapsed. `z.coerce.number()` turns `''` into `0`,
+ * which is exactly the silent conversion being guarded against; the literal
+ * `''` branch is matched first so it never gets the chance.
+ *
+ * Bounds mirror `leagues_default_*_range` in
+ * `20260821120000_league_match_defaults.sql` and the match form's own
+ * `hoursSchema(…, 720)`.
+ */
+const TIMING_MAX_HOURS = 720;
+
+const requiredHours = (label: string) =>
+  z.coerce
+    .number()
+    .min(0, { message: `${label} cannot be negative.` })
+    .max(TIMING_MAX_HOURS, { message: `${label} must be ${TIMING_MAX_HOURS} hours or fewer.` })
+    .transform((hours): string => `${String(hours)} hours`);
+
+const optionalHours = (label: string) =>
+  z
+    .union([
+      z.literal(''),
+      z.coerce
+        .number()
+        .min(0, { message: `${label} cannot be negative.` })
+        .max(TIMING_MAX_HOURS, { message: `${label} must be ${TIMING_MAX_HOURS} hours or fewer.` }),
+    ])
+    .transform((hours): string | null => (hours === '' ? null : `${String(hours)} hours`));
+
+const matchTimingDefaults = {
+  default_signup_closes_before: requiredHours('Signup close'),
+  default_cancellation_cutoff_before: requiredHours('Cancellation cutoff'),
+  default_priority_window: optionalHours('Priority window'),
+  default_roster_publish_before: optionalHours('Roster publish target'),
+};
+
+/**
+ * Turns a PostgreSQL interval back into whole hours for a form field.
+ *
+ * `null` becomes `''`, which is what an empty optional input looks like, so a
+ * round trip through the settings form preserves "not used" rather than
+ * quietly becoming zero.
+ */
+export function intervalToHoursField(interval: string | null): string {
+  if (interval === null) return '';
+  const days = /(\d+)\s+day/.exec(interval);
+  const clock = /(\d+):(\d{2}):(\d{2})/.exec(interval);
+  if (days === null && clock === null) return '';
+  const total =
+    (days === null ? 0 : Number(days[1]) * 24) +
+    (clock === null ? 0 : Number(clock[1]) + Number(clock[2]) / 60);
+  return String(Math.round(total));
+}
+
 export const SLUG_PATTERN = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 
 export const leagueSlugSchema = trimmed()
@@ -106,6 +175,7 @@ const baseLeagueFields = {
   typical_schedule: optionalText(160),
   gender_field_enabled: z.boolean(),
   goalkeeper_field_enabled: z.boolean(),
+  ...matchTimingDefaults,
 };
 
 /** Mirrors `leagues_default_min_players_range`. */

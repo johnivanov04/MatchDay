@@ -13,7 +13,7 @@ import {
   publishMatchAction,
   saveMatchTemplateAction,
 } from '@/server/actions/matches';
-import type { MatchTemplateRow } from '@/types/database';
+import type { LeagueRow, MatchTemplateRow } from '@/types/database';
 
 const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
@@ -30,13 +30,32 @@ function intervalToHours(interval: string | null): string {
   return '';
 }
 
+/**
+ * A template's timing starts from the league's defaults.
+ *
+ * A new template is a *variation* on how this league runs matches, so starting
+ * it from the league's own policy is both less typing and a better mental
+ * model than starting it from two constants nobody chose. Resolved at the
+ * object level for the same reason the create-match form is: once saved, a
+ * template owns its values outright, including its nulls, and later changes to
+ * the league defaults must not reach back into it.
+ */
 export function MatchTemplateForm({
   leagueId,
+  league,
   template,
 }: {
   leagueId: string;
+  league: LeagueRow;
   template?: MatchTemplateRow;
 }) {
+  const timing = template ?? {
+    signup_closes_before: league.default_signup_closes_before,
+    cancellation_cutoff_before: league.default_cancellation_cutoff_before,
+    priority_window: league.default_priority_window,
+    roster_publish_before: league.default_roster_publish_before,
+  };
+
   const [state, submit, pending] = useActionState(saveMatchTemplateAction, null);
   const fieldError = (name: string): string | undefined =>
     state?.ok === false ? state.fieldErrors[name] : undefined;
@@ -210,7 +229,7 @@ export function MatchTemplateForm({
             min={0}
             max={720}
             required
-            defaultValue={intervalToHours(template?.signup_closes_before ?? null) || '2'}
+            defaultValue={intervalToHours(timing.signup_closes_before)}
             className={inputClassName}
           />
         </Field>
@@ -222,7 +241,7 @@ export function MatchTemplateForm({
             min={0}
             max={720}
             required
-            defaultValue={intervalToHours(template?.cancellation_cutoff_before ?? null) || '24'}
+            defaultValue={intervalToHours(timing.cancellation_cutoff_before)}
             className={inputClassName}
           />
         </Field>
@@ -233,7 +252,7 @@ export function MatchTemplateForm({
             type="number"
             min={0}
             max={720}
-            defaultValue={intervalToHours(template?.priority_window ?? null)}
+            defaultValue={intervalToHours(timing.priority_window)}
             className={inputClassName}
           />
         </Field>
@@ -244,7 +263,7 @@ export function MatchTemplateForm({
             type="number"
             min={0}
             max={720}
-            defaultValue={intervalToHours(template?.roster_publish_before ?? null)}
+            defaultValue={intervalToHours(timing.roster_publish_before)}
             className={inputClassName}
           />
         </Field>

@@ -25,6 +25,13 @@ const VALID_LEAGUE = {
   typical_schedule: '',
   gender_field_enabled: false,
   goalkeeper_field_enabled: false,
+  // Match timing, as hours from the form. The two required ones carry the
+  // values a new league is shown; the optional two are blank, which is how a
+  // league says it does not use them.
+  default_signup_closes_before: '2',
+  default_cancellation_cutoff_before: '24',
+  default_priority_window: '',
+  default_roster_publish_before: '',
 };
 
 describe('createLeagueSchema', () => {
@@ -211,5 +218,75 @@ describe('memberEmailSchema', () => {
 
   it('rejects a malformed address', () => {
     expect(memberEmailSchema.safeParse('not-an-email').success).toBe(false);
+  });
+});
+
+describe('match timing defaults', () => {
+  it('turns hours into interval literals for the database', () => {
+    const result = createLeagueSchema.parse({
+      ...VALID_LEAGUE,
+      default_signup_closes_before: '12',
+      default_cancellation_cutoff_before: '30',
+    });
+
+    expect(result.default_signup_closes_before).toBe('12 hours');
+    expect(result.default_cancellation_cutoff_before).toBe('30 hours');
+  });
+
+  it('keeps a blank optional field as null rather than zero', () => {
+    // The distinction the whole feature turns on: "this league has no priority
+    // window" is not "a window of zero length". `z.coerce.number()` would turn
+    // `''` into `0`, which is why the empty-string branch is matched first.
+    const result = createLeagueSchema.parse({
+      ...VALID_LEAGUE,
+      default_priority_window: '',
+      default_roster_publish_before: '',
+    });
+
+    expect(result.default_priority_window).toBeNull();
+    expect(result.default_roster_publish_before).toBeNull();
+  });
+
+  it('keeps an explicit zero as zero', () => {
+    const result = createLeagueSchema.parse({
+      ...VALID_LEAGUE,
+      default_priority_window: '0',
+      default_signup_closes_before: '0',
+    });
+
+    expect(result.default_priority_window).toBe('0 hours');
+    expect(result.default_signup_closes_before).toBe('0 hours');
+  });
+
+  it.each([
+    ['default_signup_closes_before', '-1'],
+    ['default_cancellation_cutoff_before', '-1'],
+    ['default_signup_closes_before', '721'],
+    ['default_cancellation_cutoff_before', '721'],
+    ['default_priority_window', '721'],
+    ['default_roster_publish_before', '-5'],
+  ])('rejects %s = %s, mirroring the CHECK constraint', (field, value) => {
+    const result = createLeagueSchema.safeParse({ ...VALID_LEAGUE, [field]: value });
+    expect(result.success).toBe(false);
+  });
+
+  it('accepts exactly 720 hours', () => {
+    const result = createLeagueSchema.safeParse({
+      ...VALID_LEAGUE,
+      default_signup_closes_before: '720',
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('applies the same rules to the settings schema', () => {
+    const { slug: _slug, ...withoutSlug } = VALID_LEAGUE;
+    const result = updateLeagueSettingsSchema.parse({
+      ...withoutSlug,
+      default_signup_closes_before: '6',
+      default_priority_window: '',
+    });
+
+    expect(result.default_signup_closes_before).toBe('6 hours');
+    expect(result.default_priority_window).toBeNull();
   });
 });

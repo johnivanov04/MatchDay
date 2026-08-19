@@ -44,6 +44,14 @@ function readLeagueFields(formData: FormData) {
     typical_schedule: formData.get('typical_schedule') ?? '',
     gender_field_enabled: readCheckbox(formData, 'gender_field_enabled'),
     goalkeeper_field_enabled: readCheckbox(formData, 'goalkeeper_field_enabled'),
+    // Hours from the form; the schema turns them into interval literals. The
+    // two required ones fall back to the same values the columns default to,
+    // so a form posted without them behaves exactly as it did before these
+    // fields existed.
+    default_signup_closes_before: formData.get('default_signup_closes_before') ?? '2',
+    default_cancellation_cutoff_before: formData.get('default_cancellation_cutoff_before') ?? '24',
+    default_priority_window: formData.get('default_priority_window') ?? '',
+    default_roster_publish_before: formData.get('default_roster_publish_before') ?? '',
   };
 }
 
@@ -93,6 +101,10 @@ export async function createLeagueAction(
       p_typical_schedule: parsed.data.typical_schedule,
       p_gender_field_enabled: parsed.data.gender_field_enabled,
       p_goalkeeper_field_enabled: parsed.data.goalkeeper_field_enabled,
+      p_default_signup_closes_before: parsed.data.default_signup_closes_before,
+      p_default_cancellation_cutoff_before: parsed.data.default_cancellation_cutoff_before,
+      p_default_priority_window: parsed.data.default_priority_window,
+      p_default_roster_publish_before: parsed.data.default_roster_publish_before,
     });
 
     if (error !== null) {
