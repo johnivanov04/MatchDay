@@ -37,6 +37,10 @@ const NOTICE_MESSAGES: Record<DashboardNotice, string> = {
     'That page is only available to the league administrator.',
   [DASHBOARD_NOTICES.notLeagueMember]:
     'That page is only available to active members of that league.',
+  // Says what was kept as well as what ended: the fear somebody has at this
+  // moment is that they have just deleted their own record of playing.
+  [DASHBOARD_NOTICES.leftLeague]:
+    'You have left that league. Your past match and attendance history was not deleted.',
 };
 
 /**

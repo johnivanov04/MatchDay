@@ -213,6 +213,63 @@ export async function updateMembershipStatusAction(
 }
 
 /**
+ * Ends the caller's own membership of a league.
+ *
+ * ── WHAT IT SENDS, AND WHAT IT DELIBERATELY DOES NOT ───────────────────────
+ *
+ * A league id. That is the entire payload. Every other membership action here
+ * names a membership row, because an administrator is acting on somebody else;
+ * this one is the caller acting on themselves, so `leave_league()` resolves the
+ * membership from `auth.uid()` and the league. There is no membership id and no
+ * user id in the form for anybody to substitute — a forged league id can only
+ * name a league the caller does not belong to, which the database refuses.
+ *
+ * The two deliberate taps live in the sheet, not here. This action is the
+ * second of them; it does not carry a confirmation token, because a token the
+ * client always sends proves nothing about intent.
+ *
+ * ── ON SUCCESS THIS NAVIGATES AWAY, AND MUST ───────────────────────────────
+ *
+ * The same reasoning as `transferAdministrationAction`: the moment the
+ * transaction commits the caller may be standing on a league route they are no
+ * longer entitled to — the sheet opens from the app shell, so this can be
+ * invoked from anywhere. `revalidatePath` alone would re-render that route
+ * inside the action's own response, where its guard would fail and surface as
+ * an error even though leaving had succeeded. The destination is a constant:
+ * nothing about where to go next comes from the request.
+ *
+ * `revalidatePath` runs first so the dashboard renders from fresh membership
+ * data, and both sit outside the try/catch because `redirect()` signals by
+ * throwing.
+ */
+export async function leaveLeagueAction(
+  _previous: ActionResult<undefined> | null,
+  formData: FormData,
+): Promise<ActionResult<undefined>> {
+  try {
+    await requireSessionUser();
+    const leagueId = z.uuid().parse(formData.get('league_id') ?? '');
+
+    const supabase = await createSupabaseServerClient();
+    const { error } = await supabase.rpc('leave_league', { p_league_id: leagueId });
+
+    if (error !== null) {
+      // `ADMIN_TRANSFER_INVALID` reaches the sheet as "That administration
+      // transfer is not valid", which is true but unhelpful here. The
+      // administrator case has its own copy in the menu and never renders a
+      // Leave control, so this is the belt to that braces; the raw PostgreSQL
+      // message is discarded either way.
+      throw domainErrorFromDatabase(error);
+    }
+  } catch (error: unknown) {
+    return actionFailure(error);
+  }
+
+  revalidatePath('/', 'layout');
+  redirect(dashboardPathWithNotice(DASHBOARD_NOTICES.leftLeague));
+}
+
+/**
  * Hands administration to another active player, atomically.
  *
  * One RPC is one statement is one transaction. The database demotes the caller

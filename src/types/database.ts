@@ -253,7 +253,11 @@ export type NotificationType =
   // Phase 7, completing 02 §14. One type, not two: a correction is the same
   // fact about the same match arriving again, and the revision in the
   // idempotency key is what distinguishes it from the first recording.
-  | 'attendance_recorded';
+  | 'attendance_recorded'
+  // A player ending their own membership. Administrator-facing and in-app only:
+  // it is deliberately absent from `PUSH_ELIGIBLE_TYPES`, because somebody
+  // tidying up their leagues is not worth a lock-screen alert.
+  | 'member_left';
 
 export type PushDeliveryStatus =
   | 'pending'
@@ -1130,6 +1134,15 @@ export interface Database {
           p_reason?: string | null;
           p_suspended_until?: string | null;
         };
+        Returns: string;
+      };
+      /**
+       * The caller ends their own membership. A league id and nothing else:
+       * the membership is resolved from the session inside the function, so
+       * there is no id here for a client to substitute.
+       */
+      leave_league: {
+        Args: { p_league_id: string };
         Returns: string;
       };
 

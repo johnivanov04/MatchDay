@@ -1,0 +1,23 @@
+-- MatchDay — the notification type for a member leaving of their own accord.
+--
+-- Alone in its own migration for the same mechanical reason as every other
+-- notification-type migration in this directory: PostgreSQL allows
+-- `ALTER TYPE ... ADD VALUE` inside a transaction block, but the new value
+-- cannot be *used* until that transaction commits. `leave_league()` names
+-- 'member_left' in its body, so it has to live in the next file rather than
+-- this one — otherwise the migration fails with "unsafe use of new value of
+-- enum type".
+--
+-- WHAT IT IS FOR. An administrator selects from the people who are available,
+-- so somebody ceasing to be available is operational news, not housekeeping.
+-- `league_invitation_accepted` is the same shape from the other direction —
+-- one in-app notification to the one administrator, no fanout — and this
+-- follows it deliberately rather than inventing a second pattern.
+--
+-- WHAT IT IS NOT FOR. It is not push-eligible, and adding it here does not make
+-- it so: `PUSH_ELIGIBLE_TYPES` in `src/lib/push/payload.ts` is the authority on
+-- that, `member_left` is absent from it, and `leave_league()` writes an empty
+-- `delivery_metadata` to say the same thing twice. Nobody's phone should light
+-- up on a Sunday because a player tidied up their leagues.
+
+alter type public.notification_type add value if not exists 'member_left';
