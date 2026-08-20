@@ -5,7 +5,14 @@ import { DeleteAccount } from '@/components/delete-account';
 import { ProfileForm } from '@/components/profile-form';
 import { ButtonLink } from '@/components/ui/button';
 import { Card, Section } from '@/components/ui/card';
-import { BellIcon, ChevronRightIcon, LogOutIcon } from '@/components/ui/icon';
+import {
+  BellIcon,
+  ChevronRightIcon,
+  ClipboardIcon,
+  InfoIcon,
+  LogOutIcon,
+  ShieldIcon,
+} from '@/components/ui/icon';
 import { PageHeader } from '@/components/ui/page-header';
 import { requireOnboardedUser } from '@/lib/auth/page-guards';
 import { avatarImageUrl, avatarInitials, avatarLabel } from '@/lib/profile/avatar';
@@ -13,6 +20,35 @@ import { createSupabaseServerClient } from '@/lib/supabase/server';
 import type { AccountDeletionBlocker } from '@/types/database';
 
 export const metadata: Metadata = { title: 'Your profile' };
+
+/**
+ * The three public pages an App Store submission has to point at, and which
+ * Apple also requires to be reachable from inside the app.
+ *
+ * Declared as data so the Profile screen and the tests agree on one list — a
+ * link that quietly disappears from this card is exactly the kind of regression
+ * a submission gets rejected for.
+ */
+const LEGAL_LINKS = [
+  {
+    href: '/privacy',
+    label: 'Privacy Policy',
+    description: 'What we collect and what deletion removes',
+    icon: <ShieldIcon size={18} />,
+  },
+  {
+    href: '/terms',
+    label: 'Terms of Use',
+    description: 'The ground rules for using MatchDay',
+    icon: <ClipboardIcon size={18} />,
+  },
+  {
+    href: '/support',
+    label: 'Support',
+    description: 'Help with sign-in, leagues and matches',
+    icon: <InfoIcon size={18} />,
+  },
+] as const;
 
 /**
  * The account hub.
@@ -142,6 +178,45 @@ export default async function ProfilePage() {
       >
         <Card className="overflow-hidden p-0">
           <DeleteAccount blockers={blockers} />
+        </Card>
+      </Section>
+
+      {/* ── Legal and support ────────────────────────────────────────────────
+          Apple requires the privacy policy to be easily accessible from inside
+          the app, not only from the App Store listing. Last, because nobody
+          opens Profile looking for it — but present on the one screen everybody
+          knows how to find, and never more than two taps away.
+
+          Plain anchors rather than `Link`: these three live outside the
+          authenticated route group and have no session to preserve, so a client
+          transition buys nothing. It also means they keep working from a page
+          rendered for somebody whose account is on its way out. */}
+      <Section title="About">
+        <Card className="overflow-hidden p-0">
+          <ul className="divide-hairline flex flex-col">
+            {LEGAL_LINKS.map((link) => (
+              <li key={link.href}>
+                <a
+                  href={link.href}
+                  className="press flex min-h-control w-full items-center gap-3 px-4 py-3.5 text-left hover:bg-[var(--surface-hover)]"
+                >
+                  <span
+                    aria-hidden="true"
+                    className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--radius-md)] bg-[var(--surface-sunken)] text-muted"
+                  >
+                    {link.icon}
+                  </span>
+                  <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                    <span className="truncate text-sm font-semibold">{link.label}</span>
+                    <span className="truncate text-xs font-normal text-muted">
+                      {link.description}
+                    </span>
+                  </span>
+                  <ChevronRightIcon size={16} className="text-muted" />
+                </a>
+              </li>
+            ))}
+          </ul>
         </Card>
       </Section>
     </>
