@@ -88,7 +88,7 @@ git-ignored.
 | `SUPABASE_SERVICE_ROLE_KEY` | **server only** | Bypasses RLS. Never `NEXT_PUBLIC_`, never in a client component |
 | `VAPID_PRIVATE_KEY` | **server only** | Signs Web Push. `npx web-push generate-vapid-keys` |
 | `VAPID_SUBJECT` | **server only** | `mailto:` contact required by the Web Push protocol |
-| `NEXT_PUBLIC_SUPPORT_EMAIL` | browser + server | Optional. Where a blocked user reaches a human; shown in the footer and error boundaries |
+| `NEXT_PUBLIC_SUPPORT_EMAIL` | browser + server | Where a blocked user reaches a human. Shown in the footer, the error boundaries, and on the public `/support` and `/privacy` pages. Optional in development; **required for an App Store submission**, whose Support URL must reach a real address |
 | `CRON_SECRET` | **server only** | Shared secret the scheduler presents to `/api/cron/reminders`. Without it reminders never go out |
 | `TEST_DATABASE_URL` | tests only | Optional; see [Testing](#testing) |
 
