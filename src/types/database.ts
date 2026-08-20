@@ -40,6 +40,20 @@ export type ProfileRow = {
   profile_photo_path: string | null;
   created_at: string;
   updated_at: string;
+  /**
+   * When the account holder began deleting their account.
+   *
+   * Two columns rather than one, because deletion spans Postgres, Storage and
+   * GoTrue and there is a real middle state. From this instant the account can
+   * no longer participate in MatchDay — see `is_live_profile()` — which is what
+   * makes the avatar cleanup that follows unable to race an upload.
+   */
+  deletion_started_at: string | null;
+  /**
+   * When the personal-data scrub committed. A promise that this row holds
+   * nothing personal; never a synonym for "deletion requested".
+   */
+  deleted_at: string | null;
 };
 
 /**
@@ -103,6 +117,15 @@ export type LeagueRow = {
   default_cancellation_cutoff_before: string;
   default_priority_window: string | null;
   default_roster_publish_before: string | null;
+  /**
+   * When the league was permanently closed, or null while it is open.
+   *
+   * A closed league accepts no new members, matches or administration changes
+   * and is absent from discovery, but keeps every historical match, roster and
+   * attendance record. Closure exists so that an administrator with nobody to
+   * transfer to still has a way to delete their account.
+   */
+  closed_at: string | null;
   created_by: string | null;
   created_at: string;
   updated_at: string;
@@ -257,7 +280,10 @@ export type NotificationType =
   // A player ending their own membership. Administrator-facing and in-app only:
   // it is deliberately absent from `PUSH_ELIGIBLE_TYPES`, because somebody
   // tidying up their leagues is not worth a lock-screen alert.
-  | 'member_left';
+  | 'member_left'
+  // A league permanently closed. Administrator-initiated, in-app only, and one
+  // per remaining active member.
+  | 'league_closed';
 
 export type PushDeliveryStatus =
   | 'pending'
@@ -421,12 +447,53 @@ export type SignupOutcome = {
  * player type. A legacy address points at a host nobody here controls, and no
  * projection returns one — not even for the caller's own row.
  */
+/**
+ * An open league the caller administers, and therefore cannot delete their
+ * account while it stands.
+ */
+export type AccountDeletionBlocker = {
+  league_id: string;
+  league_name: string;
+  league_slug: string;
+  /**
+   * Whether an active player exists to receive administration.
+   *
+   * False means "transfer administration" is advice this person cannot follow,
+   * and closing the league is their only route. The UI must not offer an
+   * impossible instruction.
+   */
+  has_transfer_target: boolean;
+};
+
+/** An account whose deletion began and is not demonstrably finished. */
+export type AccountAwaitingDeletion = {
+  profile_id: string;
+  deletion_started_at: string;
+  deleted_at: string | null;
+  /**
+   * Whether the Supabase Auth row still exists.
+   *
+   * An account whose Auth row survives is NOT deleted however anonymous its
+   * profile has become — that row still holds the real email address.
+   */
+  auth_user_exists: boolean;
+};
+
 export type ConfirmedRosterEntry = {
   membership_id: string;
   first_name: string;
   last_name: string;
   is_self: boolean;
   profile_photo_path: string | null;
+  /**
+   * Whether this person is deleting or has deleted their MatchDay account.
+   *
+   * Derived in SQL from the profile's lifecycle columns — never from the
+   * scrubbed name, which is a value the tombstone happens to use because the
+   * column is NOT NULL. The projection has already replaced their name and
+   * photo, so this flag exists to choose the rendering, not to do the hiding.
+   */
+  is_former_member: boolean;
 };
 
 export type MatchSignupCounts = {
@@ -468,6 +535,15 @@ export type RosterAdminEntry = {
   selected_at: string | null;
   override_reason: string | null;
   profile_photo_path: string | null;
+  /**
+   * Whether this person is deleting or has deleted their MatchDay account.
+   *
+   * Derived in SQL from the profile's lifecycle columns — never from the
+   * scrubbed name, which is a value the tombstone happens to use because the
+   * column is NOT NULL. The projection has already replaced their name and
+   * photo, so this flag exists to choose the rendering, not to do the hiding.
+   */
+  is_former_member: boolean;
 };
 
 export type AddableMember = {
@@ -541,6 +617,15 @@ export type PublishedTeamEntry = {
   last_name: string;
   is_self: boolean;
   profile_photo_path: string | null;
+  /**
+   * Whether this person is deleting or has deleted their MatchDay account.
+   *
+   * Derived in SQL from the profile's lifecycle columns — never from the
+   * scrubbed name, which is a value the tombstone happens to use because the
+   * column is NOT NULL. The projection has already replaced their name and
+   * photo, so this flag exists to choose the rendering, not to do the hiding.
+   */
+  is_former_member: boolean;
 };
 
 // ── Phase 7 ────────────────────────────────────────────────────────────────
@@ -579,6 +664,15 @@ export type AttendanceWorkspaceEntry = {
   revision: number | null;
   recorded_at: string | null;
   profile_photo_path: string | null;
+  /**
+   * Whether this person is deleting or has deleted their MatchDay account.
+   *
+   * Derived in SQL from the profile's lifecycle columns — never from the
+   * scrubbed name, which is a value the tombstone happens to use because the
+   * column is NOT NULL. The projection has already replaced their name and
+   * photo, so this flag exists to choose the rendering, not to do the hiding.
+   */
+  is_former_member: boolean;
 };
 
 /** A player's own outcome for one match. No note, and no way to ask about anybody else. */
@@ -1142,6 +1236,42 @@ export interface Database {
        * there is no id here for a client to substitute.
        */
       leave_league: {
+        Args: { p_league_id: string };
+        Returns: string;
+      };
+
+      /**
+       * Account deletion. None of these takes a user id: the account is always
+       * the caller's own, resolved from `auth.uid()` inside the function.
+       */
+      my_account_deletion_blockers: {
+        Args: Record<string, never>;
+        Returns: AccountDeletionBlocker[];
+      };
+      begin_my_account_deletion: {
+        Args: Record<string, never>;
+        /** The moment deletion began — the original one on a repeat call. */
+        Returns: string;
+      };
+      finalize_my_account_deletion: {
+        Args: Record<string, never>;
+        Returns: string;
+      };
+      /**
+       * The reconciler's variant, addressed by profile id and granted to
+       * `service_role` alone. It refuses any profile that has not already
+       * started deleting, so it can never be aimed at a live account.
+       */
+      finalize_account_deletion: {
+        Args: { p_profile_id: string };
+        Returns: string;
+      };
+      accounts_awaiting_deletion: {
+        Args: { p_limit?: number };
+        Returns: AccountAwaitingDeletion[];
+      };
+      /** Permanently closes a league the caller administers. Idempotent. */
+      close_league: {
         Args: { p_league_id: string };
         Returns: string;
       };

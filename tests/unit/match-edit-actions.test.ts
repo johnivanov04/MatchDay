@@ -40,6 +40,11 @@ vi.mock('@/lib/auth/authorization', () => ({
   getMyMemberships: vi.fn(),
 }));
 vi.mock('@/lib/auth/session', () => ({
+  // The real implementation rather than a stub: it is a pure function of the
+  // profile, and a mock that always answered false would hide the very
+  // redirect it gates.
+  isProfileDeleting: (profile: { deletion_started_at?: string | null; deleted_at?: string | null }) =>
+    (profile.deletion_started_at ?? null) !== null || (profile.deleted_at ?? null) !== null,
   requireSessionUser: vi.fn(async () => ({ id: 'user-1' })),
   getSessionUser: vi.fn(),
   getCurrentProfile: vi.fn(),

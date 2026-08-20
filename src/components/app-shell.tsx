@@ -84,6 +84,10 @@ export function AppShell({
     ...entriesOf(leagueContext.switcher.active, 'active'),
     ...entriesOf(leagueContext.switcher.pending, 'pending'),
     ...entriesOf(leagueContext.switcher.suspended, 'suspended'),
+    // Last, and never switchable. A closed league is somewhere they used to
+    // play; listing it keeps their history findable without implying anything
+    // can still happen there.
+    ...entriesOf(leagueContext.switcher.closed, 'closed'),
   ];
 
   const tabs: NavTab[] = [

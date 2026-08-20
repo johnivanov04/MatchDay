@@ -881,6 +881,7 @@ describe('teams', () => {
       expect(fields.columns).toEqual([
         'display_order',
         'first_name',
+        'is_former_member',
         'is_self',
         'last_name',
         'membership_id',

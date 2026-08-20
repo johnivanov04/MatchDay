@@ -1,7 +1,12 @@
 import 'server-only';
 
 import { redirect } from 'next/navigation';
-import { getCurrentProfile, getSessionUser, type SessionUser } from '@/lib/auth/session';
+import {
+  getCurrentProfile,
+  getSessionUser,
+  isProfileDeleting,
+  type SessionUser,
+} from '@/lib/auth/session';
 import { findMyLeagueBySlug } from '@/lib/leagues/league-admin';
 import type { LeagueMembershipRow, LeagueRow, ProfileRow } from '@/types/database';
 
@@ -30,6 +35,14 @@ import type { LeagueMembershipRow, LeagueRow, ProfileRow } from '@/types/databas
 
 export const SIGN_IN_PATH = '/sign-in';
 export const ONBOARDING_PATH = '/onboarding';
+/**
+ * Where an account whose deletion has begun goes instead of MatchDay.
+ *
+ * Its own route rather than a banner on the dashboard, because there is nothing
+ * on the dashboard such a person may do: every league surface refuses them, and
+ * a page full of controls that all fail is worse than a page that explains why.
+ */
+export const ACCOUNT_DELETED_PATH = '/account/deleted';
 export const DASHBOARD_PATH = '/dashboard';
 
 /**
@@ -135,6 +148,22 @@ export async function requireOnboardedUser(): Promise<OnboardedUser> {
   const profile = await getCurrentProfile();
   if (profile === null) {
     redirect(ONBOARDING_PATH);
+  }
+
+  // THREE STATES, THREE DESTINATIONS, and conflating any two of them is a bug
+  // somebody would have to debug from a support email:
+  //
+  //     no profile row          -> onboarding
+  //     profile, live           -> MatchDay
+  //     profile, deleting/gone  -> the deletion-status screen
+  //
+  // This is why `profiles_select_self` is deliberately NOT gated on liveness in
+  // the database. If a departing account could not read its own row,
+  // `getCurrentProfile()` would return null, the branch above would fire, and
+  // somebody halfway through deleting their account would be invited to create
+  // a new profile — which the database would then refuse.
+  if (isProfileDeleting(profile)) {
+    redirect(ACCOUNT_DELETED_PATH);
   }
 
   return { user, profile };

@@ -4,6 +4,10 @@
     {
       "path": "/api/cron/reminders",
       "schedule": "*/10 * * * *"
+    },
+    {
+      "path": "/api/cron/account-deletion",
+      "schedule": "17 * * * *"
     }
   ]
 }

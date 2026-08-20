@@ -370,6 +370,7 @@ describe('roster publication', () => {
       // user agent to whoever runs it.
       expect(rows).toEqual([
         'first_name',
+        'is_former_member',
         'is_self',
         'last_name',
         'membership_id',

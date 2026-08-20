@@ -13,7 +13,10 @@ function entry(
   role: LeagueMembershipRow['role'] = 'player',
 ): LeagueMembershipWithLeague {
   const id = `league-${name.toLowerCase().replaceAll(' ', '-')}`;
-  const league = { id, name } as LeagueRow;
+  // `closed_at` is explicit: a closed league is excluded from the active set
+  // and from the fallback, so leaving it undefined would quietly test a
+  // different rule from the one production runs.
+  const league = { id, name, closed_at: null } as LeagueRow;
   const membership = { id: `m-${id}`, league_id: id, status, role } as LeagueMembershipRow;
   return { league, membership };
 }
@@ -50,7 +53,7 @@ describe('buildLeagueSwitcherModel', () => {
 
   it('handles a user with no memberships', () => {
     const model = buildLeagueSwitcherModel([]);
-    expect(model).toEqual({ active: [], pending: [], suspended: [] });
+    expect(model).toEqual({ active: [], pending: [], suspended: [], closed: [] });
   });
 });
 
@@ -107,5 +110,55 @@ describe('shouldShowLeagueSwitcher', () => {
   it('shows the control once a second relationship exists, even a pending one', () => {
     const model = buildLeagueSwitcherModel([entry('Alpha', 'active'), entry('Bravo', 'pending')]);
     expect(shouldShowLeagueSwitcher(model)).toBe(true);
+  });
+});
+
+/** The same, in a league that has been permanently closed. */
+function closedEntry(name: string, status: MembershipStatus = 'active'): LeagueMembershipWithLeague {
+  const built = entry(name, status);
+  return {
+    ...built,
+    league: { ...built.league, closed_at: '2026-08-23T10:00:00Z' } as LeagueRow,
+  };
+}
+
+describe('closed leagues', () => {
+  it('are grouped apart from the leagues somebody can still play in', () => {
+    // The membership stays `active` on purpose — that is what keeps historical
+    // matches readable — so the grouping is a question about the league.
+    const model = buildLeagueSwitcherModel([entry('Alpha', 'active'), closedEntry('Zulu')]);
+
+    expect(model.active.map((e) => e.league.name)).toEqual(['Alpha']);
+    expect(model.closed.map((e) => e.league.name)).toEqual(['Zulu']);
+  });
+
+  it('leave out a membership that was removed as well', () => {
+    expect(buildLeagueSwitcherModel([closedEntry('Zulu', 'removed')]).closed).toEqual([]);
+  });
+
+  it('are never chosen as the working context', () => {
+    // Nothing can be done in one — no match created, nobody joining — so making
+    // it active would hand somebody a screen of controls that all refuse.
+    expect(resolveActiveMembership([closedEntry('Zulu')], null)).toBeNull();
+  });
+
+  it('are not resurrected by a stored preference', () => {
+    const closed = closedEntry('Zulu');
+    expect(resolveActiveMembership([closed], closed.league.id)).toBeNull();
+  });
+
+  it('yield to an open league in the fallback', () => {
+    const open = entry('Alpha', 'active');
+    const closed = closedEntry('Zulu');
+
+    expect(resolveActiveMembership([closed, open], closed.league.id)?.league.name).toBe('Alpha');
+  });
+
+  it('still count towards showing the switcher at all', () => {
+    // Somebody with one open and one closed league needs a way to reach the
+    // closed one's history.
+    expect(
+      shouldShowLeagueSwitcher(buildLeagueSwitcherModel([entry('Alpha', 'active'), closedEntry('Zulu')])),
+    ).toBe(true);
   });
 });

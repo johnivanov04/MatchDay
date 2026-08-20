@@ -194,6 +194,7 @@ describe('player avatar projections', () => {
     it('returns exactly five columns, and none of them is the legacy url', async () => {
       expect(await columnsFor(SQL, members[1]!.user)).toEqual([
         'first_name',
+        'is_former_member',
         'is_self',
         'last_name',
         'membership_id',
@@ -279,6 +280,7 @@ describe('player avatar projections', () => {
         'first_name',
         'gender',
         'goalkeeper_willing',
+        'is_former_member',
         'last_name',
         'membership_id',
         'membership_status',
@@ -487,6 +489,7 @@ describe('player avatar projections', () => {
       expect(await columnsFor(SQL, members[1]!.user)).toEqual([
         'display_order',
         'first_name',
+        'is_former_member',
         'is_self',
         'last_name',
         'membership_id',
@@ -546,6 +549,7 @@ describe('player avatar projections', () => {
       expect(await columnsFor(SQL, admin)).toEqual([
         'canceled_at',
         'first_name',
+        'is_former_member',
         'last_name',
         'membership_id',
         'note',

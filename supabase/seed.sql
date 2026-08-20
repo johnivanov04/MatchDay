@@ -37,8 +37,16 @@ end;
 $$;
 
 -- ── Idempotency ────────────────────────────────────────────────────────────
--- Remove any previous run of this seed. Cascades clear memberships, notes,
--- audit events, app state and profiles.
+-- Remove any previous run of this seed. Cascades from `leagues` clear
+-- memberships, notes, audit events and app state.
+--
+-- PROFILES ARE DELETED EXPLICITLY, and must be. Until
+-- `20260823100000_profile_identity_decoupling.sql` they hung off
+-- `auth.users` with ON DELETE CASCADE, so removing the auth users below took
+-- them with it. That foreign key is gone — a tombstoned profile has to be able
+-- to outlive its Auth row, which is what keeps completed matches intact when
+-- somebody deletes their account — so nothing removes them on our behalf any
+-- more, and a second run collided on `profiles_pkey`.
 delete from public.leagues
  where id in (
    '22222222-2222-4222-8222-000000000001',
@@ -46,6 +54,18 @@ delete from public.leagues
  );
 
 delete from auth.users
+ where id in (
+   '11111111-1111-4111-8111-000000000001',
+   '11111111-1111-4111-8111-000000000002',
+   '11111111-1111-4111-8111-000000000003',
+   '11111111-1111-4111-8111-000000000004',
+   '11111111-1111-4111-8111-000000000005',
+   '11111111-1111-4111-8111-000000000006',
+   '11111111-1111-4111-8111-000000000007',
+   '11111111-1111-4111-8111-000000000008'
+ );
+
+delete from public.profiles
  where id in (
    '11111111-1111-4111-8111-000000000001',
    '11111111-1111-4111-8111-000000000002',

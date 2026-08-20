@@ -1,0 +1,21 @@
+-- MatchDay — the notification type for a league being closed.
+--
+-- Alone in its own migration for the mechanical reason every notification-type
+-- migration in this directory is: PostgreSQL allows `ALTER TYPE ... ADD VALUE`
+-- inside a transaction block, but the new value cannot be *used* until that
+-- transaction commits. `close_league()` names 'league_closed' in its body, so it
+-- lives in the next file — otherwise the migration fails with "unsafe use of
+-- new value of enum type".
+--
+-- WHAT IT IS FOR. A league closing is the end of a thing people were part of.
+-- The individual match cancellations already tell them what they have lost this
+-- Thursday; this tells them why, once, so that a silently empty fixture list is
+-- not the only signal.
+--
+-- NOT PUSH-ELIGIBLE, and adding it here does not make it so: `PUSH_ELIGIBLE_TYPES`
+-- in `src/lib/push/payload.ts` is the authority, `league_closed` is absent from
+-- it, and `close_league()` writes an empty `delivery_metadata` to say the same
+-- thing twice. The per-match cancellations that accompany a closure are already
+-- push-eligible and are the time-critical half of the news.
+
+alter type public.notification_type add value if not exists 'league_closed';
