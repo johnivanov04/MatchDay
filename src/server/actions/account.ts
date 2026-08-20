@@ -196,17 +196,36 @@ export async function deleteAccountAction(
     // proof of ownership rather than an application check that could be wrong.
     await deleteAvatarObjects(supabase, user.id);
 
-    await finalizeAndDeleteAuth(async () => {
+    const outcome = await finalizeAndDeleteAuth(async () => {
       const { error } = await supabase.rpc('finalize_my_account_deletion');
       if (error !== null) {
         throw domainErrorFromDatabase(error);
       }
     }, user.id);
 
-    // Whatever happened to the Auth row, the local cookies must go: the account
-    // is unusable either way, and leaving a session behind would put somebody
-    // on a status page they cannot escape by signing out.
-    await supabase.auth.signOut();
+    // ── SIGNING OUT IS CONDITIONAL, AND HAS TO BE ───────────────────────────
+    //
+    // This used to sign out unconditionally, on the reasoning that the account
+    // is unusable either way. It is — but that is not the only thing at stake.
+    //
+    // When the Auth row survives, `auth.users` still holds the person's real
+    // email address, so the deletion is genuinely unfinished. Finishing it from
+    // the interface means pressing "Finish deleting account" on the status
+    // page, and `retryAccountDeletionAction` resolves the account from the
+    // session. Signing out therefore destroyed the one thing that made the
+    // retry possible, and left them looking at "Your account was deleted" —
+    // which was not true — with no way to act on it. Only the cron reconciler
+    // could have finished it, and if the service role is what failed, the
+    // reconciler is unable to run either.
+    //
+    // Keeping the session is not a hole. The profile is already tombstoned, so
+    // `is_live_profile()` is false and every surface in the product refuses it;
+    // the only page reachable is the deletion-status screen. That is the state
+    // `a deletion-pending session can reach only the deletion-status screen`
+    // already pins.
+    if (outcome === 'complete') {
+      await supabase.auth.signOut();
+    }
   } catch (error: unknown) {
     return actionFailure(error);
   }
@@ -241,14 +260,18 @@ export async function retryAccountDeletionAction(
     // far the original attempt got.
     await deleteAvatarObjects(supabase, user.id);
 
-    await finalizeAndDeleteAuth(async () => {
+    const outcome = await finalizeAndDeleteAuth(async () => {
       const { error } = await supabase.rpc('finalize_my_account_deletion');
       if (error !== null) {
         throw domainErrorFromDatabase(error);
       }
     }, user.id);
 
-    await supabase.auth.signOut();
+    // As above: a retry that still could not remove the Auth identity must
+    // leave the session in place, or the next retry has nothing to resolve.
+    if (outcome === 'complete') {
+      await supabase.auth.signOut();
+    }
   } catch (error: unknown) {
     return actionFailure(error);
   }

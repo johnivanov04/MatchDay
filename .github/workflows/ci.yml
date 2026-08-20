@@ -257,6 +257,27 @@ jobs:
           NEXT_PUBLIC_SUPABASE_URL: ${{ env.E2E_SUPABASE_URL }}
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ env.E2E_SUPABASE_ANON_KEY }}
           NEXT_PUBLIC_SITE_URL: http://127.0.0.1:3100
+          # ── AND THE SERVER-SIDE KEY, WHICH THIS JOB USED NOT TO NEED ───────
+          #
+          # Playwright's `webServer` inherits this step's environment, so this
+          # is the Next.js server's configuration. Until account deletion the
+          # application never needed the service role at runtime: push dispatch
+          # is the only other consumer and it degrades to in-app-only without
+          # complaint, so its absence here was invisible.
+          #
+          # Deleting an `auth.users` row can only be done through the Auth Admin
+          # API, which is service-role-only. Without this the server logged
+          # `account_deletion.admin_client_unavailable` on every deletion, never
+          # contacted GoTrue, and left the Auth identity — and therefore the
+          # real email address — in place. Locally `.env.local` supplies it and
+          # `next start` picks it up, which is why the suite passed there and
+          # failed here.
+          #
+          # Same value the E2E fixtures already hold, from the stack this job
+          # started. Nothing new is exposed: it never reaches a browser, and
+          # `src/lib/supabase/admin.ts` refuses to construct a client outside the
+          # server.
+          SUPABASE_SERVICE_ROLE_KEY: ${{ env.E2E_SUPABASE_SERVICE_ROLE_KEY }}
         run: npm run test:e2e
 
       - name: Upload the Playwright report on failure
