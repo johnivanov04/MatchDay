@@ -24,7 +24,7 @@ import { BrandLockup } from '@/components/ui/brand';
  */
 export default function LegalLayout({ children }: { children: ReactNode }) {
   return (
-    <div className="mx-auto flex min-h-dvh w-full max-w-2xl flex-col px-5 py-8 sm:px-6 sm:py-12">
+    <div className="mx-auto flex min-h-dvh w-full max-w-2xl flex-col px-5 pb-8 pt-[max(2rem,env(safe-area-inset-top))] sm:px-6 sm:pb-12 sm:pt-[max(3rem,env(safe-area-inset-top))]">
       <header className="mb-8 flex items-center justify-between gap-4">
         {/* Home rather than the dashboard: a signed-out reader would be bounced
             to sign-in from there, and `/` already routes each visitor to

@@ -34,7 +34,7 @@ export default async function InvitePage({ params }: { params: Promise<{ token: 
   const usable = isPlausibleInviteToken(token);
 
   return (
-    <main id="main" className="mx-auto flex w-full max-w-md flex-col gap-6 px-5 py-12">
+    <main id="main" className="mx-auto flex w-full max-w-md flex-col gap-6 px-5 pb-12 pt-[max(3rem,env(safe-area-inset-top))]">
       <header className="flex flex-col gap-2">
         <p className="text-sm font-semibold uppercase tracking-wide text-pitch-600">MatchDay</p>
         <h1 className="text-2xl font-bold">You have been invited</h1>

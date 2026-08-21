@@ -10,6 +10,7 @@ import {
   P,
 } from '@/components/legal-prose';
 import { getSupportEmail } from '@/lib/env';
+import { isNativeIOSApp } from '@/lib/platform/native-server';
 
 export const metadata: Metadata = {
   title: 'Support',
@@ -32,8 +33,9 @@ export const metadata: Metadata = {
  * the in-app footer already uses, so there is one place to change it. When it
  * is unset the page still works and simply does not show a dead link.
  */
-export default function SupportPage() {
+export default async function SupportPage() {
   const supportEmail = getSupportEmail();
+  const isNativeApp = await isNativeIOSApp();
 
   return (
     <>
@@ -142,10 +144,23 @@ export default function SupportPage() {
             To also get alerts when MatchDay is closed, go to Profile → Phone notifications and turn
             them on for that device. Each device is separate.
           </Item>
-          <Item>
-            On iPhone and iPad, add MatchDay to your Home Screen first — Safari only offers
-            notifications to apps installed that way.
-          </Item>
+          {/* Web and home-screen PWA only.
+              Suppressed inside the iOS app, where "install this from Safari" is
+              both wrong and exactly the sentence an App Review rejection quotes
+              back at you. `/support` is a public page, so this is the one place
+              in the product where the signal has to be read per-request without
+              a session in play. */}
+          {isNativeApp ? (
+            <Item>
+              In the MatchDay iOS app, push notifications are coming in a future update. Everything
+              still arrives in your in-app inbox.
+            </Item>
+          ) : (
+            <Item>
+              On iPhone and iPad, add MatchDay to your Home Screen first — Safari only offers
+              notifications to apps installed that way.
+            </Item>
+          )}
           <Item>
             Not receiving them? Check that notifications are allowed for MatchDay in your device
             settings, then turn the device off and on again in Profile → Phone notifications.

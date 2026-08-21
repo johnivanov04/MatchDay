@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>MatchDay</title>
+    <link rel="stylesheet" href="offline.css" />
+  </head>
+  <body>
+    <!--
+      The only bundled screen in the application.
+
+      A Capacitor app that loads a remote origin shows a blank white webview
+      when the network is unreachable — no message, no retry, nothing that looks
+      like software. This is what `server.errorPath` points at instead.
+
+      Deliberately self-contained: no framework, no fonts, no images, no
+      network of any kind. Everything it needs has to already be on the device,
+      because the reason it is on screen is that nothing else could be fetched.
+    -->
+    <main>
+      <div class="mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="44" height="44" fill="none" stroke="currentColor"
+             stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="9" />
+          <path d="M12 3v4M12 17v4M3 12h4M17 12h4" />
+        </svg>
+      </div>
+
+      <h1>MatchDay can’t connect</h1>
+      <p>Check your internet connection and try again. Nothing has been lost — your leagues and matches are waiting.</p>
+
+      <button type="button" id="retry">Try again</button>
+      <p class="hint" id="hint" hidden>Still no connection.</p>
+    </main>
+
+    <script>
+      // `location.reload()` re-runs Capacitor's load of the remote origin. On
+      // success the app returns to MatchDay; on failure Capacitor brings this
+      // page back, so the button is safe to press repeatedly.
+      var button = document.getElementById('retry');
+      var hint = document.getElementById('hint');
+
+      button.addEventListener('click', function () {
+        button.disabled = true;
+        button.textContent = 'Connecting…';
+        hint.hidden = true;
+
+        // A short delay before reloading so a failure that returns instantly
+        // still reads as an attempt rather than as a button that did nothing.
+        window.setTimeout(function () {
+          window.location.reload();
+        }, 400);
+
+        // If the reload has not replaced this page, the attempt failed.
+        window.setTimeout(function () {
+          button.disabled = false;
+          button.textContent = 'Try again';
+          hint.hidden = false;
+        }, 6000);
+      });
+    </script>
+  </body>
+</html>

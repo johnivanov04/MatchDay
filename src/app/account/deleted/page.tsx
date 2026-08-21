@@ -63,7 +63,7 @@ function Shell({ children }: { children: React.ReactNode }) {
   return (
     <main
       id="main"
-      className="chalk-arc mx-auto flex min-h-dvh w-full max-w-md flex-col gap-6 px-6 py-10"
+      className="chalk-arc mx-auto flex min-h-dvh w-full max-w-md flex-col gap-6 px-6 pb-10 pt-[max(2.5rem,env(safe-area-inset-top))]"
     >
       <header className="animate-rise flex flex-col items-start gap-4">
         <BrandLockup size={34} />

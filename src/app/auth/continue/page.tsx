@@ -76,7 +76,7 @@ export default async function AuthContinuePage({
     return (
       <main
         id="main"
-        className="chalk-arc turf-stripes relative mx-auto flex min-h-dvh w-full max-w-md flex-col justify-center gap-6 px-6 py-12"
+        className="chalk-arc turf-stripes relative mx-auto flex min-h-dvh w-full max-w-md flex-col justify-center gap-6 px-6 pb-12 pt-[max(3rem,env(safe-area-inset-top))]"
       >
         <header className="animate-rise flex flex-col gap-2">
           <p className="text-sm font-semibold uppercase tracking-wide text-pitch-600">MatchDay</p>
@@ -109,7 +109,7 @@ export default async function AuthContinuePage({
   return (
     <main
       id="main"
-      className="chalk-arc turf-stripes relative mx-auto flex min-h-dvh w-full max-w-md flex-col justify-center gap-6 px-6 py-12"
+      className="chalk-arc turf-stripes relative mx-auto flex min-h-dvh w-full max-w-md flex-col justify-center gap-6 px-6 pb-12 pt-[max(3rem,env(safe-area-inset-top))]"
     >
       <header className="animate-rise flex flex-col gap-2">
         <p className="text-sm font-semibold uppercase tracking-wide text-pitch-600">MatchDay</p>

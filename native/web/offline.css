@@ -1,0 +1,98 @@
+/*
+ * Styling for the offline screen, inlined by hand.
+ *
+ * The palette and type scale mirror `src/app/globals.css` so this does not read
+ * as a different product — but it cannot import from it, because this file has
+ * to work with no network and no build step. The values are duplicated
+ * knowingly; there are six of them and they are the brand's most stable.
+ */
+:root {
+  --surface: #ffffff;
+  --text-primary: #14181c;
+  --text-secondary: #4b5563;
+  --pitch-600: #1f7a4d;
+  --pitch-700: #196340;
+  --border: #e5e7eb;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --surface: #14181c;
+    --text-primary: #f3f4f6;
+    --text-secondary: #9ca3af;
+    --pitch-600: #2f9d67;
+    --pitch-700: #37b276;
+    --border: #2b3138;
+  }
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  min-height: 100%;
+  background: var(--surface);
+  color: var(--text-primary);
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+main {
+  /* The insets matter here too: this screen can be the first thing shown on a
+     device with a Dynamic Island, before the remote application has ever
+     loaded. */
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  text-align: center;
+  padding: max(env(safe-area-inset-top), 1.5rem) 1.75rem max(env(safe-area-inset-bottom), 1.5rem);
+}
+
+.mark { color: var(--pitch-600); }
+
+h1 {
+  margin: 0.25rem 0 0;
+  font-size: 1.375rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+p {
+  margin: 0;
+  max-width: 22rem;
+  font-size: 0.9375rem;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+button {
+  margin-top: 0.75rem;
+  /* 46px, matching `min-h-control` in the application — the same reasoning
+     about WCAG 2.5.5 and sub-pixel measurement applies to this screen. */
+  min-height: 46px;
+  padding: 0 1.25rem;
+  border: 0;
+  border-radius: 0.625rem;
+  background: var(--pitch-600);
+  color: #ffffff;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:active:not(:disabled) { background: var(--pitch-700); }
+button:disabled { opacity: 0.6; }
+
+.hint {
+  font-size: 0.8125rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
+}

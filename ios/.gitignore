@@ -1,0 +1,20 @@
+App/build
+App/Pods
+App/output
+App/App/public
+DerivedData
+xcuserdata
+
+# Cordova plugins for Capacitor
+capacitor-cordova-ios-plugins
+
+# Generated Config files
+App/App/capacitor.config.json
+App/App/config.xml
+
+# Local Xcode state, written the first time the workspace is opened. Not part
+# of the project, and it changes per machine.
+App/App.xcodeproj/project.xcworkspace/xcshareddata/IDEWorkspaceChecks.plist
+
+# `Package.resolved` is deliberately NOT ignored: it pins the exact Capacitor
+# Swift package revisions, so two machines and CI build the same app.

@@ -4,6 +4,7 @@ import { requireOnboardedUser } from '@/lib/auth/page-guards';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import type { PushSubscriptionRow } from '@/types/database';
 import { PageHeader } from '@/components/ui/page-header';
+import { isNativeIOSApp } from '@/lib/platform/native-server';
 
 export const metadata: Metadata = { title: 'Phone notifications' };
 
@@ -19,7 +20,10 @@ export const metadata: Metadata = { title: 'Phone notifications' };
  * it is for. The private key is read only inside the server-only push modules.
  */
 export default async function DevicesPage() {
+  // The guard first, always: nothing should be computed for a caller who is
+  // about to be redirected.
   await requireOnboardedUser();
+  const isNativeApp = await isNativeIOSApp();
 
   const supabase = await createSupabaseServerClient();
   const { data } = await supabase
@@ -48,7 +52,7 @@ export default async function DevicesPage() {
             normally.
           </p>
         ) : (
-          <EnablePushButton vapidPublicKey={vapidPublicKey} />
+          <EnablePushButton vapidPublicKey={vapidPublicKey} isNativeApp={isNativeApp} />
         )}
       </section>
 
