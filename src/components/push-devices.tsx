@@ -61,7 +61,29 @@ function describeDevice(): string {
   return 'This device';
 }
 
-export function EnablePushButton({ vapidPublicKey }: { vapidPublicKey: string | null }) {
+export function EnablePushButton({
+  vapidPublicKey,
+  isNativeApp = false,
+}: {
+  vapidPublicKey: string | null;
+  /**
+   * Decided on the server from the User-Agent tag, and passed down.
+   *
+   * ── WHY THIS PROP EXISTS ────────────────────────────────────────────────
+   *
+   * Web Push does not work in a WKWebView: `PushManager` is not defined, so
+   * this component's own capability check would report `unsupported` and tell
+   * somebody using the App Store app that "this browser does not support phone
+   * notifications". Technically true, completely useless, and — combined with
+   * the home-screen sentence below — an instruction to go and use Safari
+   * instead, printed inside the iOS app. That is a Guideline 4.2 problem as
+   * much as a copy problem.
+   *
+   * Until native APNs lands in Build #2, the honest thing is to say the feature
+   * is coming rather than to offer a button that cannot work.
+   */
+  isNativeApp?: boolean;
+}) {
   const [status, setStatus] = useState<Status>({ kind: 'idle' });
 
   const enable = useCallback(async () => {
@@ -133,6 +155,20 @@ export function EnablePushButton({ vapidPublicKey }: { vapidPublicKey: string | 
     }
   }, [vapidPublicKey]);
 
+  // Build #1 ships the native shell without APNs. Rather than a dead button,
+  // this states the position plainly — and every notification still arrives in
+  // the in-app inbox, which is the canonical record and always was.
+  if (isNativeApp) {
+    return (
+      <div className="flex flex-col gap-2">
+        <p role="status" className="text-sm text-muted">
+          Push notifications are coming to the MatchDay app in a future update.
+          Everything still arrives in your in-app inbox, so nothing is missed.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col gap-2">
       <button
@@ -164,6 +200,10 @@ export function EnablePushButton({ vapidPublicKey }: { vapidPublicKey: string | 
         </p>
       ) : null}
 
+      {/* Web and home-screen PWA only. Inside the iOS app this component has
+          already returned above, so the sentence cannot appear there — which
+          matters, because telling an App Store user to install a web page is
+          both wrong and the sort of thing App Review rejects. */}
       <p className="text-xs text-muted">
         On iPhone, add MatchDay to your home screen first — iOS only delivers web notifications to
         installed apps.

@@ -25,7 +25,7 @@ export function AuthScreen({
   return (
     <main
       id="main"
-      className="chalk-arc turf-stripes relative mx-auto flex min-h-dvh w-full max-w-md flex-col justify-center gap-8 px-6 py-12"
+      className="chalk-arc turf-stripes relative mx-auto flex min-h-dvh w-full max-w-md flex-col justify-center gap-8 px-6 pb-12 pt-[max(3rem,env(safe-area-inset-top))]"
     >
       <header className="animate-rise flex flex-col items-start gap-4">
         <BrandLockup size={38} />

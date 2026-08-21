@@ -112,7 +112,12 @@ export function AppShell({
     <div className="mx-auto flex min-h-dvh w-full max-w-2xl flex-col lg:max-w-3xl">
       {/* Sticky and translucent: content sliding under it reads as depth, and
           the blur keeps the brand legible over whatever is passing beneath. */}
-      <header className="sticky top-0 z-30 border-b border-[var(--border-subtle)] bg-[color-mix(in_oklab,var(--surface)_86%,transparent)] backdrop-blur-xl">
+      {/* `pt-safe` is the app bar's own, and the only top inset in the product.
+          It is `0px` in every browser and in a home-screen PWA, and the height
+          of the status bar inside the iOS app, where the webview draws behind
+          it. The bar stays 56px tall either way — the inset is added above the
+          content rather than making the bar grow into it. */}
+      <header className="pt-safe sticky top-0 z-30 border-b border-[var(--border-subtle)] bg-[color-mix(in_oklab,var(--surface)_86%,transparent)] backdrop-blur-xl">
         {/* Still 56px at every width. The desktop navigation slots into the
             space the bar already had rather than making it taller — a header
             that grows to hold its own links is the other way this change goes

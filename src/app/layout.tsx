@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from 'next';
+import { NativeShell } from '@/components/native-shell';
 import './globals.css';
 
 export const metadata: Metadata = {
@@ -26,6 +27,16 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
+  /**
+   * Required for the iOS app, harmless everywhere else.
+   *
+   * Without `cover`, iOS letterboxes the webview inside the safe area and every
+   * `env(safe-area-inset-*)` value reads as zero — so the insets the layout
+   * already consumes would silently do nothing, and the app would render with
+   * grey bars above and below. With it, the webview fills the screen and the
+   * insets become real numbers the CSS can use.
+   */
+  viewportFit: 'cover',
   themeColor: [
     { media: '(prefers-color-scheme: light)', color: '#ffffff' },
     { media: '(prefers-color-scheme: dark)', color: '#14181c' },
@@ -42,6 +53,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         >
           Skip to content
         </a>
+        {/* Renders nothing, on every platform. Inside the iOS app it hides the
+            splash once MatchDay has painted, styles the status bar, sends
+            external links to the in-app browser and revalidates on resume. On
+            the web every one of those is a no-op and no Capacitor code is
+            loaded at all. */}
+        <NativeShell />
         {children}
       </body>
     </html>

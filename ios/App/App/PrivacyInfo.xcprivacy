@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  MatchDay's app-level privacy manifest.
+
+  ── WHY EVERY ARRAY IS EMPTY, AND WHY THAT IS AUDITED ──────────────────────
+
+  Verified against the exact packages installed for Build #1 — @capacitor/core,
+  /ios, /app, /browser, /splash-screen and /status-bar — by scanning all 114
+  Swift and Objective-C sources for each of Apple's five required-reason API
+  categories:
+
+      UserDefaults .............. 0 uses
+      file timestamp ............ 0 uses
+      system boot time .......... 0 uses
+      disk space ................ 0 uses
+      active keyboard ........... 0 uses
+
+  The one nearby hit, `.fileSizeKey` in Capacitor's WebViewAssetHandler, reads
+  the size of a specific bundled file. That is not the disk-space category and
+  needs no declaration.
+
+  ── NSPrivacyCollectedDataTypes IS EMPTY ON PURPOSE ────────────────────────
+
+  This manifest describes what the *native layer* collects, and it collects
+  nothing: the shell renders a webview and nothing else. What MatchDay collects
+  as a product — name, email, league participation and the rest — is declared in
+  App Store Connect's App Privacy questionnaire and documented at /privacy.
+  Duplicating it here would create a second inventory to keep in sync.
+
+  ── TRACKING IS FALSE ──────────────────────────────────────────────────────
+
+  No advertising SDK, no attribution, no IDFA, no cross-app linkage, and no
+  ATT prompt. Build #2 adds an APNs device token, which is an identifier used
+  for app functionality — it is not tracking and does not change this file.
+-->
+<plist version="1.0">
+<dict>
+	<key>NSPrivacyAccessedAPITypes</key>
+	<array/>
+	<key>NSPrivacyCollectedDataTypes</key>
+	<array/>
+	<key>NSPrivacyTrackingDomains</key>
+	<array/>
+	<key>NSPrivacyTracking</key>
+	<false/>
+</dict>
+</plist>

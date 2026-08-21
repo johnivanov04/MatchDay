@@ -472,6 +472,56 @@
 }
 
 /**
+ * The other end: the status bar, the notch and the Dynamic Island.
+ *
+ * ── WHY THIS ONLY MATTERS IN THE NATIVE APP ────────────────────────────────
+ *
+ * In a browser and in a home-screen PWA, iOS reserves the space above the page
+ * and `safe-area-inset-top` resolves to `0px`. Inside the iOS app the webview
+ * draws behind the status bar — `contentInset: 'never'` plus
+ * `viewport-fit=cover` — so the sticky app bar would otherwise sit under the
+ * clock and the Island.
+ *
+ * ── APPLIED IN EXACTLY ONE PLACE ───────────────────────────────────────────
+ *
+ * The app bar in `app-shell.tsx`, and nowhere else. Padding a scroll container
+ * *and* its sticky header is how an app ends up with a gap that grows every
+ * time somebody adds a wrapper; the header is the element that touches the top
+ * of the screen, so the header is the element that owns the inset.
+ *
+ * `max(…, 0px)` rather than the bare `env()`, so a browser that does not
+ * support the function still computes a valid length instead of dropping the
+ * declaration.
+ */
+@utility pt-safe {
+  padding-top: max(env(safe-area-inset-top), 0px);
+}
+
+/*
+ * ── THE OTHER TOP-ANCHORED SHELLS ──────────────────────────────────────────
+ *
+ * `pt-safe` above suits the app bar, which has no top padding of its own — its
+ * height comes from the 56px row inside it, so replacing `0` with the inset is
+ * exactly right.
+ *
+ * Every other full-screen shell — the auth screens, onboarding, the deletion
+ * status page, the legal pages, the invitation screen — already has deliberate
+ * top padding, and `viewport-fit=cover` puts all of them behind the status bar.
+ * Those sites use an inline `pt-[max(<their own value>,env(safe-area-inset-top))]`
+ * rather than this utility, for two reasons:
+ *
+ *   * `max()` and not `calc(a + b)`. Adding the inset to existing padding gives
+ *     roughly 6rem of nothing above the content on a Dynamic Island phone;
+ *     taking the larger of the two clears the status bar and stops there.
+ *   * the floor stays each shell's own number, so the web and the home-screen
+ *     PWA — where the inset resolves to `0px` and the design value always wins —
+ *     render byte-identically to before.
+ *
+ * This was not theoretical: with `viewport-fit=cover` and no inset, the clock
+ * overlapped the MatchDay wordmark on /privacy in the simulator.
+ */
+
+/**
  * The touch-target floor for every interactive control: 46px.
  *
  * ── WHY NOT 44 ─────────────────────────────────────────────────────────────
