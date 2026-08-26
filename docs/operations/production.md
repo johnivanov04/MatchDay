@@ -508,7 +508,60 @@ incident.
 
 ---
 
-## 10. What this MVP does not have
+## 10. Universal Links (Apple App Site Association)
+
+`/.well-known/apple-app-site-association` is served by a route handler
+(`src/app/.well-known/apple-app-site-association/route.ts`) rather than a file
+in `public/`, because Apple requires no file extension *and*
+`Content-Type: application/json` — and a `public/` file with no extension is
+served as `application/octet-stream`, which makes the association fail with no
+error anybody sees.
+
+`src/proxy.ts` excludes `.well-known`, so Apple's fetch does not trigger a
+Supabase session lookup on the way past.
+
+### Nothing is verified until it is deployed
+
+**Do not describe Universal Links as working before the checks below pass on the
+public endpoint.** Apple's association system fetches this document from the
+internet through its own CDN and caches the result. A local test proves the
+document MatchDay serves and nothing else: no link has been verified by Apple
+until the endpoint is live on the real origin.
+
+After deploying, verify the real endpoint:
+
+```bash
+curl -sI https://app.matchdayapps.com/.well-known/apple-app-site-association
+```
+
+Confirm, in this order:
+
+1. **`HTTP/2 200`** — not 301, 302, 307 or 308. Apple does **not** follow
+   redirects for this document, so a redirect is a silent failure.
+2. **`content-type: application/json`**.
+3. The body is valid JSON and carries the right app id:
+
+```bash
+curl -s https://app.matchdayapps.com/.well-known/apple-app-site-association \
+  | python3 -m json.tool
+# appIDs must be exactly ["VYC3499K46.com.johnivanov.matchday"]
+```
+
+Only once all three hold can the association be exercised for real: install the
+app on a physical iPhone, then tap a MatchDay link from Notes or Messages —
+**not** from Safari's address bar, which never triggers a Universal Link. A
+long-press showing "Open in MatchDay" confirms the association resolved.
+
+`swcutil` on a Mac and Console.app filtered on `swcd` show the device's own view
+of the association, which is the fastest way to tell "Apple has not fetched it
+yet" apart from "Apple fetched it and rejected it".
+
+Apple's CDN caches aggressively, so a wrong first publish is slow to correct.
+That is why this document ships ahead of the app build rather than with it.
+
+---
+
+## 11. What this MVP does not have
 
 Stated plainly so nobody deploys expecting it:
 

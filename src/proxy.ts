@@ -49,7 +49,13 @@ export const config = {
      * Everything except static assets and image files. Sign-in pages are
      * included on purpose: a visitor arriving with an expired cookie should
      * have it cleaned up before rendering.
+     *
+     * `.well-known` is excluded so Apple's App Site Association fetch does not
+     * trigger a Supabase session lookup. That fetch carries no cookies and has
+     * nothing to refresh, and Apple's CDN is strict about how this document is
+     * served — there is no reason to put a network round trip in front of a
+     * static file it polls on its own schedule.
      */
-    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)',
+    '/((?!_next/static|_next/image|favicon.ico|\\.well-known|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)',
   ],
 };
