@@ -22,6 +22,18 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<!-- Declared here so App Store Connect stops asking on every upload.
+	     MatchDay uses HTTPS and Apple's own APNs and nothing else: no custom
+	     cryptography, no encryption beyond what iOS provides, which is exactly
+	     the exemption this answers. -->
+	<!-- Which APNs environment this build talks to: `sandbox` for Debug,
+	     `production` for Release. Set per configuration in project.pbxproj and
+	     read by ApsEnvironmentPlugin. See that file for why it is a build
+	     setting rather than a runtime read of the signed entitlement. -->
+	<key>MATCHDAY_APNS_ENVIRONMENT</key>
+	<string>$(MATCHDAY_APNS_ENVIRONMENT)</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSCameraUsageDescription</key>

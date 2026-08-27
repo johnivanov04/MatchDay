@@ -1,7 +1,9 @@
 'use client';
 
 import { useActionState, useCallback, useState } from 'react';
+import { enableNativePushNotifications } from '@/lib/platform/apns-client';
 import {
+  registerApnsDeviceAction,
   registerPushSubscriptionAction,
   removePushSubscriptionAction,
   setPushSubscriptionEnabledAction,
@@ -155,15 +157,73 @@ export function EnablePushButton({
     }
   }, [vapidPublicKey]);
 
-  // Build #1 ships the native shell without APNs. Rather than a dead button,
-  // this states the position plainly — and every notification still arrives in
-  // the in-app inbox, which is the canonical record and always was.
+  /**
+   * The native path: APNs rather than Web Push.
+   *
+   * Web Push does not exist in a WKWebView — `PushManager` is undefined — so
+   * none of the code above can run here. The app registers with Apple directly
+   * and hands the token to `register_apns_device`.
+   */
+  const enableNative = useCallback(async () => {
+    setStatus({ kind: 'working' });
+
+    const outcome = await enableNativePushNotifications(async (input) => {
+      const formData = new FormData();
+      formData.set('device_token', input.deviceToken);
+      formData.set('environment', input.environment);
+      formData.set('installation_id', input.installationId);
+      formData.set('device_label', input.deviceLabel);
+
+      const result = await registerApnsDeviceAction(null, formData);
+      return result.ok ? { ok: true } : { ok: false, message: result.message };
+    });
+
+    if (outcome.kind === 'registered') {
+      setStatus({ kind: 'enabled' });
+      window.location.reload();
+      return;
+    }
+
+    setStatus(
+      outcome.kind === 'error' ? { kind: 'error', message: outcome.message } : { kind: outcome.kind },
+    );
+  }, []);
+
   if (isNativeApp) {
     return (
       <div className="flex flex-col gap-2">
-        <p role="status" className="text-sm text-muted">
-          Push notifications are coming to the MatchDay app in a future update.
-          Everything still arrives in your in-app inbox, so nothing is missed.
+        <button
+          type="button"
+          onClick={() => void enableNative()}
+          disabled={status.kind === 'working'}
+          className="inline-flex min-h-control items-center justify-center rounded-lg bg-pitch-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-pitch-700 disabled:opacity-55"
+        >
+          {status.kind === 'working' ? 'Enabling…' : 'Enable phone notifications'}
+        </button>
+
+        {status.kind === 'denied' ? (
+          <p role="status" className="text-sm text-muted">
+            Notifications are turned off for MatchDay. You can turn them back on in the iPhone
+            Settings app, under Notifications. Everything still arrives in your MatchDay inbox.
+          </p>
+        ) : null}
+
+        {status.kind === 'unsupported' ? (
+          <p role="status" className="text-sm text-muted">
+            This device cannot receive phone notifications. You will still receive everything in
+            the app.
+          </p>
+        ) : null}
+
+        {status.kind === 'error' ? (
+          <p role="alert" className="text-sm text-whistle-600 dark:text-whistle-300">
+            {status.message}
+          </p>
+        ) : null}
+
+        <p className="text-xs text-muted">
+          iOS asks once. If you say no, you can change it later in Settings › Notifications ›
+          MatchDay.
         </p>
       </div>
     );
@@ -219,7 +279,9 @@ export function DeviceRow({ device }: { device: PushSubscriptionRow }) {
   return (
     <li className="surface-card flex items-start justify-between gap-3 p-3">
       <div>
-        <p className="text-sm font-semibold">{device.device_label ?? 'Unnamed device'}</p>
+        <p className="text-sm font-semibold">
+          {device.device_label ?? (device.channel === 'apns' ? 'iPhone' : 'Unnamed device')}
+        </p>
         <p className="text-xs text-muted">
           {device.enabled ? 'Receiving alerts' : `Off${device.disabled_reason === null ? '' : ` — ${device.disabled_reason.replaceAll('_', ' ')}`}`}
           {device.last_success_at === null

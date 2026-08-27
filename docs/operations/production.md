@@ -35,6 +35,10 @@ each one. The rules that matter:
   every tenant boundary in the product is gone.
 - **`VAPID_PRIVATE_KEY` signs pushes to every subscribed device.** Server-only,
   deliberately unprefixed.
+- **`APNS_SANDBOX_PRIVATE_KEY` and `APNS_PRODUCTION_PRIVATE_KEY` do the same
+  for the iOS app.** Two, not one: Apple's key model is environment-specific.
+  Both server-only and unprefixed. Unset, iPhone app devices are skipped rather
+  than failed — see §6.
 - **`CRON_SECRET` is required for reminders to work at all.** Without it
   `/api/cron/reminders` answers 404 to everybody — including Vercel Cron, so
   the declared schedule silently does nothing.
@@ -216,7 +220,87 @@ the in-app inbox first and is pushed second; a failed push loses nothing.
 - **iOS only allows Web Push once the site is on the home screen.** Tell pilot
   players to use Share → Add to Home Screen, then enable notifications from
   Settings → Devices inside the app. Without that step no iPhone gets a push,
-  and nothing in the interface can work around it.
+  and nothing in the interface can work around it. Players using the App Store
+  app do not need this — they get APNs instead, below.
+
+### The iOS app: APNs
+
+The native app cannot use Web Push at all — `PushManager` does not exist in a
+WKWebView — so it registers with Apple directly and MatchDay sends over HTTP/2.
+
+| Variable | What it is |
+| --- | --- |
+| `APNS_TEAM_ID` | The ten-character Team ID. Becomes the `iss` claim |
+| `APNS_BUNDLE_ID` | `com.johnivanov.matchday`. Becomes the `apns-topic` header |
+| `APNS_SANDBOX_KEY_ID` | Key ID of the Sandbox APNs key |
+| `APNS_SANDBOX_PRIVATE_KEY` | That key's `.p8`, downloadable exactly once |
+| `APNS_PRODUCTION_KEY_ID` | Key ID of the Production APNs key |
+| `APNS_PRODUCTION_PRIVATE_KEY` | That key's `.p8` |
+
+**Two keys, because Apple's key model is environment-specific** and its current
+guidance is to hold separate Sandbox and Production keys. An older key issued
+before that distinction works in both and may continue to — but "may continue
+to" is not something to build on, and the day it stops the only symptom is that
+TestFlight testers quietly stop getting alerts. If you hold such a key, put the
+same Key ID and the same `.p8` in both pairs; that is a supported configuration.
+
+**Unset, nothing breaks.** APNs devices are skipped: nothing is attempted and
+nothing recorded, so adding a key later begins delivery with no backlog of
+permanently-failed rows. One environment configured and not the other is also
+normal — a deployment serving only the App Store build has no reason to hold a
+sandbox key, and only its sandbox devices are skipped.
+
+#### Which environment a device is in
+
+Stored per row, never guessed. A token minted against Apple's sandbox is
+meaningless to production and vice versa, and the rejection — `BadDeviceToken` —
+is indistinguishable from a corrupt token.
+
+The app reports it from `MATCHDAY_APNS_ENVIRONMENT`, an ordinary Xcode build
+setting surfaced through `Info.plist`:
+
+| Configuration | Value | Signed `aps-environment` |
+| --- | --- | --- |
+| Debug (device build from Xcode) | `sandbox` | `development` |
+| Release (Archive → TestFlight → App Store) | `production` | `production` |
+
+This is deliberately boring. Reading the signed entitlement at runtime needs
+either `SecTaskCopyValueForEntitlement` — which links on iOS but is declared
+only in the macOS SDK, making it a private symbol — or a parser for the
+`LC_CODE_SIGNATURE` blob, which depends on undocumented code-signing layout in a
+binary Apple re-signs on the way to the App Store. Both were rejected.
+
+**Development APNs verification must use the Debug configuration.** Running
+Release directly from Xcode against a development profile is not a supported
+APNs test setup: the entitlement would say `development` while the build setting
+says `production`, and every send would be addressed to the wrong host.
+
+#### Reading a failure
+
+**A 403 does not mean a dead phone.** APNs reports provider-credential problems
+with statuses that also cover device problems, so MatchDay classifies on the
+`reason` string. Exactly three reasons retire a registration:
+
+| Reason | Meaning |
+| --- | --- |
+| `Unregistered` | The app was deleted from that device |
+| `ExpiredToken` | The same, reported the other way |
+| `BadDeviceToken` | APNs will not accept the token — and because the row records its own environment, the usual innocent cause of this cannot arise |
+
+Everything else leaves the device enabled. In particular
+**`DeviceTokenNotForTopic` does not retire anything**: it says the token does not
+match the topic the request claimed, and the topic is `APNS_BUNDLE_ID` — so a
+wrong bundle identifier, a key issued for a different app, or an upstream
+environment mismatch all produce it. Retiring on it would empty the device table
+over one wrong environment variable. It records `permanent_failure`, which
+`record_push_delivery_result` does not act on, so the row is untouched and
+delivery resumes the moment the configuration is corrected.
+
+`ExpiredProviderToken` is handled rather than recorded: the cached signing JWT is
+dropped, a fresh one is signed, and the send is retried **exactly once**. Only
+the final outcome is recorded, so a recovered send leaves no failure behind. The
+retry is straight-line and cannot re-enter — retrying a credential APNs has
+already refused is how `TooManyProviderTokenUpdates` happens.
 
 ### App icons
 
@@ -558,6 +642,34 @@ yet" apart from "Apple fetched it and rejected it".
 
 Apple's CDN caches aggressively, so a wrong first publish is slow to correct.
 That is why this document ships ahead of the app build rather than with it.
+
+---
+
+### Verifying an iOS build before uploading
+
+Four facts can only be established by building, so they are checked against the
+artefact rather than asserted in a test. `tests/unit/ios-project.test.ts` pins
+the project settings that produce them.
+
+```bash
+# 1. Debug resolves to sandbox, Release to production.
+xcodebuild -project ios/App/App.xcodeproj -target App -configuration Debug \
+  -showBuildSettings | grep MATCHDAY_APNS_ENVIRONMENT
+xcodebuild -project ios/App/App.xcodeproj -target App -configuration Release \
+  -showBuildSettings | grep MATCHDAY_APNS_ENVIRONMENT
+
+# 2. The signed entitlements. Development build → development; the App Store
+#    export → production. Xcode rewrites it at export, not at archive, so an
+#    archive still shows `development` and that is correct.
+codesign -d --entitlements :- <path>/App.app
+
+# 3. The privacy manifest is actually in the bundle. It was not in Build #1.
+ls <path>/App.app/PrivacyInfo.xcprivacy
+
+# 4. The build number has moved on. App Store Connect refuses a re-upload of
+#    one it already has.
+/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' <path>/App.app/Info.plist
+```
 
 ---
 

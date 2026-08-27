@@ -29,6 +29,13 @@ next-env.d.ts
 .env.production
 !.env.example
 
+# APNs signing keys. Apple lets a .p8 be downloaded exactly once and anyone
+# holding one can send a notification to every device the app is installed on,
+# so the file belongs in a secret store and never in a repository. Ignored by
+# extension rather than by name: the filename carries the Key ID and would
+# differ for every key.
+*.p8
+
 # misc
 .DS_Store
 *.pem

@@ -25,7 +25,12 @@ export type PushErrorCategory =
   | 'server_error'
   | 'network'
   | 'timeout'
-  | 'unknown';
+  | 'unknown'
+  // APNs distinguishes "this token is wrong" from "this token is finished",
+  // and separately from "your provider credentials are wrong". Web Push
+  // collapses all three into a status code.
+  | 'bad_device_token'
+  | 'provider_config';
 
 export interface PushFailureClassification {
   status: Extract<
@@ -124,4 +129,151 @@ export function classifyPushError(error: unknown): PushFailureClassification {
   }
 
   return { status: 'temporary_failure', category: 'network', invalidatesSubscription: false };
+}
+
+
+/**
+ * Classifies an APNs rejection.
+ *
+ * ── THE REASON DECIDES, NOT THE STATUS ─────────────────────────────────────
+ *
+ * APNs returns a small set of statuses and a long list of `reason` strings, and
+ * the status alone is not enough to act on. `403` covers five distinct
+ * conditions: an expired provider token, an invalid one, a missing one, and two
+ * certificate problems. Not one of them says anything about the device — they
+ * all say MatchDay's own credentials are wrong. Retiring a player's phone
+ * because a signing key expired would silently unsubscribe an entire user base
+ * from one operator mistake, and they would have to notice and re-enable
+ * notifications by hand.
+ *
+ * So the three device-fatal reasons are named explicitly, and everything else
+ * is either the operator's problem or worth retrying.
+ *
+ * An unrecognised reason is temporary, for the same reason an unrecognised Web
+ * Push status is: retrying something hopeless wastes a little work, while
+ * permanently discarding something recoverable loses a match alert.
+ */
+export function classifyApnsFailure(
+  status: number,
+  reason: string | null,
+): PushFailureClassification {
+  switch (reason) {
+    // ── The device is finished ─────────────────────────────────────────────
+    //
+    // Only reasons that prove *this token* can never be used again. Retiring a
+    // registration is a decision the player cannot see and cannot undo without
+    // finding the setting and turning notifications on again, so the bar is
+    // that the token itself is dead — not that a send failed.
+    //
+    // `Unregistered` and `ExpiredToken` (410) are Apple saying the app is gone
+    // from that device.
+    //
+    // `BadDeviceToken` is only meaningful because the environment is stored per
+    // row: the usual cause of it — a production token offered to the sandbox
+    // host, or the reverse — cannot happen here, because the row records which
+    // environment its token was minted in and the sender picks the host from
+    // that. What is left really is a token APNs will not accept.
+    case 'Unregistered':
+    case 'ExpiredToken':
+      return { status: 'invalidated', category: 'gone', invalidatesSubscription: true };
+    case 'BadDeviceToken':
+      return {
+        status: 'invalidated',
+        category: 'bad_device_token',
+        invalidatesSubscription: true,
+      };
+
+    // ── Our credentials are wrong ──────────────────────────────────────────
+    //
+    // Permanent, because retrying with the same key cannot help — but the
+    // device is untouched. `record_push_delivery_result` has no branch for
+    // `permanent_failure`, so the subscription is left exactly as it was and
+    // starts working again the moment the key is fixed.
+    case 'ExpiredProviderToken':
+    case 'InvalidProviderToken':
+    case 'MissingProviderToken':
+    case 'BadCertificate':
+    case 'BadCertificateEnvironment':
+      return {
+        status: 'permanent_failure',
+        category: 'unauthorized',
+        invalidatesSubscription: false,
+      };
+
+    // ── We built the request wrong ─────────────────────────────────────────
+    //
+    // Also permanent and also nothing to do with the device: a wrong topic, a
+    // malformed header, a bad path. An operator or a deploy fixes these.
+    // `DeviceTokenNotForTopic` reads like a device problem and is not one. It
+    // says this token does not belong to the topic the request claimed, and the
+    // topic comes from `APNS_BUNDLE_ID` — so the same rejection is produced by
+    // a misconfigured bundle identifier, by a key issued for a different app,
+    // and by an environment mismatch upstream of us. None of those are evidence
+    // that the installation is dead, and treating them as such would retire
+    // every iPhone in the database over one wrong environment variable.
+    //
+    // Permanent for this attempt, and the registration stays enabled: the
+    // moment the configuration is corrected, delivery resumes with nobody
+    // having to re-enable anything.
+    case 'DeviceTokenNotForTopic':
+    case 'BadTopic':
+    case 'TopicDisallowed':
+    case 'MissingTopic':
+    case 'MissingDeviceToken':
+    case 'BadPath':
+    case 'MethodNotAllowed':
+    case 'BadPriority':
+    case 'BadExpirationDate':
+    case 'BadMessageId':
+    case 'BadCollapseId':
+    case 'DuplicateHeaders':
+    case 'InvalidPushType':
+    case 'PayloadEmpty':
+      return {
+        status: 'permanent_failure',
+        category: 'provider_config',
+        invalidatesSubscription: false,
+      };
+
+    case 'PayloadTooLarge':
+      return {
+        status: 'permanent_failure',
+        category: 'payload_too_large',
+        invalidatesSubscription: false,
+      };
+
+    // ── Worth trying again ─────────────────────────────────────────────────
+    //
+    // `TooManyProviderTokenUpdates` is the one to be careful about: it means we
+    // regenerated the signing JWT too often, and the fix is to reuse a cached
+    // one — which `apns.ts` does — not to stop sending.
+    case 'TooManyRequests':
+    case 'TooManyProviderTokenUpdates':
+      return { status: 'temporary_failure', category: 'rate_limited', invalidatesSubscription: false };
+    case 'IdleTimeout':
+      return { status: 'temporary_failure', category: 'timeout', invalidatesSubscription: false };
+    case 'InternalServerError':
+    case 'ServiceUnavailable':
+    case 'Shutdown':
+      return {
+        status: 'temporary_failure',
+        category: 'server_error',
+        invalidatesSubscription: false,
+      };
+
+    default:
+      break;
+  }
+
+  // No reason, or one Apple has added since this was written. Fall back to the
+  // status, which at least distinguishes "their fault" from "unknown" — and
+  // never invalidates a device on a status alone.
+  if (status >= 500) {
+    return { status: 'temporary_failure', category: 'server_error', invalidatesSubscription: false };
+  }
+  if (status === 429) {
+    return { status: 'temporary_failure', category: 'rate_limited', invalidatesSubscription: false };
+  }
+
+  return { status: 'temporary_failure', category: 'unknown', invalidatesSubscription: false };
 }

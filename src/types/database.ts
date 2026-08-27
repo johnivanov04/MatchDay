@@ -292,6 +292,17 @@ export type PushDeliveryStatus =
   | 'permanent_failure'
   | 'invalidated';
 
+/** How a push subscription is delivered to. See `push_channel` in SQL. */
+export type PushChannel = 'web_push' | 'apns';
+
+/**
+ * Which APNs host a device token belongs to.
+ *
+ * Reported by the app from its own signed `aps-environment` entitlement. Never
+ * inferred from the token, whose bytes are identically shaped in both.
+ */
+export type ApnsEnvironment = 'development' | 'production';
+
 export type GuidelineVersionRow = {
   id: string;
   league_id: string;
@@ -752,6 +763,7 @@ export type NotificationRow = {
 export type PushSubscriptionRow = {
   id: string;
   user_id: string;
+  channel: PushChannel;
   device_label: string | null;
   enabled: boolean;
   created_at: string;
@@ -1339,6 +1351,16 @@ export interface Database {
         Returns: string;
       };
       remove_push_subscription: { Args: { p_subscription_id: string }; Returns: undefined };
+      register_apns_device: {
+        Args: {
+          p_device_token: string;
+          p_environment: ApnsEnvironment;
+          p_installation_id: string;
+          p_device_label?: string | null;
+        };
+        Returns: string;
+      };
+      remove_apns_installation: { Args: { p_installation_id: string }; Returns: undefined };
       record_push_delivery_result: {
         Args: {
           p_notification_id: string;
@@ -1371,6 +1393,8 @@ export interface Database {
       match_lifecycle_status: MatchLifecycleStatus;
       notification_type: NotificationType;
       push_delivery_status: PushDeliveryStatus;
+      push_channel: PushChannel;
+      apns_environment: ApnsEnvironment;
     };
     CompositeTypes: Record<string, never>;
   };

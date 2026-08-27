@@ -3,7 +3,7 @@ import 'server-only';
 import type { CanonicalNotificationForPush } from '@/lib/push/payload';
 import type { PushDispatchStore, PushSubscriptionRecord } from '@/lib/push/dispatch';
 import { createSupabaseAdminClient, isServiceRoleConfigured } from '@/lib/supabase/admin';
-import type { PushDeliveryStatus } from '@/types/database';
+import type { ApnsEnvironment, PushChannel, PushDeliveryStatus } from '@/types/database';
 
 /**
  * The real `PushDispatchStore`, backed by the service-role client.
@@ -58,13 +58,62 @@ export function createPushDispatchStore(): PushDispatchStore | null {
         return [];
       }
 
+      // Both address shapes, selected together and separated by `channel` on
+      // the way out. The credential columns — `endpoint`, `p256dh`,
+      // `auth_secret`, `device_token` — are granted to no client role at all,
+      // which is why this is the service-role client and why the result never
+      // leaves the dispatcher.
       const { data } = await client
         .from('push_subscriptions')
-        .select('id, user_id, endpoint, p256dh, auth_secret')
+        .select(
+          'id, user_id, channel, endpoint, p256dh, auth_secret, device_token, apns_environment',
+        )
         .in('user_id', userIds)
         .eq('enabled', true);
 
-      return (data ?? []) as unknown as PushSubscriptionRecord[];
+      const rows = (data ?? []) as unknown as Array<{
+        id: string;
+        user_id: string;
+        channel: PushChannel;
+        endpoint: string | null;
+        p256dh: string | null;
+        auth_secret: string | null;
+        device_token: string | null;
+        apns_environment: ApnsEnvironment | null;
+      }>;
+
+      // Narrowed rather than cast. `push_subscriptions_channel_shape` already
+      // guarantees each row is fully one shape or the other, so a row failing
+      // these checks is a row the dispatcher genuinely cannot address — and
+      // dropping it is better than sending `undefined` to a push service.
+      return rows.flatMap((row): PushSubscriptionRecord[] => {
+        if (row.channel === 'apns') {
+          return row.device_token !== null && row.apns_environment !== null
+            ? [
+                {
+                  id: row.id,
+                  user_id: row.user_id,
+                  channel: 'apns',
+                  device_token: row.device_token,
+                  apns_environment: row.apns_environment,
+                },
+              ]
+            : [];
+        }
+
+        return row.endpoint !== null && row.p256dh !== null && row.auth_secret !== null
+          ? [
+              {
+                id: row.id,
+                user_id: row.user_id,
+                channel: 'web_push',
+                endpoint: row.endpoint,
+                p256dh: row.p256dh,
+                auth_secret: row.auth_secret,
+              },
+            ]
+          : [];
+      });
     },
 
     async alreadyDelivered(notificationId: string, subscriptionId: string): Promise<boolean> {

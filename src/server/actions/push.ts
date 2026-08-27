@@ -122,3 +122,72 @@ export async function removePushSubscriptionAction(
     return actionFailure(error);
   }
 }
+
+/**
+ * APNs device registration, from the native iOS app.
+ *
+ * The app produces the token, reads its own signed `aps-environment`, and
+ * carries a stable installation id; this stores all three. As with Web Push,
+ * nothing here ever reads a token back — the column is granted to no client
+ * role at all.
+ */
+const apnsDeviceSchema = z.object({
+  // Uppercase hex of even length, matching what `PushNotifications` emits and
+  // what `push_subscriptions_device_token_shape` accepts. No exact length is
+  // asserted: Apple documents the token as variable, and pinning one would turn
+  // a future widening into a simultaneous failure on every device.
+  device_token: z
+    .string()
+    .trim()
+    .min(2)
+    .max(512)
+    .regex(/^[0-9A-Fa-f]+$/, 'That device could not be registered.')
+    .refine((value) => value.length % 2 === 0, 'That device could not be registered.')
+    .transform((value) => value.toUpperCase()),
+  environment: z.enum(['development', 'production']),
+  installation_id: z.string().trim().regex(/^[A-Za-z0-9_-]{8,64}$/),
+  device_label: z
+    .string()
+    .trim()
+    .max(80)
+    .transform((value): string | null => (value === '' ? null : value)),
+});
+
+export async function registerApnsDeviceAction(
+  _previous: ActionResult<undefined> | null,
+  formData: FormData,
+): Promise<ActionResult<undefined>> {
+  try {
+    await requireSessionUser();
+
+    const parsed = apnsDeviceSchema.safeParse({
+      device_token: formData.get('device_token') ?? '',
+      environment: formData.get('environment') ?? '',
+      installation_id: formData.get('installation_id') ?? '',
+      device_label: formData.get('device_label') ?? '',
+    });
+
+    if (!parsed.success) {
+      throw new DomainError('VALIDATION_FAILED', {
+        fieldErrors: { form: 'That device could not be registered.' },
+      });
+    }
+
+    const supabase = await createSupabaseServerClient();
+    const { error } = await supabase.rpc('register_apns_device', {
+      p_device_token: parsed.data.device_token,
+      p_environment: parsed.data.environment,
+      p_installation_id: parsed.data.installation_id,
+      p_device_label: parsed.data.device_label,
+    });
+
+    if (error !== null) {
+      throw domainErrorFromDatabase(error);
+    }
+
+    revalidatePath('/settings/devices');
+    return actionSuccess();
+  } catch (error: unknown) {
+    return actionFailure(error);
+  }
+}
