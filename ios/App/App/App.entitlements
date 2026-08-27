@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  Universal Links.
+
+	  `applinks:` tells iOS to fetch
+	  https://app.matchdayapps.com/.well-known/apple-app-site-association and
+	  associate this app with the paths that document claims. The claimed and
+	  excluded route sets live there, in
+	  `src/app/.well-known/apple-app-site-association/route.ts`, and are
+	  deliberately not duplicated here — one source of truth, on the server,
+	  where it can be corrected without shipping a new binary.
+	-->
+	<key>com.apple.developer.associated-domains</key>
+	<array>
+		<string>applinks:app.matchdayapps.com</string>
+	</array>
+
+	<!--
+	  APNs.
+
+	  `development` is correct for every build signed with a development
+	  profile. Xcode rewrites this to `production` when it exports an App Store
+	  or TestFlight archive, which is exactly why the app must read its *signed*
+	  entitlement at runtime rather than trusting a compile-time constant — see
+	  `ApsEnvironmentPlugin.swift`. A TestFlight build talking to the sandbox
+	  APNs host fails silently on every notification.
+	-->
+	<key>aps-environment</key>
+	<string>development</string>
+</dict>
+</plist>

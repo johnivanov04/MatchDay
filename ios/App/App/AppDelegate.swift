@@ -33,6 +33,44 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         // Called when the application is about to terminate. Save data if appropriate. See also applicationDidEnterBackground:.
     }
 
+    // ── APNs, and why these two live here ────────────────────────────────
+    //
+    // `@capacitor/push-notifications` never speaks to iOS directly. It observes
+    // two NotificationCenter names, and Capacitor only *declares* them — see
+    // CAPNotifications.swift. Nothing in the framework posts them, so unless
+    // the application forwards these callbacks the plugin waits for a token
+    // that iOS already delivered and threw away.
+    //
+    // That failure is silent in every way that matters: it compiles, signs,
+    // uploads and passes every automated gate. On a device it presents as
+    // registration hanging until the caller's timeout, with no error from iOS,
+    // because iOS did not fail — nobody was listening. The plugin's README
+    // requires these; `npx cap sync` does not add them to an AppDelegate that
+    // predates the plugin, which is exactly how this one came to be missing.
+    //
+    // They stay on the AppDelegate rather than moving to the SceneDelegate:
+    // remote-notification registration is a UIApplicationDelegate concern and
+    // has no scene-based equivalent.
+
+    func application(_ application: UIApplication,
+                     didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+        NotificationCenter.default.post(
+            name: .capacitorDidRegisterForRemoteNotifications,
+            object: deviceToken
+        )
+    }
+
+    func application(_ application: UIApplication,
+                     didFailToRegisterForRemoteNotificationsWithError error: Error) {
+        // Forwarded rather than swallowed. Without this the caller cannot tell
+        // "APNs refused" from "APNs is slow", and both would look like a
+        // timeout — which is precisely what made the missing pair hard to see.
+        NotificationCenter.default.post(
+            name: .capacitorDidFailToRegisterForRemoteNotifications,
+            object: error
+        )
+    }
+
     func application(_ application: UIApplication,
                      configurationForConnecting connectingSceneSession: UISceneSession,
                      options: UIScene.ConnectionOptions) -> UISceneConfiguration {

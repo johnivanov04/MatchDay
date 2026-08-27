@@ -5,10 +5,11 @@
 
   ── WHY EVERY ARRAY IS EMPTY, AND WHY THAT IS AUDITED ──────────────────────
 
-  Verified against the exact packages installed for Build #1 — @capacitor/core,
-  /ios, /app, /browser, /splash-screen and /status-bar — by scanning all 114
-  Swift and Objective-C sources for each of Apple's five required-reason API
-  categories:
+  Re-verified for Build #2, which adds @capacitor/push-notifications to the
+  set — @capacitor/core, /ios, /app, /browser, /push-notifications,
+  /splash-screen and /status-bar — by scanning all 118 Swift and Objective-C
+  sources (113 excluding the packages' own test targets) for each of Apple's
+  five required-reason API categories:
 
       UserDefaults .............. 0 uses
       file timestamp ............ 0 uses
@@ -33,6 +34,15 @@
   No advertising SDK, no attribution, no IDFA, no cross-app linkage, and no
   ATT prompt. Build #2 adds an APNs device token, which is an identifier used
   for app functionality — it is not tracking and does not change this file.
+
+  ── THIS FILE HAS TO BE IN THE TARGET TO COUNT ─────────────────────────────
+
+  It exists in the repository from Build #1 but was never a member of the App
+  target, so it was not copied into the bundle and Apple never saw it. A
+  manifest that is not in the built product is indistinguishable from no
+  manifest at all, and the omission is silent in both directions: the build
+  succeeds and the upload is accepted. It is a resource of the App target as of
+  Build #2 — see PBXResourcesBuildPhase in project.pbxproj.
 -->
 <plist version="1.0">
 <dict>

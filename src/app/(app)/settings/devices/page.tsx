@@ -5,6 +5,7 @@ import { createSupabaseServerClient } from '@/lib/supabase/server';
 import type { PushSubscriptionRow } from '@/types/database';
 import { PageHeader } from '@/components/ui/page-header';
 import { isNativeIOSApp } from '@/lib/platform/native-server';
+import { readApnsConfiguration } from '@/lib/push/apns';
 
 export const metadata: Metadata = { title: 'Phone notifications' };
 
@@ -29,12 +30,28 @@ export default async function DevicesPage() {
   const { data } = await supabase
     .from('push_subscriptions')
     .select(
-      'id, user_id, device_label, enabled, created_at, updated_at, last_seen_at, last_success_at, consecutive_failures, disabled_reason',
+      'id, user_id, channel, device_label, enabled, created_at, updated_at, last_seen_at, last_success_at, consecutive_failures, disabled_reason',
     )
     .order('created_at', { ascending: false });
 
   const devices: PushSubscriptionRow[] = data ?? [];
   const vapidPublicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY ?? null;
+
+  // ── Availability is a different question on each platform ────────────────
+  //
+  // Web Push needs a VAPID key pair; APNs needs Apple credentials; neither
+  // says anything about the other. This used to ask only the Web Push
+  // question, which meant a deployment with APNs configured and no VAPID key
+  // told everybody using the iOS app that notifications "are not configured"
+  // — while the working native control sat one component further down,
+  // unreachable. The reverse was wrong too: with a VAPID key and no APNs
+  // credentials it offered iOS a button that could only fail at registration.
+  //
+  // `readApnsConfiguration` is server-only and this is a Server Component, so
+  // the credentials are read here and nothing about them reaches the browser.
+  const configured = isNativeApp
+    ? readApnsConfiguration() !== null
+    : vapidPublicKey !== null;
 
   return (
     <>
@@ -46,13 +63,15 @@ export default async function DevicesPage() {
 
       <section className="surface-card flex flex-col gap-3 p-4">
         <h2 className="text-[0.9375rem] font-semibold">This device</h2>
-        {vapidPublicKey === null ? (
+        {configured ? (
+          // `vapidPublicKey` may be null here, and that is fine: the native
+          // branch of this component returns before ever reading it.
+          <EnablePushButton vapidPublicKey={vapidPublicKey} isNativeApp={isNativeApp} />
+        ) : (
           <p className="text-sm text-muted">
             Phone notifications are not configured on this deployment. Your in-app inbox works
             normally.
           </p>
-        ) : (
-          <EnablePushButton vapidPublicKey={vapidPublicKey} isNativeApp={isNativeApp} />
         )}
       </section>
 

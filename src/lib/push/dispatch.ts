@@ -1,9 +1,13 @@
 import 'server-only';
 
-import { classifyPushError, classifyPushStatusCode } from '@/lib/push/classify';
+import {
+  classifyApnsFailure,
+  classifyPushError,
+  classifyPushStatusCode,
+} from '@/lib/push/classify';
 import { buildPushPayload, type CanonicalNotificationForPush } from '@/lib/push/payload';
 import type { PushSender, PushTarget } from '@/lib/push/sender';
-import type { PushDeliveryStatus } from '@/types/database';
+import type { ApnsEnvironment, PushDeliveryStatus } from '@/types/database';
 
 /**
  * Delivering canonical notifications to phones.
@@ -24,13 +28,30 @@ import type { PushDeliveryStatus } from '@/types/database';
  * without a network or a database.
  */
 
-export interface PushSubscriptionRecord {
-  id: string;
-  user_id: string;
-  endpoint: string;
-  p256dh: string;
-  auth_secret: string;
-}
+/**
+ * A subscription as the dispatcher needs it: the owner, and the address.
+ *
+ * Discriminated on `channel`, the same column the row carries, so a record
+ * cannot describe a device the code then addresses through the wrong protocol.
+ * The database enforces the same exclusivity from its side — see
+ * `push_subscriptions_channel_shape`.
+ */
+export type PushSubscriptionRecord =
+  | {
+      id: string;
+      user_id: string;
+      channel: 'web_push';
+      endpoint: string;
+      p256dh: string;
+      auth_secret: string;
+    }
+  | {
+      id: string;
+      user_id: string;
+      channel: 'apns';
+      device_token: string;
+      apns_environment: ApnsEnvironment;
+    };
 
 /**
  * The persistence this dispatcher needs. Implemented against the service-role
@@ -77,8 +98,8 @@ export async function dispatchPushNotifications(
     return result;
   }
 
-  // No VAPID configuration: push is simply not available on this deployment.
-  // The canonical notifications already exist, so nothing is lost.
+  // No transport at all: push is simply not available on this deployment. The
+  // canonical notifications already exist, so nothing is lost.
   if (deps.sender === null) {
     result.skipped = notificationIds.length;
     return result;
@@ -125,16 +146,34 @@ export async function dispatchPushNotifications(
           continue;
         }
 
-        const target: PushTarget = {
-          subscriptionId: subscription.id,
-          endpoint: subscription.endpoint,
-          p256dh: subscription.p256dh,
-          auth: subscription.auth_secret,
-        };
-
-        result.attempted += 1;
+        const target: PushTarget =
+          subscription.channel === 'apns'
+            ? {
+                channel: 'apns',
+                subscriptionId: subscription.id,
+                deviceToken: subscription.device_token,
+                environment: subscription.apns_environment,
+              }
+            : {
+                channel: 'web_push',
+                subscriptionId: subscription.id,
+                endpoint: subscription.endpoint,
+                p256dh: subscription.p256dh,
+                auth: subscription.auth_secret,
+              };
 
         const outcome = await deps.sender.send(target, payload);
+
+        // This deployment has no transport for that channel. Nothing was
+        // attempted and nothing is recorded, so adding the credentials later
+        // leaves no terminal rows to unpick — the same treatment a deployment
+        // with no VAPID keys at all already gets.
+        if (!outcome.ok && 'unsupported' in outcome) {
+          result.skipped += 1;
+          continue;
+        }
+
+        result.attempted += 1;
 
         if (outcome.ok) {
           await deps.store.recordResult(notification.id, subscription.id, 'sent', null);
@@ -145,7 +184,9 @@ export async function dispatchPushNotifications(
         const classification =
           'statusCode' in outcome
             ? classifyPushStatusCode(outcome.statusCode)
-            : classifyPushError(outcome.error);
+            : 'apnsStatus' in outcome
+              ? classifyApnsFailure(outcome.apnsStatus, outcome.apnsReason)
+              : classifyPushError(outcome.error);
 
         await deps.store.recordResult(
           notification.id,
