@@ -1,0 +1,162 @@
+name: Deploy production
+
+# ── WHY THIS WORKFLOW EXISTS ─────────────────────────────────────────────────
+#
+# Build #2 shipped application code to production while two Supabase migrations
+# were still pending. Vercel deployed on merge; the schema was applied by hand
+# some time later; and in between, every player who tapped "Enable phone
+# notifications" was told they lacked permission — because the function the code
+# called did not exist yet.
+#
+# Two independent pipelines with no ordering between them will do that again.
+# This workflow makes the ordering explicit: migrations first, deploy second,
+# and no deploy at all if the migrations do not apply cleanly.
+#
+# Vercel's own production deploys are switched off in `vercel.json`
+# (`git.deploymentEnabled.main: false`) so there is exactly one path to
+# production. Preview deployments for every other branch are untouched.
+
+on:
+  push:
+    branches: [main]
+  # Re-running a deploy by hand is genuinely useful — a failed health check, an
+  # expired token. The job-level `if` below pins it to `main`, so choosing any
+  # other ref in the UI runs nothing rather than deploying a feature branch.
+  workflow_dispatch:
+
+# Never two production deploys at once, and never cancel one midway: a cancelled
+# run could stop between `db push` and the deploy, which is the exact state this
+# workflow exists to prevent.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  # The same lint, type-check, test, build and end-to-end suite a pull request
+  # runs — reused rather than restated, so the two cannot drift.
+  verify:
+    if: github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/ci.yml
+
+  deploy:
+    name: Migrate, then deploy
+    needs: verify
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    # Every production credential is scoped to this environment. A pull-request
+    # workflow does not declare it and therefore cannot read any of them, which
+    # is what keeps untrusted PR code away from the production database.
+    environment: production
+
+    steps:
+      - name: Check out the exact commit that triggered this run
+        uses: actions/checkout@v4
+        with:
+          # Not a branch name: `main` could have moved while `verify` ran, and
+          # deploying a commit that was never verified is the failure mode this
+          # workflow is meant to remove.
+          ref: ${{ github.sha }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: npm
+
+      # Pinned, not `latest`. A deployment pipeline that silently changes its
+      # own tooling between runs cannot be reasoned about, and both of these
+      # versions are the ones this cutover was rehearsed against.
+      - name: Install the Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: 2.111.0
+
+      - name: Install the Vercel CLI
+        run: npm install --global vercel@54.6.1
+
+      # ── Database first ───────────────────────────────────────────────────
+      #
+      # Non-interactive throughout: the access token authenticates the CLI, the
+      # database password authorises the migration connection. Neither is echoed.
+      - name: Link the production Supabase project
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+        run: supabase link --project-ref "$SUPABASE_PROJECT_ID" --password "$SUPABASE_DB_PASSWORD"
+
+      - name: Show what would be applied
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+        run: supabase db push --linked --dry-run --password "$SUPABASE_DB_PASSWORD"
+
+      - name: Apply pending migrations
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+        run: supabase db push --linked --password "$SUPABASE_DB_PASSWORD"
+
+      # Belt and braces. `db push` exits non-zero on failure, but "the push
+      # reported success" and "production now has every migration this commit
+      # carries" are different claims, and only the second one licenses a deploy.
+      - name: Verify migration parity
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+        run: |
+          supabase migration list --linked --password "$SUPABASE_DB_PASSWORD" \
+            --output-format json > migrations.json
+          node --input-type=module <<'NODE'
+          import { readFileSync } from 'node:fs';
+          const raw = readFileSync('migrations.json', 'utf8');
+          const line = raw.split('\n').find((l) => l.trim().startsWith('{'));
+          if (!line) {
+            console.error('Could not read the migration list.');
+            process.exit(1);
+          }
+          const { migrations } = JSON.parse(line);
+          const pending = migrations.filter((m) => m.local && !m.remote);
+          const unknown = migrations.filter((m) => m.remote && !m.local);
+          console.log(`local ${migrations.filter((m) => m.local).length}, pending ${pending.length}, remote-only ${unknown.length}`);
+          for (const m of pending) console.error(`PENDING: ${m.local}`);
+          // A migration the remote has and this commit does not means production
+          // is ahead of the code — a rollback, or somebody applying by hand.
+          // Worth failing on: deploying older code over a newer schema is the
+          // mirror image of the incident this workflow prevents.
+          for (const m of unknown) console.error(`REMOTE-ONLY: ${m.remote}`);
+          if (pending.length > 0 || unknown.length > 0) process.exit(1);
+          console.log('Migration parity confirmed.');
+          NODE
+
+      # ── Only now, the application ────────────────────────────────────────
+      #
+      # Reached only if every step above succeeded, which is the whole point:
+      # new code cannot become active before the schema it depends on exists.
+      - name: Deploy this commit to Vercel production
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: |
+          vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
+          vercel build --prod --token="$VERCEL_TOKEN"
+          vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN" > deployment-url.txt
+          echo "Deployed: $(cat deployment-url.txt)"
+
+      - name: Verify production is healthy
+        run: |
+          for attempt in 1 2 3 4 5; do
+            body=$(curl --silent --show-error --max-time 15 https://app.matchdayapps.com/api/health || true)
+            echo "attempt $attempt: $body"
+            case "$body" in
+              *'"status":"ok"'*) echo 'Production is healthy.'; exit 0 ;;
+            esac
+            sleep 10
+          done
+          echo 'Production did not report healthy after the deploy.'
+          exit 1

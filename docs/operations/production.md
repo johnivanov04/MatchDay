@@ -60,10 +60,61 @@ Set them in the host's own encrypted store, not in a file in the repository.
 
 Migrations are plain SQL in `supabase/migrations`, applied in filename order.
 
+**Production migrations are applied by CI, not by hand.** Merging to `main`
+runs `.github/workflows/deploy-production.yml`, which verifies the commit,
+applies pending migrations, confirms parity, and only then deploys that same
+commit to Vercel. Vercel's own production deploys are switched off
+(`git.deploymentEnabled.main: false` in `vercel.json`) so there is exactly one
+path to production.
+
+The commands below remain correct for a local check or an emergency, and
+`migration list` is safe to run at any time:
+
 ```bash
 supabase link --project-ref <ref>
-supabase db push
+supabase migration list --linked   # read-only: what is applied, what is pending
+supabase db push                   # normally CI's job, not yours
 ```
+
+### The ordering rule, and why it exists
+
+Build #2 shipped code to production while two migrations were still pending.
+Vercel deployed on merge; the schema was applied by hand some time later; and in
+between, every player who tapped "Enable phone notifications" was told **"You do
+not have permission to do that"** — because `register_apns_device` did not exist
+yet, and an unrecognised database error used to fall back to that message.
+
+Two pipelines with no ordering between them will do that again. The workflow
+removes the ordering question: no migration, no deploy.
+
+### Migrations must be backward-compatible with the deployed application
+
+**Database migration rollback is forward-only; code rollback is not.**
+
+Vercel keeps previous deployments, so reverting the application is instant.
+There is no equivalent for the schema: `supabase db push` only rolls forward,
+and undoing a migration means writing and applying a new one.
+
+The consequence is a rule that has to hold for every migration:
+
+> A migration must leave the **previously deployed** application version working.
+
+Because migrations are applied *before* the new code goes live, the old code is
+briefly running against the new schema — and if a deploy is rolled back, it runs
+against it for as long as the rollback lasts. So:
+
+- **Add** columns, tables, types, functions and indexes freely.
+- **Widen** constraints freely — dropping a `NOT NULL` or relaxing a `CHECK`
+  cannot break code that was already satisfying the stricter version.
+- **Do not** drop or rename a column, table or function the deployed code still
+  reads, and do not narrow a constraint in the same migration that starts
+  writing values which satisfy it. Split those across two releases: add and
+  backfill first, remove once nothing references it.
+
+The Build #2 and Build #3 migrations are all of the first two kinds. The one
+signature change so far — `record_push_delivery_result` gaining a parameter —
+kept the new argument defaulted precisely so the previously deployed dispatcher,
+which passes four arguments, keeps working.
 
 `supabase/seed.sql` is **development fixture data** — named test accounts, a
 sample league, sample matches. It must never run against production.
