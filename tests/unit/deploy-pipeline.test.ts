@@ -141,12 +141,127 @@ describe('the production workflow is ordered and gated', () => {
   });
 
   it('applies migrations before it deploys, and verifies parity in between', () => {
-    const order = ['Apply pending migrations', 'Verify migration parity', 'Deploy this commit'];
+    const order = [
+      'Apply pending migrations',
+      'Verify migration parity',
+      'Create a staged production deployment',
+    ];
     const positions = order.map((step) => DEPLOY.indexOf(step));
 
     for (const position of positions) expect(position).toBeGreaterThan(-1);
     // The whole point, expressed as a comparison rather than a comment.
     expect(positions).toEqual([...positions].sort((a, b) => a - b));
+  });
+
+  describe('the application is staged before it is promoted', () => {
+    /**
+     * ── WHAT THIS PREVENTS ─────────────────────────────────────────────────
+     *
+     * The first version of this workflow built on the runner and shipped the
+     * result with `--prebuilt`. The runner used Node 22; the Vercel project
+     * runs Node 24. The output was assembled for a runtime it would never
+     * execute on — and every gate passed, because the build succeeded, the
+     * deploy succeeded and the deployment reported READY.
+     *
+     * Production served 500 on every dynamic route until it was rolled back.
+     *
+     * Two defects, fixed together: Vercel now performs the build, so the
+     * runtime cannot be mismatched; and the deployment is health-checked while
+     * the production domains still point elsewhere, so a bad build is never
+     * served rather than merely being noticed afterwards.
+     */
+    it('never builds locally or deploys prebuilt output', () => {
+      expect(DEPLOY_COMMANDS).not.toContain('--prebuilt');
+      expect(DEPLOY_COMMANDS).not.toMatch(/vercel build/);
+    });
+
+    it('does not pull the production environment onto the runner', () => {
+      // `vercel pull` writes .vercel/.env.production.local — every production
+      // secret, including the APNs signing key — to disk. It existed only to
+      // feed the local build that no longer happens.
+      expect(DEPLOY_COMMANDS).not.toMatch(/vercel pull/);
+    });
+
+    it('stages the deployment without moving the production domains', () => {
+      expect(DEPLOY_COMMANDS).toMatch(/vercel deploy --prod --skip-domain/);
+    });
+
+    it('promotes explicitly rather than relying on deploy to alias', () => {
+      expect(DEPLOY_COMMANDS).toMatch(/vercel promote "\$STAGED_URL"/);
+    });
+
+    it('checks the staged deployment through a protection-aware request', () => {
+      // A plain curl to a staged URL is answered by Vercel's authentication
+      // page, not by the application, so it would "pass" against nothing.
+      expect(DEPLOY_COMMANDS).toMatch(/vercel curl .* --deployment "\$STAGED_URL"/);
+    });
+
+    it('fails the probe on any non-success HTTP status', () => {
+      /**
+       * ── THE HOLE THIS CLOSES ───────────────────────────────────────────
+       *
+       * `vercel curl` invokes the system curl, and plain curl exits 0 for an
+       * HTTP 500 — it fetched a page and does not care what the status was.
+       * A probe without `--fail-with-body` therefore reports success against a
+       * completely broken deployment, which is exactly the deployment this gate
+       * exists to catch.
+       *
+       * Measured against a live deployment: a 404 exits 0 without the flag and
+       * 22 with it.
+       */
+      expect(DEPLOY_COMMANDS).toContain('--fail-with-body');
+
+      // Every probe goes through one helper, so the flag cannot be present on
+      // some requests and missing from others.
+      const probeBodies = [...DEPLOY_COMMANDS.matchAll(/vercel curl [^\n]*\n[^\n]*/g)].map(
+        (m) => m[0],
+      );
+      expect(probeBodies.length).toBeGreaterThan(0);
+      for (const body of probeBodies) expect(body).toContain('--fail-with-body');
+    });
+
+    it('does not decide health by matching text in the body', () => {
+      // The first version looked for the string "Internal Server Error", which
+      // any differently-shaped error page walks straight past. Status is the
+      // assertion now.
+      expect(DEPLOY_COMMANDS).not.toContain("*'Internal Server Error'*");
+    });
+
+    it('requires the health body to report the database, not just a 200', () => {
+      // A deployment that boots but cannot reach Supabase answers 200 with a
+      // body saying so. Status alone would promote it.
+      expect(DEPLOY_COMMANDS).toContain('"status":"ok"');
+      expect(DEPLOY_COMMANDS).toContain('"database":"ok"');
+    });
+
+    it('probes the routes that a failed runtime takes down', () => {
+      for (const path of ['/api/health', '/sign-in', '/privacy', '/.well-known/apple-app-site-association']) {
+        expect(DEPLOY_COMMANDS).toContain(path);
+      }
+    });
+
+    it('health-checks the staged deployment strictly before promoting it', () => {
+      const staged = DEPLOY.indexOf('Health-check the staged deployment');
+      const promote = DEPLOY.indexOf('Promote the staged deployment');
+      const after = DEPLOY.indexOf('Verify production is healthy');
+
+      for (const position of [staged, promote, after]) expect(position).toBeGreaterThan(-1);
+      // Staged check, then promote, then the post-promotion check. Any other
+      // order means production can be serving a build nothing verified.
+      expect([staged, promote, after]).toEqual([staged, promote, after].sort((a, b) => a - b));
+    });
+
+    it('still verifies production after promotion', () => {
+      expect(DEPLOY_COMMANDS).toContain('https://app.matchdayapps.com/api/health');
+    });
+
+    it('keeps migration parity ahead of every deployment step', () => {
+      const parity = DEPLOY.indexOf('Verify migration parity');
+      const stage = DEPLOY.indexOf('Create a staged production deployment');
+
+      expect(parity).toBeGreaterThan(-1);
+      expect(stage).toBeGreaterThan(parity);
+    });
   });
 
   it('waits for the full verification suite first', () => {

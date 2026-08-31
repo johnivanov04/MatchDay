@@ -143,16 +143,127 @@ jobs:
       #
       # Reached only if every step above succeeded, which is the whole point:
       # new code cannot become active before the schema it depends on exists.
-      - name: Deploy this commit to Vercel production
+      # ── The application, staged before it is promoted ────────────────────
+      #
+      # Reached only if every step above succeeded, which is the whole point:
+      # new code cannot become active before the schema it depends on exists.
+      #
+      # ── WHY NOT `vercel build` + `--prebuilt` ────────────────────────────
+      #
+      # That is what this workflow did first, and it took production down. The
+      # runner built with Node 22 while the Vercel project runs Node 24, so the
+      # prebuilt output was assembled for a runtime it would never execute on.
+      # Every gate passed — the build succeeded, the deploy succeeded, the
+      # deployment reported READY — and every dynamic route answered 500.
+      #
+      # Building on Vercel removes the class of fault entirely. The project's
+      # own runtime and environment are used by definition, and there is no
+      # second place for them to be configured and drift.
+      #
+      # `vercel pull` is gone with it. It was only needed to feed a local build,
+      # and it writes `.vercel/.env.production.local` — every production secret,
+      # including the APNs signing key, onto the runner's disk for no reason.
+      - name: Create a staged production deployment
+        id: stage
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
         run: |
-          vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
-          vercel build --prod --token="$VERCEL_TOKEN"
-          vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN" > deployment-url.txt
-          echo "Deployed: $(cat deployment-url.txt)"
+          # `--skip-domain` builds and deploys to production *without* aliasing
+          # the production domains to it. The result is a real production
+          # deployment, reachable at its own URL, that nobody is being served.
+          vercel deploy --prod --skip-domain --yes --token="$VERCEL_TOKEN" > staged-url.txt
+          url="$(cat staged-url.txt)"
+          case "$url" in
+            https://*) ;;
+            *) echo "Did not get a deployment URL back."; exit 1 ;;
+          esac
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "Staged: $url"
+
+      # ── The gate that was missing ────────────────────────────────────────
+      #
+      # The previous version health-checked *after* the alias moved, so it could
+      # only report damage that was already live. Checking the staged URL first
+      # means a broken build is never served: the production domains stay on the
+      # deployment they are on, and this job fails instead.
+      #
+      # `vercel curl` targets a specific deployment and carries the protection
+      # bypass, so a deployment that is not publicly reachable can still be
+      # inspected. A plain curl to the staged URL would be answered by Vercel's
+      # authentication page rather than by the application.
+      - name: Health-check the staged deployment before promoting it
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          STAGED_URL: ${{ steps.stage.outputs.url }}
+        run: |
+          # `vercel curl` invokes the system curl and forwards these flags to it.
+          #
+          # `--fail-with-body` is doing the real work. Plain curl exits 0 for an
+          # HTTP 500 — it fetched a page, and it does not care what the status
+          # was — so a probe without it reports success against a completely
+          # broken deployment. Measured against a live deployment: a 404 exits 0
+          # without the flag and 22 with it. The body is still printed, which is
+          # what makes a failure diagnosable.
+          probe() {
+            vercel curl "$1" --deployment "$STAGED_URL" --yes --token="$VERCEL_TOKEN" \
+              --silent --show-error --fail-with-body
+          }
+
+          # /api/health is the one endpoint where a 2xx is not enough. It answers
+          # 200 with a body describing what it checked, and a deployment that
+          # boots but cannot reach the database would pass on status alone.
+          healthy=""
+          for attempt in 1 2 3 4 5; do
+            if body="$(probe /api/health)"; then
+              case "$body" in
+                *'"status":"ok"'*)
+                  case "$body" in
+                    *'"database":"ok"'*) healthy=yes ;;
+                  esac
+                  ;;
+              esac
+            else
+              body="request failed"
+            fi
+            echo "health attempt $attempt: $(printf '%s' "$body" | head -c 200)"
+            [ -n "$healthy" ] && break
+            # A cold function is slower on its first request; that is not a fault.
+            sleep 10
+          done
+
+          if [ -z "$healthy" ]; then
+            echo 'Staged deployment is not healthy. Production is untouched.'
+            exit 1
+          fi
+
+          # The rest are status-only, and `--fail-with-body` is the assertion:
+          # any 4xx or 5xx exits non-zero and takes the step down with it. These
+          # three are here because the outage this replaced took out every
+          # dynamic route, not just the health endpoint — a server-rendered
+          # page, a static page, and the association document Apple fetches.
+          for path in /sign-in /privacy /.well-known/apple-app-site-association; do
+            if ! probe "$path" > /dev/null; then
+              echo "Staged deployment failed on $path. Production is untouched."
+              exit 1
+            fi
+            echo "ok: $path"
+          done
+
+          echo 'Staged deployment is healthy.'
+
+      - name: Promote the staged deployment
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          STAGED_URL: ${{ steps.stage.outputs.url }}
+        run: |
+          vercel promote "$STAGED_URL" --yes --token="$VERCEL_TOKEN"
+          echo "Promoted: $STAGED_URL"
 
       - name: Verify production is healthy
         run: |
@@ -164,5 +275,5 @@ jobs:
             esac
             sleep 10
           done
-          echo 'Production did not report healthy after the deploy.'
+          echo 'Production did not report healthy after promotion.'
           exit 1
