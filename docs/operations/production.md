@@ -67,6 +67,27 @@ commit to Vercel. Vercel's own production deploys are switched off
 (`git.deploymentEnabled.main: false` in `vercel.json`) so there is exactly one
 path to production.
 
+### How CI reaches the production database
+
+Over a **Session Pooler connection string**, held as `SUPABASE_DB_URL` in the
+GitHub **`production`** environment. `supabase db push` and
+`supabase migration list` both take `--db-url`, so the workflow talks to
+Postgres directly and never touches the Supabase management API.
+
+There is deliberately no `supabase link` step. It was tried and refused twice
+with *"Authorization failed for the access token and project ref pair"* — a
+project-scoped token with Project Settings READ and Migrations READ-WRITE
+authenticates correctly but is not authorised for the endpoint `link` calls.
+Rather than chase the right scope, the pipeline stopped needing one: migrations
+are DDL against a single database, and a connection string is all they ever
+required. That also collapsed three secrets into one.
+
+The URL is supplied whole and used verbatim. Do not reconstruct it in the
+workflow — the pooler's host, port and username all differ from the direct
+`db.<ref>.supabase.co` endpoint, and guessing any of them turns a working deploy
+into a failed one. It is passed by environment variable rather than interpolated
+into a command line, so only the variable name appears in a run log.
+
 The commands below remain correct for a local check or an emergency, and
 `migration list` is safe to run at any time:
 

@@ -80,36 +80,42 @@ jobs:
 
       # ── Database first ───────────────────────────────────────────────────
       #
-      # Non-interactive throughout: the access token authenticates the CLI, the
-      # database password authorises the migration connection. Neither is echoed.
-      - name: Link the production Supabase project
-        env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-          SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
-          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
-        run: supabase link --project-ref "$SUPABASE_PROJECT_ID" --password "$SUPABASE_DB_PASSWORD"
-
+      # Straight to Postgres over `--db-url`, with no `supabase link` and no
+      # management API in the path at all.
+      #
+      # `link` was tried first and refused twice: "Authorization failed for the
+      # access token and project ref pair". A project-scoped token with Project
+      # Settings READ and Migrations READ-WRITE authenticates fine but is not
+      # authorised for the endpoint `link` calls — and chasing the right scope
+      # would leave the pipeline depending on a permission model that can change
+      # underneath it.
+      #
+      # Migrations are DDL against one database. A connection string is all they
+      # ever needed, and it collapses three secrets into one.
+      #
+      # The URL is a Session Pooler connection string, supplied whole and used
+      # verbatim — never reconstructed here, because the pooler host, port and
+      # username differ from the direct endpoint and guessing any of them turns
+      # a working deploy into a failed one. It is passed by environment variable
+      # and never interpolated into a logged command line.
       - name: Show what would be applied
         env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
-        run: supabase db push --linked --dry-run --password "$SUPABASE_DB_PASSWORD"
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: supabase db push --db-url "$SUPABASE_DB_URL" --dry-run
 
       - name: Apply pending migrations
         env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
-        run: supabase db push --linked --password "$SUPABASE_DB_PASSWORD"
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: supabase db push --db-url "$SUPABASE_DB_URL"
 
       # Belt and braces. `db push` exits non-zero on failure, but "the push
       # reported success" and "production now has every migration this commit
       # carries" are different claims, and only the second one licenses a deploy.
       - name: Verify migration parity
         env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
         run: |
-          supabase migration list --linked --password "$SUPABASE_DB_PASSWORD" \
+          supabase migration list --db-url "$SUPABASE_DB_URL" \
             --output-format json > migrations.json
           node --input-type=module <<'NODE'
           import { readFileSync } from 'node:fs';

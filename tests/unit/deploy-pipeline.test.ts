@@ -28,6 +28,18 @@ const VERCEL = JSON.parse(read('vercel.json')) as {
   crons?: Array<{ path: string; schedule: string }>;
 };
 const DEPLOY = read('.github/workflows/deploy-production.yml');
+
+/**
+ * The workflow with its comment lines stripped.
+ *
+ * The comments explain, at length, which approaches were tried and rejected —
+ * so they mention `supabase link` and the credentials it needed. An assertion
+ * that a command is absent has to look at commands, or it fails on the prose
+ * describing why the command was removed.
+ */
+const DEPLOY_COMMANDS = DEPLOY.split('\n')
+  .filter((line) => !/^\s*#/.test(line))
+  .join('\n');
 const CI = read('.github/workflows/ci.yml');
 
 describe('Vercel does not deploy production by itself', () => {
@@ -73,6 +85,59 @@ describe('the production workflow is ordered and gated', () => {
     // declare the environment — which is what keeps pull-request code away
     // from the production database.
     expect(DEPLOY).toContain('environment: production');
+  });
+
+  describe('the database credential model', () => {
+    /**
+     * Migrations reach production over a plain connection string. `supabase
+     * link` was tried first and refused twice — "Authorization failed for the
+     * access token and project ref pair" — because a project-scoped token that
+     * authenticates correctly is still not authorised for the endpoint `link`
+     * calls. Talking to Postgres directly removes the management API from the
+     * path, and with it a permission model that can change underneath us.
+     */
+    it('uses a connection string and never links', () => {
+      expect(DEPLOY_COMMANDS).not.toContain('supabase link');
+      for (const step of ['db push --db-url', 'migration list --db-url']) {
+        expect(DEPLOY_COMMANDS).toContain(step);
+      }
+    });
+
+    it('no longer depends on the management-API credentials', () => {
+      // Three secrets collapsed into one. Leaving them referenced would keep
+      // the pipeline failing on a permission it no longer needs.
+      for (const gone of [
+        'SUPABASE_ACCESS_TOKEN',
+        'SUPABASE_PROJECT_ID',
+        'SUPABASE_DB_PASSWORD',
+      ]) {
+        expect(DEPLOY_COMMANDS).not.toContain(gone);
+      }
+    });
+
+    it('reads the URL from the production environment and nowhere else', () => {
+      expect(DEPLOY).toContain('SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}');
+    });
+
+    it('passes the URL by environment variable, never on a command line', () => {
+      /**
+       * A connection string carries the database password. Interpolating the
+       * secret into the `run:` text would put it in the rendered command that
+       * Actions prints; `"$SUPABASE_DB_URL"` is expanded by the shell instead,
+       * so only the variable name is ever displayed.
+       */
+      expect(DEPLOY_COMMANDS).not.toMatch(/--db-url "\$\{\{/);
+      const uses = [...DEPLOY_COMMANDS.matchAll(/--db-url (\S+)/g)].map((m) => m[1]);
+      expect(uses.length).toBeGreaterThan(0);
+      for (const use of uses) expect(use).toBe('"$SUPABASE_DB_URL"');
+    });
+
+    it('never echoes the URL and never enables shell tracing', () => {
+      // `set -x` would print every expanded command, including the connection
+      // string, into a log this repository cannot redact after the fact.
+      expect(DEPLOY_COMMANDS).not.toMatch(/set -x|set -o xtrace/);
+      expect(DEPLOY_COMMANDS).not.toMatch(/echo .*SUPABASE_DB_URL/);
+    });
   });
 
   it('applies migrations before it deploys, and verifies parity in between', () => {
