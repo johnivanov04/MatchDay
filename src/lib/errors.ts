@@ -53,6 +53,8 @@ export const DOMAIN_ERROR_CODES = [
   // from every ordinary surface; `LEAGUE_CLOSED` is what a closed league says
   // to anything that would treat it as open.
   'ACCOUNT_DELETED',
+  // The server, not the caller, is wrong. See `errors-from-database.ts`.
+  'SERVER_MISCONFIGURED',
   'LEAGUE_CLOSED',
 ] as const;
 
@@ -85,6 +87,12 @@ const USER_FACING_MESSAGES: Record<DomainErrorCode, string> = {
   TEAM_ASSIGNMENT_INVALID: 'That team assignment is not valid.',
   NOTIFICATION_NOT_FOUND: 'That notification is no longer available.',
   NOT_AUTHORIZED: 'You do not have permission to do that.',
+  // Deliberately says nothing about what is misconfigured. The person reading
+  // this cannot fix it and retrying in a second will not help — but it must not
+  // read as *their* fault, which is exactly how the old NOT_AUTHORIZED
+  // fallback read when a database function was missing in production.
+  SERVER_MISCONFIGURED:
+    'Something on our side is not working right now. This has been reported — please try again later.',
   VALIDATION_FAILED: 'Please check the highlighted fields and try again.',
   // Deliberately not "your account is deleted": the person reading this may be
   // mid-deletion with a retry still to run, and the status screen is where the

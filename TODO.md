@@ -20,13 +20,13 @@ list of what an operator must actually do.
 
 None of these is a code change. See `docs/operations/production.md`.
 
-- [ ] Set `CRON_SECRET` on the deployment and confirm the `vercel.json` cron
+- [x] Set `CRON_SECRET` on the deployment and confirm the `vercel.json` cron
       entry is registered and invoking successfully. **Reminders do not go out
       until this is done**, and on a Hobby plan the ten-minute cadence needs an
       upgrade.
-- [ ] Set `NEXT_PUBLIC_SUPPORT_EMAIL` so a blocked player has a route to a
+- [x] Set `NEXT_PUBLIC_SUPPORT_EMAIL` so a blocked player has a route to a
       human.
-- [ ] Set `REMINDER_HEARTBEAT_URL` in Production so an outside observer watches
+- [x] Set `REMINDER_HEARTBEAT_URL` in Production so an outside observer watches
       the reminder scheduler. Unset, the cron still works but nothing notices if
       it stops — and a deployment that stops running crons cannot notice its own
       silence.
@@ -92,10 +92,6 @@ remembering as patterns rather than one-off bugs:
       select/insert/delete-own policies, `profiles.profile_photo_path`, and
       on-device resize to a 512x512 JPEG. `profile_photo_url` is kept for legacy
       rows, still rendered, no longer editable.
-- [ ] **Avatars beyond the profile page.** The upload flow ships alone by
-      design — rosters, the team builder, published teams, member lists and the
-      attendance register still show names only. Deferred until the upload flow
-      has been used on a physical iPhone.
 - [ ] **Administrator notes UI.** `league_membership_admin_notes` exists with
       administrator-only RLS but has no interface; it is written to only by the
       seed.
@@ -150,9 +146,6 @@ timezone resolution, canonical in-app notifications, and opt-in Web Push.
 
 Carried forward from Phase 3:
 
-- [ ] **Real PWA icons.** The manifest ships an SVG with `sizes: "any"`.
-      Generate 192px and 512px PNGs (including a maskable variant) before
-      relying on home-screen install on Android.
 - [ ] **Push delivery is inline, not queued.** `dispatchPushForKeyPrefix` runs
       inside the request that published the match. It cannot fail the domain
       operation, but a large league means a slow response. Move it to a queue
@@ -205,10 +198,6 @@ the remaining notification-centre mutations.
 
 Carried forward from Phase 5:
 
-- [ ] **No scheduler is configured.** `POST /api/cron/reminders` and
-      `npm run reminders:run` both exist; nothing calls either on a cadence.
-      Until an operator wires up Vercel Cron or `pg_cron`, reminders do not go
-      out. This is the single most important operational gap in the product.
 - [ ] **The two deadlines round opposite ways.** Cancelling *at*
       `cancellation_cutoff_at` is on time (`now() > cutoff` is late), while
       signup treats `now() >= signup_closes_at` as closed. Both are tested and
@@ -265,9 +254,6 @@ Decided 2026-08-03, delivered in Phase 3. See
 - [ ] Component tests for the league switcher and forms.
 - [ ] Rate limiting on the sign-in endpoint. Supabase Auth applies its own
       limits; this is about the application surface in front of it.
-- [ ] Automated data-retention and deletion. Removing a member's data is a
-      manual database operation today — fine for a 22-player pilot, a blocker
-      for anything wider.
 - [ ] `teams_published` is a `match_lifecycle_status` value nothing can reach.
       Phase 6 settled that publication is metadata; either implement it or drop
       the enum value rather than leaving it looking implemented.

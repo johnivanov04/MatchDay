@@ -255,6 +255,15 @@ export interface ApnsRequest {
 export interface ApnsResponse {
   status: number;
   body: string;
+  /**
+   * Apple's `apns-id` for this attempt, when it sent one.
+   *
+   * Returned on success *and* on rejection, and it is the only handle Apple's
+   * support and delivery-status tooling recognise. Optional because a transport
+   * error never reached a response, and because nothing in the product depends
+   * on it — it exists so a question about one notification can be asked later.
+   */
+  apnsId?: string;
 }
 
 /**
@@ -303,15 +312,26 @@ export function createHttp2ApnsTransport(): ApnsTransport {
 
           let status = 0;
           let text = '';
+          let apnsId: string | undefined;
 
           stream.setEncoding('utf8');
           stream.on('response', (responseHeaders) => {
             status = Number(responseHeaders[http2.constants.HTTP2_HEADER_STATUS] ?? 0);
+            // HTTP/2 header names are lowercase. A repeated header would arrive
+            // as an array; only a single string is meaningful here.
+            const header = responseHeaders['apns-id'];
+            if (typeof header === 'string' && header !== '') {
+              apnsId = header;
+            }
           });
           stream.on('data', (chunk: string) => {
             text += chunk;
           });
-          stream.on('end', () => resolve({ status, body: text }));
+          stream.on('end', () =>
+            // Spread rather than assigning `undefined`: `exactOptionalPropertyTypes`
+            // distinguishes an absent key from one set to undefined.
+            resolve({ status, body: text, ...(apnsId === undefined ? {} : { apnsId }) }),
+          );
           stream.on('error', reject);
           stream.setTimeout(REQUEST_TIMEOUT_MS, () => {
             stream.close(http2.constants.NGHTTP2_CANCEL);
@@ -450,14 +470,21 @@ export function createApnsSender(
           response = await attempt();
         }
 
+        // Carried on both outcomes. Apple returns `apns-id` for a rejection
+        // too, and a rejected notification is exactly the one somebody later
+        // asks about.
+        const identifier =
+          response.apnsId === undefined ? {} : { providerMessageId: response.apnsId };
+
         if (response.status === 200) {
-          return { ok: true };
+          return { ok: true, ...identifier };
         }
 
         return {
           ok: false,
           apnsStatus: response.status,
           apnsReason: parseApnsReason(response.body),
+          ...identifier,
         };
       } catch (error: unknown) {
         // Handed on unmodified for `classifyPushError` to inspect structurally,
