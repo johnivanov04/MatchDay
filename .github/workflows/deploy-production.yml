@@ -268,6 +268,21 @@ jobs:
 
           echo 'Staged deployment is healthy.'
 
+      # Only now do the production domains move. Every failure above leaves them
+      # exactly where they were, on a deployment known to be serving.
+      #
+      # ── WHY `--scope` IS HERE AND NOT ON `deploy` ────────────────────────
+      #
+      # `vercel deploy` reads VERCEL_ORG_ID and VERCEL_PROJECT_ID from the
+      # environment and is pinned to the team by them. `promote` takes a URL and
+      # resolves it against whatever scope the CLI is currently in — which, for
+      # a Full Account token on a fresh runner with no default team, is the
+      # personal account. A deployment the previous step had just created then
+      # looked foreign:
+      #
+      #     Error: Deployment belongs to a different team
+      #
+      # Naming the scope explicitly resolves the URL where it actually lives.
       - name: Promote the staged deployment
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
@@ -275,7 +290,7 @@ jobs:
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
           STAGED_URL: ${{ steps.stage.outputs.url }}
         run: |
-          vercel promote "$STAGED_URL" --yes --token="$VERCEL_TOKEN"
+          vercel promote "$STAGED_URL" --yes --scope "$VERCEL_ORG_ID" --token="$VERCEL_TOKEN"
           echo "Promoted: $STAGED_URL"
 
       - name: Verify production is healthy
