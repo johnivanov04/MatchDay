@@ -539,6 +539,73 @@ describe('createApnsSender', () => {
     });
   });
 
+  describe('Apple’s apns-id', () => {
+    /**
+     * The only handle Apple's support and delivery-status tooling recognise.
+     * Build #2 shipped without it: the first production send was recorded as
+     * `sent`, which answers "did Apple take it" and not "which one".
+     */
+    const APNS_ID = '8B2E0B0E-4C3D-4F1A-9E77-2A6D5C1B0F42';
+
+    it('is carried on a successful send', async () => {
+      const { transport } = createTransport({ status: 200, body: '', apnsId: APNS_ID });
+      const outcome = await createApnsSender(CONFIG, transport).send(APNS_TARGET, PAYLOAD);
+
+      expect(outcome).toEqual({ ok: true, providerMessageId: APNS_ID });
+    });
+
+    it('is carried on a rejection too, which is the one somebody asks about', async () => {
+      const { transport } = createTransport({
+        status: 410,
+        body: '{"reason":"Unregistered"}',
+        apnsId: APNS_ID,
+      });
+      const outcome = await createApnsSender(CONFIG, transport).send(APNS_TARGET, PAYLOAD);
+
+      expect(outcome).toEqual({
+        ok: false,
+        apnsStatus: 410,
+        apnsReason: 'Unregistered',
+        providerMessageId: APNS_ID,
+      });
+    });
+
+    it('is simply absent when Apple sent none', async () => {
+      // `exactOptionalPropertyTypes` distinguishes an absent key from one set
+      // to undefined, and the database column is nullable for the same reason.
+      const { transport } = createTransport({ status: 200, body: '' });
+      const outcome = await createApnsSender(CONFIG, transport).send(APNS_TARGET, PAYLOAD);
+
+      expect(outcome).toEqual({ ok: true });
+      expect(Object.keys(outcome)).not.toContain('providerMessageId');
+    });
+
+    it('does not change delivery semantics', async () => {
+      // Same status in, same ok/not-ok out, with or without the header.
+      const withId = await createApnsSender(
+        CONFIG,
+        createTransport({ status: 200, body: '', apnsId: APNS_ID }).transport,
+      ).send(APNS_TARGET, PAYLOAD);
+      const withoutId = await createApnsSender(
+        CONFIG,
+        createTransport({ status: 200, body: '' }).transport,
+      ).send(APNS_TARGET, PAYLOAD);
+
+      expect(withId.ok).toBe(true);
+      expect(withoutId.ok).toBe(true);
+    });
+
+    it('exposes no credential or device token alongside it', async () => {
+      const { transport } = createTransport({ status: 200, body: '', apnsId: APNS_ID });
+      const outcome = await createApnsSender(CONFIG, transport).send(APNS_TARGET, PAYLOAD);
+
+      const serialised = JSON.stringify(outcome);
+      expect(serialised).not.toContain(APNS_TARGET.deviceToken);
+      expect(serialised).not.toContain('BEGIN');
+      expect(serialised).not.toContain(CONFIG.keys.production?.keyId ?? 'PRODUCTN456');
+    });
+  });
+
   it('reports the status and the reason, so the caller can tell them apart', async () => {
     const { transport } = createTransport({ status: 410, body: '{"reason":"Unregistered"}' });
     const outcome = await createApnsSender(CONFIG, transport).send(APNS_TARGET, PAYLOAD);

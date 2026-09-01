@@ -781,6 +781,8 @@ export type PushDeliveryAttemptRow = {
   status: PushDeliveryStatus;
   attempt_count: number;
   last_error_category: string | null;
+  /** The push provider's own identifier for the attempt — APNs `apns-id`. */
+  provider_message_id: string | null;
   last_attempted_at: string | null;
   delivered_at: string | null;
   created_at: string;
@@ -1367,6 +1369,7 @@ export interface Database {
           p_subscription_id: string;
           p_status: PushDeliveryStatus;
           p_error_category?: string | null;
+          p_provider_message_id?: string | null;
         };
         Returns: undefined;
       };

@@ -139,12 +139,14 @@ export function createPushDispatchStore(): PushDispatchStore | null {
       subscriptionId: string,
       status: PushDeliveryStatus,
       errorCategory: string | null,
+      providerMessageId: string | null = null,
     ): Promise<void> {
       await client.rpc('record_push_delivery_result', {
         p_notification_id: notificationId,
         p_subscription_id: subscriptionId,
         p_status: status,
         p_error_category: errorCategory,
+        p_provider_message_id: providerMessageId,
       });
     },
   };

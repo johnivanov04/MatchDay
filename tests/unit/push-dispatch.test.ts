@@ -38,6 +38,7 @@ interface Recorded {
   subscriptionId: string;
   status: PushDeliveryStatus;
   errorCategory: string | null;
+  providerMessageId?: string | null;
 }
 
 function createStore(overrides: Partial<PushDispatchStore> = {}) {
@@ -50,8 +51,14 @@ function createStore(overrides: Partial<PushDispatchStore> = {}) {
     loadEnabledSubscriptions: async () => [SUBSCRIPTION],
     alreadyDelivered: async (notificationId, subscriptionId) =>
       delivered.has(`${notificationId}:${subscriptionId}`),
-    recordResult: async (notificationId, subscriptionId, status, errorCategory) => {
-      recorded.push({ notificationId, subscriptionId, status, errorCategory });
+    recordResult: async (notificationId, subscriptionId, status, errorCategory, providerMessageId) => {
+      recorded.push({
+        notificationId,
+        subscriptionId,
+        status,
+        errorCategory,
+        ...(providerMessageId === undefined ? {} : { providerMessageId }),
+      });
       if (status === 'sent' || status === 'permanent_failure' || status === 'invalidated') {
         delivered.add(`${notificationId}:${subscriptionId}`);
       }
@@ -83,6 +90,7 @@ describe('successful delivery', () => {
         subscriptionId: SUBSCRIPTION.id,
         status: 'sent',
         errorCategory: null,
+        providerMessageId: null,
       },
     ]);
   });
@@ -368,6 +376,7 @@ describe('two channels', () => {
           subscriptionId: 'subscription-apns',
           status: 'sent',
           errorCategory: null,
+          providerMessageId: null,
         },
       ]);
     });
@@ -407,6 +416,7 @@ describe('two channels', () => {
           subscriptionId: 'subscription-apns',
           status: 'invalidated',
           errorCategory: 'gone',
+          providerMessageId: null,
         },
       ]);
     });
@@ -431,6 +441,7 @@ describe('two channels', () => {
           subscriptionId: 'subscription-apns',
           status: 'permanent_failure',
           errorCategory: 'unauthorized',
+          providerMessageId: null,
         },
       ]);
     });
@@ -466,6 +477,7 @@ describe('two channels', () => {
             subscriptionId: 'subscription-apns',
             status: 'permanent_failure',
             errorCategory: category,
+            providerMessageId: null,
           },
         ]);
       },
@@ -507,6 +519,120 @@ describe('two channels', () => {
         status: 'temporary_failure',
         errorCategory: 'rate_limited',
       });
+    });
+  });
+});
+
+
+describe('the provider’s own identifier is recorded as evidence', () => {
+  const APNS_SUBSCRIPTION: PushSubscriptionRecord = {
+    id: 'subscription-apns',
+    user_id: 'user-1',
+    channel: 'apns',
+    device_token: 'A1B2C3D4',
+    apns_environment: 'production',
+  };
+  const APNS_ID = '8B2E0B0E-4C3D-4F1A-9E77-2A6D5C1B0F42';
+
+  function apnsStore() {
+    return createStore({ loadEnabledSubscriptions: async () => [APNS_SUBSCRIPTION] });
+  }
+
+  it('is stored alongside a successful delivery', async () => {
+    const { store, recorded } = apnsStore();
+
+    await dispatchPushNotifications([NOTIFICATION.id], {
+      store,
+      sender: createRoutingPushSender({
+        web_push: null,
+        apns: { send: async () => ({ ok: true, providerMessageId: APNS_ID }) },
+      }),
+    });
+
+    expect(recorded).toEqual([
+      {
+        notificationId: NOTIFICATION.id,
+        subscriptionId: 'subscription-apns',
+        status: 'sent',
+        errorCategory: null,
+        providerMessageId: APNS_ID,
+      },
+    ]);
+  });
+
+  it('is stored alongside a rejection, which is when it matters most', async () => {
+    const { store, recorded } = apnsStore();
+
+    await dispatchPushNotifications([NOTIFICATION.id], {
+      store,
+      sender: createRoutingPushSender({
+        web_push: null,
+        apns: {
+          send: async () => ({
+            ok: false,
+            apnsStatus: 410,
+            apnsReason: 'Unregistered',
+            providerMessageId: APNS_ID,
+          }),
+        },
+      }),
+    });
+
+    expect(recorded[0]).toMatchObject({
+      status: 'invalidated',
+      errorCategory: 'gone',
+      providerMessageId: APNS_ID,
+    });
+  });
+
+  it('is null when the provider returned none', async () => {
+    const { store, recorded } = apnsStore();
+
+    await dispatchPushNotifications([NOTIFICATION.id], {
+      store,
+      sender: createRoutingPushSender({ web_push: null, apns: succeedingSender }),
+    });
+
+    expect(recorded[0]).toMatchObject({ status: 'sent', providerMessageId: null });
+  });
+
+  it('is null for a transport failure that never reached a response', async () => {
+    const { store, recorded } = apnsStore();
+
+    await dispatchPushNotifications([NOTIFICATION.id], {
+      store,
+      sender: createRoutingPushSender({
+        web_push: null,
+        apns: { send: async () => ({ ok: false, error: new Error('socket hang up') }) },
+      }),
+    });
+
+    expect(recorded[0]).toMatchObject({ status: 'temporary_failure', providerMessageId: null });
+  });
+
+  it('does not change how any outcome is classified', async () => {
+    // The identifier is evidence, not input to the state machine.
+    const { store, recorded } = apnsStore();
+
+    await dispatchPushNotifications([NOTIFICATION.id], {
+      store,
+      sender: createRoutingPushSender({
+        web_push: null,
+        apns: {
+          send: async () => ({
+            ok: false,
+            apnsStatus: 403,
+            apnsReason: 'ExpiredProviderToken',
+            providerMessageId: APNS_ID,
+          }),
+        },
+      }),
+    });
+
+    // Still a permanent failure that leaves the device enabled.
+    expect(recorded[0]).toMatchObject({
+      status: 'permanent_failure',
+      errorCategory: 'unauthorized',
     });
   });
 });

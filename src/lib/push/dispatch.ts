@@ -71,6 +71,8 @@ export interface PushDispatchStore {
     subscriptionId: string,
     status: PushDeliveryStatus,
     errorCategory: string | null,
+    /** The provider's own identifier for the attempt, when it returned one. */
+    providerMessageId?: string | null,
   ): Promise<void>;
 }
 
@@ -175,8 +177,19 @@ export async function dispatchPushNotifications(
 
         result.attempted += 1;
 
+        // Present on a success and on an APNs rejection alike; absent when the
+        // send never reached a response.
+        const providerMessageId =
+          'providerMessageId' in outcome ? (outcome.providerMessageId ?? null) : null;
+
         if (outcome.ok) {
-          await deps.store.recordResult(notification.id, subscription.id, 'sent', null);
+          await deps.store.recordResult(
+            notification.id,
+            subscription.id,
+            'sent',
+            null,
+            providerMessageId,
+          );
           result.sent += 1;
           continue;
         }
@@ -193,6 +206,7 @@ export async function dispatchPushNotifications(
           subscription.id,
           classification.status,
           classification.category,
+          providerMessageId,
         );
         result.failed += 1;
       }

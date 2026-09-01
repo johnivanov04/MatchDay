@@ -36,7 +36,12 @@ export type PushTarget =
     };
 
 export type PushSendOutcome =
-  | { ok: true }
+  /**
+   * `providerMessageId` is the provider's own identifier for the attempt —
+   * APNs `apns-id` today. Recorded as evidence and never read by the product,
+   * so it is optional on every outcome that could carry one.
+   */
+  | { ok: true; providerMessageId?: string }
   /**
    * No transport is configured for this target's channel — a deployment with
    * no VAPID keys, or none with APNs credentials. Distinct from a failure:
@@ -50,7 +55,7 @@ export type PushSendOutcome =
    * An APNs rejection. Carries the reason as well as the status because the
    * status alone cannot be acted on — see `classifyApnsFailure`.
    */
-  | { ok: false; apnsStatus: number; apnsReason: string | null }
+  | { ok: false; apnsStatus: number; apnsReason: string | null; providerMessageId?: string }
   | { ok: false; error: unknown };
 
 export interface PushSender {
