@@ -208,8 +208,21 @@ jobs:
           # broken deployment. Measured against a live deployment: a 404 exits 0
           # without the flag and 22 with it. The body is still printed, which is
           # what makes a failure diagnosable.
+          #
+          # ── AND THAT FORWARDING IS WHY THERE IS NO `--token` HERE ──────────
+          #
+          # The same pass-through that carries `--fail-with-body` to curl also
+          # carried `--token`, which curl does not have:
+          #
+          #     curl: option --token=***: is unknown
+          #
+          # Every probe died before making a request. Authentication comes from
+          # `VERCEL_TOKEN` in this step's environment instead, which the CLI
+          # reads natively. `vercel deploy` and `vercel promote` keep their
+          # `--token` flags — those commands consume it rather than forwarding
+          # it, and both have already succeeded in CI.
           probe() {
-            vercel curl "$1" --deployment "$STAGED_URL" --yes --token="$VERCEL_TOKEN" \
+            vercel curl "$1" --deployment "$STAGED_URL" --yes \
               --silent --show-error --fail-with-body
           }
 

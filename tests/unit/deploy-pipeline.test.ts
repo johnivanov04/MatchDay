@@ -220,6 +220,45 @@ describe('the production workflow is ordered and gated', () => {
       for (const body of probeBodies) expect(body).toContain('--fail-with-body');
     });
 
+    it('never passes --token to vercel curl', () => {
+      /**
+       * ── THE FAILURE THIS PINS ──────────────────────────────────────────
+       *
+       * `vercel curl` forwards unrecognised arguments to the system curl —
+       * that is how `--fail-with-body` reaches curl at all. It does the same
+       * with `--token`, and curl has no such option:
+       *
+       *     curl: option --token=***: is unknown
+       *
+       * Every probe died before making a request, and the staged deployment was
+       * never actually checked. The gate failed closed, which is the right
+       * direction, but on its own tooling rather than on the deployment.
+       *
+       * Authentication comes from the step environment instead.
+       */
+      const curlLines = [...DEPLOY_COMMANDS.matchAll(/vercel curl [^\n]*(\n[^\n]*)?/g)].map(
+        (m) => m[0],
+      );
+      expect(curlLines.length).toBeGreaterThan(0);
+      for (const line of curlLines) expect(line).not.toContain('--token');
+    });
+
+    it('supplies the token to the health step through its environment', () => {
+      const step = DEPLOY.slice(
+        DEPLOY.indexOf('Health-check the staged deployment'),
+        DEPLOY.indexOf('Promote the staged deployment'),
+      );
+      expect(step).toContain('VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}');
+    });
+
+    it('keeps --token on the commands that consume it', () => {
+      // `deploy` and `promote` take the flag themselves rather than forwarding
+      // it, and both have already succeeded in CI. Changing them here would be
+      // an unrelated refactor riding along in a one-line fix.
+      expect(DEPLOY_COMMANDS).toMatch(/vercel deploy [^\n]*--token="\$VERCEL_TOKEN"/);
+      expect(DEPLOY_COMMANDS).toMatch(/vercel promote [^\n]*--token="\$VERCEL_TOKEN"/);
+    });
+
     it('does not decide health by matching text in the body', () => {
       // The first version looked for the string "Internal Server Error", which
       // any differently-shaped error page walks straight past. Status is the
