@@ -259,6 +259,33 @@ describe('the production workflow is ordered and gated', () => {
       expect(DEPLOY_COMMANDS).toMatch(/vercel promote [^\n]*--token="\$VERCEL_TOKEN"/);
     });
 
+    it('promotes within the team that owns the deployment', () => {
+      /**
+       * ── THE FAILURE THIS PINS ──────────────────────────────────────────
+       *
+       * `vercel deploy` reads VERCEL_ORG_ID and VERCEL_PROJECT_ID from the
+       * environment and is pinned to the team by them. `promote` takes a URL
+       * and resolves it against whatever scope the CLI is currently in — for a
+       * Full Account token on a fresh runner with no default team, the personal
+       * account. The deployment the previous step had just created then looked
+       * foreign:
+       *
+       *     Error: Deployment belongs to a different team
+       *
+       * Staged health had already passed at that point, so a verified build sat
+       * one flag away from being served.
+       */
+      expect(DEPLOY_COMMANDS).toMatch(/vercel promote [^\n]*--scope "\$VERCEL_ORG_ID"/);
+    });
+
+    it('gives the promote step the org id it scopes by', () => {
+      const step = DEPLOY.slice(
+        DEPLOY.indexOf('- name: Promote the staged deployment'),
+        DEPLOY.indexOf('- name: Verify production is healthy'),
+      );
+      expect(step).toContain('VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}');
+    });
+
     it('does not decide health by matching text in the body', () => {
       // The first version looked for the string "Internal Server Error", which
       // any differently-shaped error page walks straight past. Status is the
