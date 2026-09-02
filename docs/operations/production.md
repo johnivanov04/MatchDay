@@ -206,17 +206,26 @@ select cron.schedule(
 );
 ```
 
-The SQL route creates the canonical in-app notifications — which is the record
-that matters — but **not** the Web Push fan-out, which lives in the application.
-Prefer the HTTP route where the platform allows it.
+The SQL route creates the canonical in-app notifications *and*, since Phase 3B,
+their delivery jobs — the trigger on `notifications` fires whoever does the
+insert, so a `pg_cron` schedule no longer loses the push. It still needs
+`/api/cron/notification-delivery` running to drain the queue. Prefer the HTTP
+route where the platform allows it, so both halves are scheduled the same way.
 
 ### What is in the repository, and what is not
 
-`vercel.json` declares the cron entry:
+`vercel.json` declares three cron entries:
 
 ```json
-{ "crons": [{ "path": "/api/cron/reminders", "schedule": "*/10 * * * *" }] }
+{ "crons": [
+  { "path": "/api/cron/reminders",             "schedule": "*/10 * * * *" },
+  { "path": "/api/cron/account-deletion",      "schedule": "17 * * * *" },
+  { "path": "/api/cron/notification-delivery", "schedule": "* * * * *" }
+] }
 ```
+
+All three share `CRON_SECRET` and the same 404-without-it behaviour, so there is
+one secret to rotate and one authorization model to understand.
 
 Vercel Cron issues **GET** and injects `Authorization: Bearer $CRON_SECRET`
 automatically, which is why the route answers both verbs over the same secret
@@ -253,9 +262,9 @@ select cron.schedule(
 );
 ```
 
-This creates the canonical in-app notifications — the record that matters — but
-**not** the Web Push fan-out, which lives in the application. Prefer the HTTP
-route wherever possible.
+This creates the canonical in-app notifications and their delivery jobs; the
+queue worker sends them. Before Phase 3B the fan-out lived in the application and
+this route lost it. Prefer the HTTP route wherever possible.
 
 ### Verify it by hand
 
@@ -402,6 +411,98 @@ why that third file exists.
 
 ---
 
+## 6b. The notification delivery queue
+
+Phase 3B moved provider delivery out of the request. Before it, publishing a
+match meant the administrator's request stayed open while the server talked to
+APNs and Web Push once per device of every member of the league. Measured
+locally against a 150-member fanout at a simulated 60 ms provider round trip,
+that was **9.3 seconds** of the request; the enqueue that replaced it costs
+**2.4 ms**.
+
+### How a notification becomes a push
+
+```
+domain RPC (publish_match, decide_join_request, generate_due_reminders, …)
+  └─ INSERT INTO notifications                     ─┐  one transaction
+       └─ TRIGGER notifications_enqueue_delivery    │  both rows or neither
+            └─ INSERT INTO notification_delivery_jobs
+                                                   ─┘
+… request returns here …
+
+/api/cron/notification-delivery  (every minute)
+  └─ claim_notification_delivery_jobs()   for update skip locked, bounded
+  └─ dispatchPushNotifications()          APNs / Web Push
+  └─ record_push_delivery_result()        per (notification, subscription)
+  └─ complete_notification_delivery_job() terminal
+```
+
+The enqueue is a **trigger**, not a call the application makes. That is what
+removes the window in which a notification could exist with no delivery job —
+and it is why approving a join request now pushes, which it never did: the
+membership action was the one fanout path that forgot to call the old push seam.
+
+### The delivery guarantee is at-least-once
+
+Not exactly-once, and it must not be described as such.
+
+- The job commits with the notification, so work cannot be **lost**.
+- A worker killed after sending but before recording leaves a lease that
+  expires; the job is claimed again and the send can genuinely **happen twice**.
+
+What makes a duplicate *alert* unlikely is one layer down and is not part of the
+guarantee: `push_delivery_attempts` is unique per (notification, subscription)
+and the dispatcher skips any pair already in a terminal state. The provider call
+happens before that row is written, and nothing can make those two atomic across
+a network boundary.
+
+### The lease is crash recovery, not retry
+
+A job stuck in `processing` past `lease_expires_at` is assumed to belong to a
+worker that died — a redeploy, a function timeout, an instance reclaimed — and is
+reclaimed. That is the only automatic re-attempt in the system.
+
+There is **no provider retry policy**. A notification whose every device
+rejected it is recorded `failed` with `all_attempts_failed` and left alone.
+Phase 3C owns backoff.
+
+### Operating it
+
+The queue is service-role only: RLS is enabled and forced with **no policies**,
+`authenticated` holds no grant, and both RPCs re-check `auth.role()`. There is
+no member-facing view of it and there should not be one.
+
+```sql
+-- Queue depth by state. The number that matters is `pending` not growing.
+select status, count(*), min(created_at) as oldest
+  from public.notification_delivery_jobs
+ group by status order by status;
+
+-- Jobs that failed, by reason.
+select last_error_category, count(*)
+  from public.notification_delivery_jobs
+ where status = 'failed'
+ group by 1 order by 2 desc;
+```
+
+`pending` climbing steadily means the worker is not running (check the cron
+dashboard and `CRON_SECRET`) or has nowhere to send (`notification_delivery.skipped`
+in the logs — no service-role key, or no VAPID and no APNs credentials). A
+deployment with no transport deliberately leaves jobs `pending` rather than
+completing work it could not do, so nothing is discarded when credentials
+finally arrive.
+
+Batch and time bounds live in `src/server/notification-delivery.ts`: 25 jobs per
+claim, 200 per pass, a 45-second budget, and a 120-second lease. The SQL clamps
+the batch to 100 regardless of what the caller asks for.
+
+### No backfill
+
+The migration deliberately enqueues nothing that already existed. Every
+push-eligible notification present when it ran had already been through the
+inline dispatcher, and enqueueing them would have made the worker's first run
+light up every phone in the product with alerts about matches played weeks ago.
+
 ## 7. Observability
 
 Server logs are single-line JSON on stdout, which every host collects and
@@ -413,10 +514,14 @@ indexes. There is no agent and no vendor.
 | `action.rejected_input` | warn | Malformed input — a bad UUID, a stale form, a hand-crafted POST. **Never page on this**; see below |
 | `action.failed` | error | Something threw that nobody anticipated, carrying `severity: "unexpected"`. **Page on this** |
 | `action.dependency_failed` | error | The database said something this application does not model — a lost connection, a statement timeout, a new constraint. Carries `severity: "unexpected"` and the SQLSTATE. **Page on this** |
-| `reminder.run` | info | A reminder pass completed, with `claimed` / `notified` / `push_failures`. Emitted on empty passes too, so its **absence** is the signal |
+| `reminder.run` | info | A reminder pass completed, with `claimed` / `notified`. Emitted on empty passes too, so its **absence** is the signal |
 | `reminder.failed` | error | The generator errored; nothing was claimed. **Alert on this** |
 | `reminder.skipped` | warn | No service-role key configured, so nothing ran |
-| `reminder.push_incomplete` | warn | Notifications committed, push fan-out threw for at least one occurrence |
+| `notification_delivery.run` | info | A delivery pass completed, with `claimed` / `completed` / `failed` / `sent` / `duration_ms`. Emitted on empty passes too |
+| `notification_delivery.failed` | error | The queue itself could not be read or written; nothing was drained. **Alert on this** |
+| `notification_delivery.skipped` | warn | No service-role key, or no push transport configured. **Jobs are accumulating unsent** |
+| `notification_delivery.incomplete` | warn | At least one notification reached none of its devices |
+| `notification_delivery.stale_claim` | warn | A job was finished under another worker's claim. Rare; repeated occurrences mean the lease is shorter than a batch takes |
 | `heartbeat.sent` | info | The external heartbeat was pinged, with `kind` = `success` or `failure` |
 | `heartbeat.failed` | warn | The monitoring provider was unreachable or answered non-2xx. **Does not affect the cron result** |
 | `heartbeat.misconfigured` | warn | `REMINDER_HEARTBEAT_URL` is set but unusable — **monitoring is silently off** |

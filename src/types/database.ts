@@ -789,6 +789,45 @@ export type PushDeliveryAttemptRow = {
   updated_at: string;
 };
 
+// ── Phase 3B ───────────────────────────────────────────────────────────────
+
+/**
+ * Where a queued delivery has got to.
+ *
+ * Distinct from `PushDeliveryStatus`, which describes one *provider attempt* to
+ * one device. A job is the unit of work owed for a whole notification: it can
+ * be `completed` having sent to three phones, one phone, or none at all,
+ * because "nothing to deliver to" is a finished job and not a failure.
+ */
+export type NotificationDeliveryJobStatus =
+  | 'pending'
+  | 'processing'
+  | 'completed'
+  | 'failed';
+
+export type NotificationDeliveryJobRow = {
+  id: string;
+  notification_id: string;
+  status: NotificationDeliveryJobStatus;
+  /** Times claimed, not times a provider was called. */
+  attempts: number;
+  claimed_at: string | null;
+  claimed_by: string | null;
+  /** Crashed-worker recovery only — never a provider retry schedule. */
+  lease_expires_at: string | null;
+  completed_at: string | null;
+  last_error_category: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+/** One row of `claim_notification_delivery_jobs`. */
+export type ClaimedDeliveryJob = {
+  job_id: string;
+  job_notification_id: string;
+  job_attempts: number;
+};
+
 /**
  * Shape expected by the `supabase-js` generics.
  *
@@ -936,6 +975,12 @@ export interface Database {
       };
       push_delivery_attempts: {
         Row: PushDeliveryAttemptRow;
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      notification_delivery_jobs: {
+        Row: NotificationDeliveryJobRow;
         Insert: never;
         Update: never;
         Relationships: [];
@@ -1373,6 +1418,22 @@ export interface Database {
         };
         Returns: undefined;
       };
+      claim_notification_delivery_jobs: {
+        Args: {
+          p_worker: string;
+          p_limit?: number;
+          p_lease_seconds?: number;
+        };
+        Returns: ClaimedDeliveryJob[];
+      };
+      complete_notification_delivery_job: {
+        Args: {
+          p_job_id: string;
+          p_status: NotificationDeliveryJobStatus;
+          p_error_category?: string | null;
+        };
+        Returns: boolean;
+      };
       record_audit_event: {
         Args: {
           p_league_id: string;
@@ -1396,6 +1457,7 @@ export interface Database {
       match_lifecycle_status: MatchLifecycleStatus;
       notification_type: NotificationType;
       push_delivery_status: PushDeliveryStatus;
+      notification_delivery_job_status: NotificationDeliveryJobStatus;
       push_channel: PushChannel;
       apns_environment: ApnsEnvironment;
     };

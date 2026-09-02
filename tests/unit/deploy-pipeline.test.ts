@@ -62,6 +62,7 @@ describe('Vercel does not deploy production by itself', () => {
     // account-deletion schedules must survive that edit.
     expect(VERCEL.crons?.map((c) => c.path).sort()).toEqual([
       '/api/cron/account-deletion',
+      '/api/cron/notification-delivery',
       '/api/cron/reminders',
     ]);
   });

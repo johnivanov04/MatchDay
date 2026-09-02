@@ -6,7 +6,6 @@ import { requireLeagueAdmin } from '@/lib/auth/authorization';
 import { requireSessionUser } from '@/lib/auth/session';
 import { actionFailure, actionSuccess, DomainError, type ActionResult } from '@/lib/errors';
 import { domainErrorFromDatabase } from '@/lib/errors-from-database';
-import { dispatchPushForKeyPrefix } from '@/lib/push/notify';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { guidelineAcceptanceSchema, guidelineDraftSchema } from '@/lib/validation/guideline';
 import { toFieldErrors } from '@/lib/validation/profile';
@@ -139,8 +138,6 @@ export async function publishGuidelineVersionAction(
     if (error !== null) {
       throw domainErrorFromDatabase(error);
     }
-
-    await dispatchPushForKeyPrefix(`guideline_acceptance_required:${versionId}`);
 
     revalidatePath('/', 'layout');
     return actionSuccess();

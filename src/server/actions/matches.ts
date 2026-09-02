@@ -8,7 +8,6 @@ import { MATCH_NOTICES, matchPathWithNotice } from '@/lib/auth/page-guards';
 import { requireSessionUser } from '@/lib/auth/session';
 import { actionFailure, actionSuccess, DomainError, type ActionResult } from '@/lib/errors';
 import { domainErrorFromDatabase } from '@/lib/errors-from-database';
-import { dispatchPushForKeyPrefix } from '@/lib/push/notify';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import {
   createMatchSchema,
@@ -19,26 +18,6 @@ import {
   updatePublishedMatchSchema,
 } from '@/lib/validation/match';
 import { toFieldErrors } from '@/lib/validation/profile';
-
-/**
- * Pushes a fanout the database has already committed.
- *
- * Called only *after* the domain transaction, and outside every `try` that
- * decides the action's result, because by this point the match is changed and
- * the canonical notifications exist. Web Push is a best-effort copy of
- * information the member already has waiting in the app, so a push that does
- * not go out must never come back to the administrator as a failed edit.
- *
- * `dispatchPushForKeyPrefix` already swallows its own failures. This catch is
- * what stops that guarantee being quietly lost the day it stops holding.
- */
-async function pushCommittedFanout(prefix: string): Promise<void> {
-  try {
-    await dispatchPushForKeyPrefix(prefix);
-  } catch {
-    /* deliberately silent — see above */
-  }
-}
 
 function readTemplateForm(formData: FormData) {
   return {
@@ -243,14 +222,6 @@ export async function createMatchAction(
     return actionFailure(error);
   }
 
-  // Post-commit, and outside every `try` that decides this action's result: the
-  // match is open and the canonical notifications exist by now, so a push that
-  // does not go out must never be reported as a failed publication. Nothing is
-  // pushed for a draft, because nothing was notified.
-  if (published) {
-    await pushCommittedFanout(`match_published:${matchId}`);
-  }
-
   revalidatePath('/', 'layout');
   redirect(
     matchPathWithNotice(
@@ -272,8 +243,6 @@ export async function publishMatchAction(
   _previous: ActionResult<undefined> | null,
   formData: FormData,
 ): Promise<ActionResult<undefined>> {
-  let pushPrefix: string;
-
   try {
     const leagueId = z.uuid().parse(formData.get('league_id') ?? '');
     const matchId = z.uuid().parse(formData.get('match_id') ?? '');
@@ -285,13 +254,9 @@ export async function publishMatchAction(
     if (error !== null) {
       throw domainErrorFromDatabase(error);
     }
-
-    pushPrefix = `match_published:${matchId}`;
   } catch (error: unknown) {
     return actionFailure(error);
   }
-
-  await pushCommittedFanout(pushPrefix);
 
   revalidatePath('/', 'layout');
   return actionSuccess();
@@ -301,8 +266,6 @@ export async function cancelMatchAction(
   _previous: ActionResult<undefined> | null,
   formData: FormData,
 ): Promise<ActionResult<undefined>> {
-  let pushPrefix: string;
-
   try {
     const leagueId = z.uuid().parse(formData.get('league_id') ?? '');
     const matchId = z.uuid().parse(formData.get('match_id') ?? '');
@@ -323,12 +286,9 @@ export async function cancelMatchAction(
       throw domainErrorFromDatabase(error);
     }
 
-    pushPrefix = `match_canceled:${matchId}`;
   } catch (error: unknown) {
     return actionFailure(error);
   }
-
-  await pushCommittedFanout(pushPrefix);
 
   revalidatePath('/', 'layout');
   return actionSuccess();
@@ -423,7 +383,6 @@ export async function updatePublishedMatchAction(
   formData: FormData,
 ): Promise<ActionResult<undefined>> {
   let destination: string;
-  let pushPrefix: string;
 
   try {
     const leagueId = z.uuid().parse(formData.get('league_id') ?? '');
@@ -459,7 +418,7 @@ export async function updatePublishedMatchAction(
     }
 
     const supabase = await createSupabaseServerClient();
-    const { data, error } = await supabase.rpc('update_published_match', {
+    const { error } = await supabase.rpc('update_published_match', {
       p_match_id: matchId,
       p_title: parsed.data.title,
       p_match_date: parsed.data.match_date,
@@ -480,15 +439,10 @@ export async function updatePublishedMatchAction(
       throw domainErrorFromDatabase(error);
     }
 
-    // The revision is part of the notification key, so pushing the right batch
-    // means asking for the revision the database just produced.
-    pushPrefix = `match_changed:${matchId}:${String(data)}`;
     destination = matchPathWithNotice(slug, matchId, MATCH_NOTICES.saved);
   } catch (error: unknown) {
     return actionFailure(error);
   }
-
-  await pushCommittedFanout(pushPrefix);
 
   revalidatePath('/', 'layout');
   redirect(destination);

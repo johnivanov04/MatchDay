@@ -14,7 +14,6 @@ const mocks = vi.hoisted(() => ({
   requireLeagueAdmin: vi.fn(),
   requireSessionUser: vi.fn(),
   rpc: vi.fn(),
-  dispatchPushForKeyPrefix: vi.fn(),
 }));
 
 vi.mock('next/cache', () => ({ revalidatePath: mocks.revalidatePath }));
@@ -32,9 +31,6 @@ vi.mock('@/lib/auth/session', () => ({
   requireSessionUser: mocks.requireSessionUser,
   getSessionUser: vi.fn(),
   getCurrentProfile: vi.fn(),
-}));
-vi.mock('@/lib/push/notify', () => ({
-  dispatchPushForKeyPrefix: mocks.dispatchPushForKeyPrefix,
 }));
 vi.mock('@/lib/supabase/server', () => ({
   createSupabaseServerClient: async () => ({ rpc: mocks.rpc }),
@@ -73,7 +69,6 @@ beforeEach(() => {
     data: { status: 'canceled', waitlist_position: null },
     error: null,
   });
-  mocks.dispatchPushForKeyPrefix.mockResolvedValue(undefined);
 });
 
 describe('cancelling a spot', () => {
@@ -120,24 +115,19 @@ describe('cancelling a spot', () => {
     expect(result).toMatchObject({ ok: true, data: { status: 'withdrawn_late' } });
   });
 
-  it('pushes the promotion and administrator batches a cancellation can trigger', async () => {
-    await cancelSpotAction(null, form({ match_id: MATCH_ID }));
-
-    const prefixes = mocks.dispatchPushForKeyPrefix.mock.calls.map((call) => call[0]);
-    expect(prefixes).toEqual([
-      `waitlist_promotion:${MATCH_ID}`,
-      `late_cancellation:${MATCH_ID}`,
-      `replacement_needed:${MATCH_ID}`,
-    ]);
-  });
-
-  it('still succeeds when every push fails', async () => {
-    // The cancellation, the capacity release, the promotion and the canonical
-    // notifications are already committed.
-    mocks.dispatchPushForKeyPrefix.mockRejectedValue(new Error('push service unreachable'));
-
+  it('cancels on the RPC alone, with no provider round trip', async () => {
+    // PHASE 3B. A late cancellation is the worst of the old inline paths: one
+    // tap could fan out three separate batches — the promotion, the late
+    // withdrawal alert, the replacement call — and the player who cancelled
+    // waited for every device in all three before their screen came back.
+    //
+    // All three still happen. The database writes them and enqueues their
+    // delivery jobs in the same transaction; the player no longer waits.
     const result = await cancelSpotAction(null, form({ match_id: MATCH_ID }));
+
     expect(result?.ok).toBe(true);
+    expect(mocks.rpc).toHaveBeenCalledTimes(1);
+    expect(mocks.rpc).toHaveBeenCalledWith('cancel_spot', expect.anything());
   });
 
   it('reports a refusal with its domain code', async () => {
@@ -235,14 +225,14 @@ describe('administrator promotion', () => {
     }
   });
 
-  it('succeeds even when the promotion push fails', async () => {
-    mocks.dispatchPushForKeyPrefix.mockRejectedValue(new Error('push down'));
-
+  it('promotes without waiting on the promoted player\'s devices', async () => {
     const result = await promoteWaitlistedPlayerAction(
       null,
       form({ league_id: LEAGUE_ID, match_id: MATCH_ID }),
     );
+
     expect(result?.ok).toBe(true);
+    expect(mocks.rpc).toHaveBeenCalledTimes(1);
   });
 });
 

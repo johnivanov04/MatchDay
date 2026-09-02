@@ -5,7 +5,6 @@ import { z } from 'zod';
 import { requireLeagueAdmin } from '@/lib/auth/authorization';
 import { actionFailure, actionSuccess, type ActionResult } from '@/lib/errors';
 import { domainErrorFromDatabase } from '@/lib/errors-from-database';
-import { dispatchPushForKeyPrefix } from '@/lib/push/notify';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 
 /**
@@ -24,22 +23,6 @@ import { createSupabaseServerClient } from '@/lib/supabase/server';
 
 const matchIdSchema = z.uuid();
 const teamIdSchema = z.uuid();
-
-/**
- * Pushes a fanout the database has already committed.
- *
- * After the transaction and outside the `try` that decides the result, for the
- * reason the match and signup actions give: the teams are published and the
- * canonical notifications exist, so a push that does not go out must never come
- * back to the administrator as a failed publication.
- */
-async function pushCommittedFanout(prefix: string): Promise<void> {
-  try {
-    await dispatchPushForKeyPrefix(prefix);
-  } catch {
-    /* deliberately silent — the notification is already safe in the inbox */
-  }
-}
 
 /** Shape shared by every builder mutation that returns nothing interesting. */
 async function teamMutation(
@@ -225,8 +208,6 @@ export async function publishTeamsAction(
   } catch (error: unknown) {
     return actionFailure(error);
   }
-
-  await pushCommittedFanout(`teams:${matchId}:${String(revision)}`);
 
   revalidatePath('/', 'layout');
   return actionSuccess(revision);

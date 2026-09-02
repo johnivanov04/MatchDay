@@ -32,7 +32,6 @@ function result(overrides: Partial<ReminderRunResult> = {}): ReminderRunResult {
     status: 'idle',
     claimed: 0,
     notified: 0,
-    pushFailures: 0,
     errorCode: null,
     ...overrides,
   };
@@ -175,7 +174,6 @@ describe('the response body leaks nothing', () => {
       'claimed',
       'errorCode',
       'notified',
-      'pushFailures',
       'status',
     ]);
     expect(body['errorCode']).toBe('23505');
@@ -278,7 +276,6 @@ describe('the heartbeat cannot affect the cron outcome', () => {
       'claimed',
       'errorCode',
       'notified',
-      'pushFailures',
       'status',
     ]);
   });

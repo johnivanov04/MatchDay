@@ -16,11 +16,13 @@ import { createSupabaseServerClient } from '@/lib/supabase/server';
  * decides an outcome, and nothing here passes an actor or a league — the
  * database derives both from `auth.uid()`.
  *
- * NO PUSH DISPATCH. Every other fanout action in this codebase calls
- * `dispatchPushForKeyPrefix` after committing. Attendance deliberately does
- * not: `attendance_recorded` is absent from `PUSH_ELIGIBLE_TYPES`, the
- * notification is written with `push_eligible: false`, and 7Q settles that the
- * canonical in-app record is required while an automatic push is not. A push
+ * NO PUSH. Since Phase 3B nothing here has to arrange that: a delivery job is
+ * enqueued by trigger for any notification written with `push_eligible: true`,
+ * and attendance deliberately writes `false`. `attendance_recorded` is also
+ * absent from `PUSH_ELIGIBLE_TYPES`, so the dispatcher would decline it even if
+ * a job were somehow created — two independent refusals, which is what this
+ * particular notification is worth. 7Q settles that the canonical in-app record
+ * is required while an automatic push is not. A push
  * payload renders on a lock screen where anyone glancing at the phone can read
  * it, and "You are recorded as not having attended" is not something to put
  * there without the league asking for it.

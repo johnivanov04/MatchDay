@@ -29,7 +29,6 @@ const mocks = vi.hoisted(() => {
     rpc: vi.fn(),
     upsert: vi.fn(),
     del: vi.fn(),
-    dispatchPushForKeyPrefix: vi.fn(),
   };
 });
 
@@ -48,9 +47,6 @@ vi.mock('@/lib/auth/session', () => ({
   requireSessionUser: vi.fn(async () => ({ id: 'user-1' })),
   getSessionUser: vi.fn(),
   getCurrentProfile: vi.fn(),
-}));
-vi.mock('@/lib/push/notify', () => ({
-  dispatchPushForKeyPrefix: mocks.dispatchPushForKeyPrefix,
 }));
 vi.mock('@/lib/supabase/server', () => ({
   createSupabaseServerClient: async () => ({
@@ -130,7 +126,6 @@ beforeEach(() => {
   mocks.rpc.mockResolvedValue({ data: 4, error: null });
   mocks.upsert.mockResolvedValue({ error: null });
   mocks.del.mockResolvedValue({ error: null });
-  mocks.dispatchPushForKeyPrefix.mockResolvedValue(undefined);
 });
 
 describe('editing a draft', () => {
@@ -169,7 +164,9 @@ describe('editing a draft', () => {
 
   it('notifies nobody', async () => {
     await run(updateDraftMatchAction, baseForm());
-    expect(mocks.dispatchPushForKeyPrefix).not.toHaveBeenCalled();
+    // A draft has no members watching it. The RPC is the only call, and it
+    // creates no notification — so there is nothing to enqueue either.
+    expect(mocks.rpc).toHaveBeenCalledTimes(1);
   });
 
   it('returns field errors in the form rather than navigating', async () => {
@@ -236,24 +233,23 @@ describe('editing a published match', () => {
     }
   });
 
-  it('pushes the batch the database just created, keyed on the new revision', async () => {
+  it('returns without waiting on any push provider', async () => {
+    // PHASE 3B. This action used to publish the edit and then sit in the
+    // request talking to APNs and Web Push, once per device of every member of
+    // the league. It now returns as soon as the database has committed; the
+    // trigger enqueued a delivery job in that same transaction, and the worker
+    // drains it.
+    //
+    // Asserted as "the RPC is the only thing awaited", because that is the
+    // property an administrator actually feels — anything else added here would
+    // be latency they pay for a copy of something already in their inbox.
     mocks.rpc.mockResolvedValue({ data: 4, error: null });
-
-    await run(updatePublishedMatchAction, baseForm());
-
-    expect(mocks.dispatchPushForKeyPrefix).toHaveBeenCalledWith(`match_changed:${MATCH_ID}:4`);
-  });
-
-  it('still succeeds when Web Push fails outright', async () => {
-    // The edit and its canonical notifications are already committed. Pushing
-    // is a best-effort copy of information the member already has waiting in
-    // the app, and losing it must not turn a real outcome into an error.
-    mocks.dispatchPushForKeyPrefix.mockRejectedValue(new Error('push service unreachable'));
 
     const { redirectedTo, result } = await run(updatePublishedMatchAction, baseForm());
 
     expect(result).toBeNull();
     expect(redirectedTo).toBe(`${DETAIL}?notice=saved`);
+    expect(mocks.rpc).toHaveBeenCalledTimes(1);
   });
 
   it('reports a stale revision with an actionable message', async () => {
@@ -321,7 +317,9 @@ describe('saving administrator notes', () => {
 
   it('notifies and pushes nobody', async () => {
     await run(saveMatchAdminNotesAction, baseForm({ notes: 'Private' }));
-    expect(mocks.dispatchPushForKeyPrefix).not.toHaveBeenCalled();
+    // Notes are the administrator's private working memory. No RPC that
+    // creates a notification runs, so nothing is enqueued for delivery.
+    expect(mocks.rpc).not.toHaveBeenCalled();
   });
 
   it('refuses before touching anything when the caller is not the administrator', async () => {

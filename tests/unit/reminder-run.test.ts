@@ -1,3 +1,6 @@
+import { readFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as ObservabilityLog from '@/lib/observability/log';
 
@@ -18,7 +21,6 @@ import type * as ObservabilityLog from '@/lib/observability/log';
 const mocks = vi.hoisted(() => ({
   isServiceRoleConfigured: vi.fn(),
   rpc: vi.fn(),
-  dispatchPushForKeyPrefix: vi.fn(),
   logInfo: vi.fn(),
   logWarn: vi.fn(),
   logError: vi.fn(),
@@ -27,9 +29,6 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@/lib/supabase/admin', () => ({
   isServiceRoleConfigured: mocks.isServiceRoleConfigured,
   createSupabaseAdminClient: () => ({ rpc: mocks.rpc }),
-}));
-vi.mock('@/lib/push/notify', () => ({
-  dispatchPushForKeyPrefix: mocks.dispatchPushForKeyPrefix,
 }));
 // The writers are spied on; `assertLoggable` keeps its real implementation,
 // because the whole point of the last section is to check keys against the
@@ -46,7 +45,6 @@ const { runDueReminders, reminderRunFailed } = await import('@/server/reminders'
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.isServiceRoleConfigured.mockReturnValue(true);
-  mocks.dispatchPushForKeyPrefix.mockResolvedValue(undefined);
 });
 
 afterEach(() => {
@@ -148,11 +146,10 @@ describe('what the run logs', () => {
 
     const result = await runDueReminders();
 
-    expect(result).toMatchObject({ status: 'worked', claimed: 2, notified: 5, pushFailures: 0 });
+    expect(result).toMatchObject({ status: 'worked', claimed: 2, notified: 5 });
     expect(mocks.logInfo).toHaveBeenCalledWith('reminder.run', {
       claimed: 2,
       notified: 5,
-      push_failures: 0,
     });
   });
 
@@ -183,63 +180,33 @@ describe('what the run logs', () => {
   });
 });
 
-describe('push is best effort, and visibly so', () => {
-  it('still reports the run as worked when a push fan-out throws', async () => {
+describe('the reminder worker no longer delivers anything itself', () => {
+  // Phase 3B moved delivery behind the durable queue. What this module owes is
+  // the canonical notifications; the trigger enqueues them in the same
+  // transaction, and `/api/cron/notification-delivery` drains the queue.
+  //
+  // The property worth pinning is negative and easy to lose: a reminder pass
+  // must make NO provider call. If someone reintroduces an inline dispatch,
+  // reminder generation goes back to being bounded by Apple's response time
+  // inside a function with a wall clock.
+  it('imports no push transport at all', async () => {
+    const source = await readFile(
+      join(dirname(fileURLToPath(import.meta.url)), '../../src/server/reminders.ts'),
+      'utf8',
+    );
+
+    for (const forbidden of ['push/notify', 'push/dispatch', 'push/sender', 'push/apns']) {
+      expect(source, forbidden).not.toContain(forbidden);
+    }
+  });
+
+  it('reports a run without any push bookkeeping in its result', async () => {
     mocks.rpc.mockResolvedValue(claimed([{ reminder_id: 'r1', notified: 4 }]));
-    mocks.dispatchPushForKeyPrefix.mockRejectedValue(new Error('push service down'));
 
     const result = await runDueReminders();
 
-    // The notifications are committed and in the inbox. A push failure must not
-    // roll that back or make the scheduler retry a completed claim.
-    expect(result.status).toBe('worked');
-    expect(result.claimed).toBe(1);
-    expect(result.notified).toBe(4);
-  });
-
-  it('counts push failures instead of swallowing them', async () => {
-    mocks.rpc.mockResolvedValue(
-      claimed([
-        { reminder_id: 'r1', notified: 1 },
-        { reminder_id: 'r2', notified: 1 },
-      ]),
-    );
-    mocks.dispatchPushForKeyPrefix
-      .mockRejectedValueOnce(new Error('down'))
-      .mockResolvedValueOnce(undefined);
-
-    const result = await runDueReminders();
-
-    expect(result.pushFailures).toBe(1);
-    expect(mocks.logWarn).toHaveBeenCalledWith('reminder.push_incomplete', {
-      claimed: 2,
-      push_failures: 1,
-    });
-  });
-
-  it('keeps dispatching after one occurrence fails', async () => {
-    mocks.rpc.mockResolvedValue(
-      claimed([
-        { reminder_id: 'r1', notified: 1 },
-        { reminder_id: 'r2', notified: 1 },
-        { reminder_id: 'r3', notified: 1 },
-      ]),
-    );
-    mocks.dispatchPushForKeyPrefix.mockRejectedValue(new Error('down'));
-
-    const result = await runDueReminders();
-
-    // One bad endpoint must not stop the other two leagues being pushed.
-    expect(mocks.dispatchPushForKeyPrefix).toHaveBeenCalledTimes(3);
-    expect(result.pushFailures).toBe(3);
-  });
-
-  it('dispatches per claimed occurrence, keyed to what it just created', async () => {
-    mocks.rpc.mockResolvedValue(claimed([{ reminder_id: 'abc', notified: 1 }]));
-
-    await runDueReminders();
-
-    expect(mocks.dispatchPushForKeyPrefix).toHaveBeenCalledWith('reminder:abc');
+    expect(result).toEqual({ status: 'worked', claimed: 1, notified: 4, errorCode: null });
+    expect(result).not.toHaveProperty('pushFailures');
   });
 });
 
@@ -252,7 +219,6 @@ describe('every field these events emit actually reaches the log line', () => {
     const { assertLoggable } = await import('@/lib/observability/log');
 
     mocks.rpc.mockResolvedValue(claimed([{ reminder_id: 'r1', notified: 1 }]));
-    mocks.dispatchPushForKeyPrefix.mockRejectedValue(new Error('down'));
     await runDueReminders();
 
     mocks.isServiceRoleConfigured.mockReturnValue(false);

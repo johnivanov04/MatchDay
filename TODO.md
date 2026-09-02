@@ -146,13 +146,16 @@ timezone resolution, canonical in-app notifications, and opt-in Web Push.
 
 Carried forward from Phase 3:
 
-- [ ] **Push delivery is inline, not queued.** `dispatchPushForKeyPrefix` runs
-      inside the request that published the match. It cannot fail the domain
-      operation, but a large league means a slow response. Move it to a queue
-      or a background function before a league grows past a few dozen members.
+- [x] **Push delivery is inline, not queued.** Done in Phase 3B. A trigger on
+      `notifications` enqueues a delivery job in the same transaction that
+      writes the row, and `/api/cron/notification-delivery` drains it. The
+      request no longer waits on any provider: measured locally, a 150-member
+      fanout went from ~9.3 s of in-request provider time to a 2.4 ms enqueue.
 - [ ] **No retry scheduler.** A `temporary_failure` is recorded and left. There
       is nothing that comes back to retry it; `push_delivery_attempts` holds
-      everything a worker would need.
+      everything a worker would need. Phase 3B deliberately did not add one:
+      its lease only recovers jobs from a **crashed worker**, never from a
+      provider that said no. Phase 3C owns backoff.
 - [ ] **Reminder scheduling is stored, not executed.** `reminder_offsets` on a
       template is future-compatible metadata; the scheduler is Phase 5.
 - [ ] **Notification retention.** 04 §3 suggests 90 days in the default UI.
