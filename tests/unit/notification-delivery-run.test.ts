@@ -1,3 +1,4 @@
+import { generateKeyPairSync } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -5,6 +6,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as ObservabilityLog from '@/lib/observability/log';
 import type { DeliveryQueueStore } from '@/lib/notifications/delivery-queue';
 import type { PushDispatchStore, PushSubscriptionRecord } from '@/lib/push/dispatch';
+import {
+  createApnsSender,
+  resetProviderTokenCache,
+  type ApnsConfiguration,
+} from '@/lib/push/apns';
 import type { PushSender } from '@/lib/push/sender';
 import type { ClaimedDeliveryJob, RescheduledDeliveryJob } from '@/types/database';
 
@@ -653,6 +659,311 @@ describe('Phase 3C — a retry must not re-deliver what already arrived', () => 
     await runNotificationDelivery({ deps: { queue: second.queue, store, sender } });
 
     expect(targets).toEqual(['sub-web']);
+  });
+});
+
+describe('Phase 3C — a provider verdict reaches the right terminal decision', () => {
+  /**
+   * The seam between `classify.ts` and the retry policy.
+   *
+   * Both ends were already tested — the classifier knows `TooManyRequests` is
+   * temporary, and the worker knows a retryable outcome means reschedule — but
+   * nothing joined them. Reclassifying one reason, or changing which field the
+   * worker reads, would have gone unnoticed by every existing test.
+   *
+   * These run the REAL dispatcher over a real subscription so the whole chain
+   * is exercised: provider answer → classify → `retryable` → reschedule.
+   */
+  function apnsPair(reply: { status: number; reason: string | null }) {
+    const store = statefulPair();
+    const sender = {
+      async send() {
+        return reply.status === 200
+          ? { ok: true as const }
+          : {
+              ok: false as const,
+              apnsStatus: reply.status,
+              apnsReason: reply.reason,
+            };
+      },
+    } as unknown as PushSender;
+    return { store, sender };
+  }
+
+  function webPair(reply: { statusCode?: number; error?: unknown }) {
+    const store = statefulPair('web');
+    const sender = {
+      async send() {
+        return reply.error !== undefined
+          ? { ok: false as const, error: reply.error }
+          : { ok: false as const, statusCode: reply.statusCode! };
+      },
+    } as unknown as PushSender;
+    return { store, sender };
+  }
+
+  function statefulPair(kind: 'apns' | 'web' = 'apns'): PushDispatchStore {
+    const subscription: PushSubscriptionRecord =
+      kind === 'apns'
+        ? {
+            id: 'sub-1',
+            user_id: 'user-1',
+            channel: 'apns',
+            device_token: 'A'.repeat(64),
+            apns_environment: 'production',
+          }
+        : {
+            id: 'sub-1',
+            user_id: 'user-1',
+            channel: 'web_push',
+            endpoint: 'https://push.example.test/x',
+            p256dh: 'p'.repeat(87),
+            auth_secret: 'a'.repeat(22),
+          };
+
+    return {
+      loadNotifications: async (ids) =>
+        ids.map((id) => ({
+          id,
+          type: 'match_published' as const,
+          title: 'T',
+          body: 'B',
+          deep_link: '/leagues/x/matches/y',
+        })),
+      loadRecipients: async (ids) => new Map(ids.map((id) => [id, 'user-1'])),
+      loadEnabledSubscriptions: async () => [subscription],
+      alreadyDelivered: async () => false,
+      recordResult: async () => undefined,
+    };
+  }
+
+  it.each([
+    ['TooManyRequests', 429],
+    ['IdleTimeout', 503],
+    ['InternalServerError', 500],
+    ['ServiceUnavailable', 503],
+    ['Shutdown', 503],
+  ])('APNs %s is retried, not abandoned', async (reason, status) => {
+    const { store, sender } = apnsPair({ status, reason });
+    const q = fakeQueue([[job(1)], []]);
+
+    await runNotificationDelivery({ deps: { queue: q.queue, store, sender } });
+
+    expect(q.rescheduled).toEqual([{ id: job(1).job_id, category: 'temporary_failure' }]);
+    expect(q.completed).toHaveLength(0);
+    expect(q.failed).toHaveLength(0);
+  });
+
+  it.each([
+    ['ExpiredProviderToken', 403],
+    ['InvalidProviderToken', 403],
+    ['BadDeviceToken', 400],
+    ['Unregistered', 410],
+    ['PayloadTooLarge', 413],
+  ])('APNs %s is terminal, never retried', async (reason, status) => {
+    const { store, sender } = apnsPair({ status, reason });
+    const q = fakeQueue([[job(1)], []]);
+
+    await runNotificationDelivery({ deps: { queue: q.queue, store, sender } });
+
+    expect(q.rescheduled).toHaveLength(0);
+    expect(q.failed).toEqual([{ id: job(1).job_id, category: 'all_attempts_failed' }]);
+  });
+
+  it.each([[429], [500], [502], [503], [504]])(
+    'Web Push %i is retried, not abandoned',
+    async (statusCode) => {
+      const { store, sender } = webPair({ statusCode });
+      const q = fakeQueue([[job(1)], []]);
+
+      await runNotificationDelivery({ deps: { queue: q.queue, store, sender } });
+
+      expect(q.rescheduled).toHaveLength(1);
+    },
+  );
+
+  it.each([
+    ['TimeoutError', Object.assign(new Error('slow'), { name: 'TimeoutError' })],
+    ['AbortError', Object.assign(new Error('aborted'), { name: 'AbortError' })],
+    ['a plain network fault', new Error('ECONNRESET')],
+  ])('Web Push %s is retried, not abandoned', async (_label, error) => {
+    const { store, sender } = webPair({ error });
+    const q = fakeQueue([[job(1)], []]);
+
+    await runNotificationDelivery({ deps: { queue: q.queue, store, sender } });
+
+    expect(q.rescheduled).toHaveLength(1);
+  });
+
+  it.each([[404], [410], [400], [401], [403], [413]])(
+    'Web Push %i is terminal, never retried',
+    async (statusCode) => {
+      const { store, sender } = webPair({ statusCode });
+      const q = fakeQueue([[job(1)], []]);
+
+      await runNotificationDelivery({ deps: { queue: q.queue, store, sender } });
+
+      expect(q.rescheduled).toHaveLength(0);
+      expect(q.failed).toHaveLength(1);
+    },
+  );
+});
+
+describe("Phase 3C does not disturb the APNs sender's own token refresh", () => {
+  /**
+   * `ExpiredProviderToken` is the one failure the sender fixes in place: it
+   * drops the cached JWT, signs a new one and retries the HTTP request once,
+   * immediately. That has existed since Build #2 and is a different mechanism
+   * from Phase 3C's durable backoff — one lives below `send()`, the other above
+   * it, and neither should be able to swallow the other.
+   *
+   * This runs the REAL `createApnsSender` over a scripted transport, through
+   * the REAL dispatcher and worker, so the whole stack is exercised.
+   */
+  function apnsConfig(): ApnsConfiguration {
+    const key = generateKeyPairSync('ec', {
+      namedCurve: 'P-256',
+      privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+      publicKeyEncoding: { type: 'spki', format: 'pem' },
+    }).privateKey;
+
+    return {
+      teamId: 'TEAMID1234',
+      bundleId: 'com.example.test',
+      keys: {
+        development: { keyId: 'SANDBOX123', privateKey: key },
+        production: { keyId: 'PRODUCTN456', privateKey: key },
+      },
+    };
+  }
+
+  function scriptedTransport(replies: Array<{ status: number; body: string }>) {
+    const requests: unknown[] = [];
+    return {
+      requests,
+      transport: {
+        post: async (request: unknown) => {
+          requests.push(request);
+          const index = Math.min(requests.length - 1, replies.length - 1);
+          return replies[index]!;
+        },
+      },
+    };
+  }
+
+  const EXPIRED = { status: 403, body: '{"reason":"ExpiredProviderToken"}' };
+
+  function storeFor(recorded: Array<{ subscriptionId: string; status: string }>) {
+    const terminal = new Set<string>();
+    const store: PushDispatchStore = {
+      loadNotifications: async (ids) =>
+        ids.map((id) => ({
+          id,
+          type: 'match_published' as const,
+          title: 'T',
+          body: 'B',
+          deep_link: '/leagues/x/matches/y',
+        })),
+      loadRecipients: async (ids) => new Map(ids.map((id) => [id, 'user-1'])),
+      loadEnabledSubscriptions: async () => [
+        {
+          id: 'sub-apns',
+          user_id: 'user-1',
+          channel: 'apns' as const,
+          device_token: 'A'.repeat(64),
+          apns_environment: 'production' as const,
+        },
+      ],
+      alreadyDelivered: async (_n, subscriptionId) => terminal.has(subscriptionId),
+      recordResult: async (_n, subscriptionId, status) => {
+        recorded.push({ subscriptionId, status });
+        if (status === 'sent' || status === 'permanent_failure' || status === 'invalidated') {
+          terminal.add(subscriptionId);
+        }
+      },
+    };
+    return store;
+  }
+
+  beforeEach(() => {
+    resetProviderTokenCache();
+  });
+
+  it('recovers in place: two HTTP requests, ONE recorded outcome, job completed', async () => {
+    const recorded: Array<{ subscriptionId: string; status: string }> = [];
+    const { transport, requests } = scriptedTransport([EXPIRED, { status: 200, body: '' }]);
+    const sender = createApnsSender(apnsConfig(), transport);
+    const q = fakeQueue([[job(1)], []]);
+
+    const result = await runNotificationDelivery({
+      deps: { queue: q.queue, store: storeFor(recorded), sender },
+    });
+
+    // The sender retried underneath us.
+    expect(requests).toHaveLength(2);
+    // …and the dispatcher above it saw a single send with a single outcome.
+    expect(recorded).toEqual([{ subscriptionId: 'sub-apns', status: 'sent' }]);
+    expect(result.sent).toBe(1);
+    // Phase 3C did NOT schedule a durable retry for something already fixed.
+    expect(q.rescheduled).toHaveLength(0);
+    expect(q.completed).toEqual([job(1).job_id]);
+  });
+
+  it('does not re-send to that subscription on any later pass', async () => {
+    // The recovered send is terminal like any other success, so even if the job
+    // were claimed again the phone is not asked twice.
+    const recorded: Array<{ subscriptionId: string; status: string }> = [];
+    const store = storeFor(recorded);
+    const { transport, requests } = scriptedTransport([EXPIRED, { status: 200, body: '' }]);
+    const sender = createApnsSender(apnsConfig(), transport);
+
+    await runNotificationDelivery({ deps: { queue: fakeQueue([[job(1)], []]).queue, store, sender } });
+    expect(requests).toHaveLength(2);
+
+    await runNotificationDelivery({ deps: { queue: fakeQueue([[job(1)], []]).queue, store, sender } });
+
+    // No third request: `alreadyDelivered` skipped the pair.
+    expect(requests).toHaveLength(2);
+    expect(recorded).toHaveLength(1);
+  });
+
+  it('hands a still-expired token to 3C as a PERMANENT failure, not a retry', async () => {
+    // The refresh did not help, so this is our own credential problem. Backing
+    // off five times would not fix a key an operator has to rotate — and the
+    // classifier has always called it permanent.
+    const recorded: Array<{ subscriptionId: string; status: string }> = [];
+    const { transport, requests } = scriptedTransport([EXPIRED]);
+    const sender = createApnsSender(apnsConfig(), transport);
+    const q = fakeQueue([[job(1)], []]);
+
+    await runNotificationDelivery({
+      deps: { queue: q.queue, store: storeFor(recorded), sender },
+    });
+
+    expect(requests).toHaveLength(2); // tried once more, then gave up
+    expect(recorded).toEqual([{ subscriptionId: 'sub-apns', status: 'permanent_failure' }]);
+    expect(q.rescheduled).toHaveLength(0);
+    expect(q.failed).toEqual([{ id: job(1).job_id, category: 'all_attempts_failed' }]);
+  });
+
+  it('still applies 3C backoff when the retry hits a genuinely transient answer', async () => {
+    // Refresh succeeded in signing, but Apple was busy. That IS retryable, and
+    // the durable schedule must pick it up.
+    const recorded: Array<{ subscriptionId: string; status: string }> = [];
+    const { transport, requests } = scriptedTransport([
+      EXPIRED,
+      { status: 503, body: '{"reason":"ServiceUnavailable"}' },
+    ]);
+    const sender = createApnsSender(apnsConfig(), transport);
+    const q = fakeQueue([[job(1)], []]);
+
+    await runNotificationDelivery({
+      deps: { queue: q.queue, store: storeFor(recorded), sender },
+    });
+
+    expect(requests).toHaveLength(2);
+    expect(recorded).toEqual([{ subscriptionId: 'sub-apns', status: 'temporary_failure' }]);
+    expect(q.rescheduled).toEqual([{ id: job(1).job_id, category: 'temporary_failure' }]);
   });
 });
 
