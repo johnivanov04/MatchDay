@@ -456,15 +456,49 @@ and the dispatcher skips any pair already in a terminal state. The provider call
 happens before that row is written, and nothing can make those two atomic across
 a network boundary.
 
-### The lease is crash recovery, not retry
+### The lease is crash recovery; the backoff is provider retry
 
-A job stuck in `processing` past `lease_expires_at` is assumed to belong to a
-worker that died — a redeploy, a function timeout, an instance reclaimed — and is
-reclaimed. That is the only automatic re-attempt in the system.
+Two different mechanisms, two different columns, deliberately never mixed.
 
-There is **no provider retry policy**. A notification whose every device
-rejected it is recorded `failed` with `all_attempts_failed` and left alone.
-Phase 3C owns backoff.
+**Lease reclaim.** A job stuck in `processing` past `lease_expires_at` belonged
+to a worker that died — a redeploy, a function timeout, a reclaimed instance —
+and is picked up again. It ignores `next_attempt_at`, because a crashed worker
+is not waiting on a provider. It increments `attempts` and **never**
+`provider_attempts`, so a bad deploy cannot quietly spend every in-flight
+notification's retry budget.
+
+**Provider retry (Phase 3C).** A delivery round that left at least one
+subscription in `temporary_failure` returns the job to `pending` with a future
+`next_attempt_at`:
+
+| temporary failure | next attempt |
+|---|---|
+| 1st | +1 minute |
+| 2nd | +2 minutes |
+| 3rd | +5 minutes |
+| 4th | +15 minutes |
+| 5th | terminal `failed`, category `retries_exhausted` |
+
+At most **five** provider delivery rounds. No jitter: the fleet is a single cron
+on a one-minute tick, so there is no herd to spread out.
+
+The schedule lives in `reschedule_notification_delivery_job`, not in the worker.
+Two workers racing on one job cannot compute two different next-attempt times,
+and there is no constant in TypeScript to drift from the column in Postgres.
+
+**Never retried:** `permanent_failure` and `invalidated` are terminal per
+(notification, subscription) and always were. A notification with no enabled
+subscriptions is `completed`, not retried — there is nothing owed.
+
+### Partial fanout
+
+A notification reaching one phone and being rate limited on another is **not**
+finished. The job is rescheduled, and the next round re-sends to nobody who
+already has it: `push_delivery_attempts` is unique per (notification,
+subscription) and the dispatcher skips any pair already `sent`,
+`permanent_failure` or `invalidated`.
+
+So the retry is per-subscription in effect, while the queue stays per-notification.
 
 ### Operating it
 
@@ -478,11 +512,21 @@ select status, count(*), min(created_at) as oldest
   from public.notification_delivery_jobs
  group by status order by status;
 
--- Jobs that failed, by reason.
+-- Why jobs ended. Three distinguishable terminal causes:
+--   retries_exhausted   → the provider kept saying "try later" and we stopped
+--   all_attempts_failed → the provider said "never" (permanent / invalidated)
+--   dispatch_error      → our own fault; the pass could not be carried out
 select last_error_category, count(*)
   from public.notification_delivery_jobs
  where status = 'failed'
  group by 1 order by 2 desc;
+
+-- Work currently backed off, and how long until it is due.
+select id, provider_attempts, next_attempt_at,
+       next_attempt_at - now() as due_in
+  from public.notification_delivery_jobs
+ where status = 'pending' and next_attempt_at > now()
+ order by next_attempt_at;
 ```
 
 `pending` climbing steadily means the worker is not running (check the cron
@@ -521,6 +565,8 @@ indexes. There is no agent and no vendor.
 | `notification_delivery.failed` | error | The queue itself could not be read or written; nothing was drained. **Alert on this** |
 | `notification_delivery.skipped` | warn | No service-role key, or no push transport configured. **Jobs are accumulating unsent** |
 | `notification_delivery.incomplete` | warn | At least one notification reached none of its devices |
+| `notification_delivery.retry_scheduled` | info | A delivery round hit a retryable provider failure; carries `retry_number` and `next_attempt_at` |
+| `notification_delivery.retry_exhausted` | warn | Five temporary failures; the job is now terminally `failed`. **Worth alerting on a sustained rate** |
 | `notification_delivery.stale_claim` | warn | A job was finished under another worker's claim. Rare; repeated occurrences mean the lease is shorter than a batch takes |
 | `heartbeat.sent` | info | The external heartbeat was pinged, with `kind` = `success` or `failure` |
 | `heartbeat.failed` | warn | The monitoring provider was unreachable or answered non-2xx. **Does not affect the cron result** |

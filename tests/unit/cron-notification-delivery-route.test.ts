@@ -42,6 +42,8 @@ function result(overrides: Partial<DeliveryRunResult> = {}): DeliveryRunResult {
     claimed: 0,
     completed: 0,
     failed: 0,
+    rescheduled: 0,
+    exhausted: 0,
     sent: 0,
     errorCode: null,
     ...overrides,
@@ -183,6 +185,8 @@ describe('the response body', () => {
       claimed: 0,
       completed: 0,
       failed: 0,
+      rescheduled: 0,
+      exhausted: 0,
       sent: 0,
       errorCode: '42501',
     });

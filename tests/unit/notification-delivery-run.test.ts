@@ -4,9 +4,9 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as ObservabilityLog from '@/lib/observability/log';
 import type { DeliveryQueueStore } from '@/lib/notifications/delivery-queue';
-import type { PushDispatchStore } from '@/lib/push/dispatch';
+import type { PushDispatchStore, PushSubscriptionRecord } from '@/lib/push/dispatch';
 import type { PushSender } from '@/lib/push/sender';
-import type { ClaimedDeliveryJob } from '@/types/database';
+import type { ClaimedDeliveryJob, RescheduledDeliveryJob } from '@/types/database';
 
 /**
  * The delivery worker's outcome contract.
@@ -60,7 +60,15 @@ function fakeQueue(batches: ClaimedDeliveryJob[][]) {
   const claims: Array<{ worker: string; limit: number; lease: number }> = [];
   const completed: string[] = [];
   const failed: Array<{ id: string; category: string | null }> = [];
+  const rescheduled: Array<{ id: string; category: string | null }> = [];
   let call = 0;
+  // Overridable per test so retry-budget behaviour can be simulated without a
+  // database; the DB suite proves the real schedule.
+  let rescheduleResult: RescheduledDeliveryJob = {
+    outcome: 'scheduled',
+    retry_number: 1,
+    scheduled_for: '2026-09-02T12:00:00.000Z',
+  };
 
   const queue: DeliveryQueueStore = {
     async claim(worker, limit, lease) {
@@ -75,9 +83,22 @@ function fakeQueue(batches: ClaimedDeliveryJob[][]) {
       failed.push({ id, category });
       return true;
     },
+    async reschedule(id, category) {
+      rescheduled.push({ id, category });
+      return rescheduleResult;
+    },
   };
 
-  return { queue, claims, completed, failed };
+  return {
+    queue,
+    claims,
+    completed,
+    failed,
+    rescheduled,
+    setRescheduleResult(next: RescheduledDeliveryJob) {
+      rescheduleResult = next;
+    },
+  };
 }
 
 /** The dispatch layer is mocked at its own boundary, not below it. */
@@ -142,6 +163,8 @@ describe('claiming', () => {
       claimed: 0,
       completed: 0,
       failed: 0,
+      rescheduled: 0,
+      exhausted: 0,
       sent: 0,
       errorCode: null,
     });
@@ -255,22 +278,23 @@ describe('terminal state', () => {
     expect(result.completed).toBe(1);
   });
 
-  it('completes a job that reached some devices but not others', async () => {
+  it('completes a job that reached some devices and was permanently refused by others', async () => {
     // One member with a dead endpoint is an ordinary, successful fanout. The
     // per-device outcome is already on `push_delivery_attempts`; the job is
-    // not the place to re-litigate it.
-    const { queue, completed, failed } = fakeQueue([[job(1)], []]);
-    const { store, sender } = scenario({ attempted: 3, sent: 1 });
+    // not the place to re-litigate it, and a permanent refusal earns no retry.
+    const { queue, completed, failed, rescheduled } = fakeQueue([[job(1)], []]);
+    const { store, sender } = scenario({ attempted: 3, sent: 1, failWith: 'permanent' });
 
     await runNotificationDelivery({ deps: deps(queue, { store, sender }) });
 
     expect(completed).toHaveLength(1);
     expect(failed).toHaveLength(0);
+    expect(rescheduled).toHaveLength(0);
   });
 
-  it('fails a job when every attempt it made was rejected', async () => {
+  it('fails a job when every attempt it made was permanently rejected', async () => {
     const { queue, completed, failed } = fakeQueue([[job(1)], []]);
-    const { store, sender } = scenario({ attempted: 2, sent: 0 });
+    const { store, sender } = scenario({ attempted: 2, sent: 0, failWith: 'permanent' });
 
     const result = await runNotificationDelivery({ deps: deps(queue, { store, sender }) });
 
@@ -343,6 +367,292 @@ describe('terminal state', () => {
     expect(mocks.logWarn).toHaveBeenCalledWith('notification_delivery.stale_claim', {
       job_id: job(1).job_id,
     });
+  });
+});
+
+describe('Phase 3C — retryable failures', () => {
+  it('reschedules rather than completing when a provider says try later', async () => {
+    const { queue, completed, failed, rescheduled } = fakeQueue([[job(1)], []]);
+    const { store, sender } = scenario({ attempted: 1, sent: 0, failWith: 'temporary' });
+
+    const result = await runNotificationDelivery({ deps: deps(queue, { store, sender }) });
+
+    expect(rescheduled).toEqual([{ id: job(1).job_id, category: 'temporary_failure' }]);
+    expect(completed).toHaveLength(0);
+    expect(failed).toHaveLength(0);
+    expect(result.rescheduled).toBe(1);
+  });
+
+  it('reschedules a PARTIAL fanout, even though something was delivered', async () => {
+    // THE RULE THIS PHASE EXISTS FOR. One phone got it, another was rate
+    // limited. Completing here would drop the second phone's copy for good.
+    //
+    // The already-sent pair is terminal in `push_delivery_attempts`, so the
+    // retry re-sends to nobody who already has it — that half is proved
+    // against the real database in `tests/db/notification-delivery-retry`.
+    const { queue, completed, rescheduled } = fakeQueue([[job(1)], []]);
+    const { store, sender } = scenario({ attempted: 2, sent: 1, failWith: 'temporary' });
+
+    const result = await runNotificationDelivery({ deps: deps(queue, { store, sender }) });
+
+    expect(rescheduled).toHaveLength(1);
+    expect(completed).toHaveLength(0);
+    // The successful send is still counted — it happened and is not undone.
+    expect(result.sent).toBe(1);
+  });
+
+  it('logs the scheduled retry with its number and next attempt time', async () => {
+    const f = fakeQueue([[job(1)], []]);
+    f.setRescheduleResult({
+      outcome: 'scheduled',
+      retry_number: 3,
+      scheduled_for: '2026-09-02T12:05:00.000Z',
+    });
+    const { store, sender } = scenario({ attempted: 1, sent: 0, failWith: 'temporary' });
+
+    await runNotificationDelivery({ deps: deps(f.queue, { store, sender }) });
+
+    expect(mocks.logInfo).toHaveBeenCalledWith('notification_delivery.retry_scheduled', {
+      job_id: job(1).job_id,
+      retry_number: 3,
+      error_category: 'temporary_failure',
+      next_attempt_at: '2026-09-02T12:05:00.000Z',
+    });
+  });
+
+  it('counts an exhausted budget as a failed job and says so', async () => {
+    const f = fakeQueue([[job(1)], []]);
+    f.setRescheduleResult({ outcome: 'exhausted', retry_number: 5, scheduled_for: null });
+    const { store, sender } = scenario({ attempted: 1, sent: 0, failWith: 'temporary' });
+
+    const result = await runNotificationDelivery({ deps: deps(f.queue, { store, sender }) });
+
+    expect(result.exhausted).toBe(1);
+    expect(result.failed).toBe(1);
+    expect(result.rescheduled).toBe(0);
+    expect(mocks.logWarn).toHaveBeenCalledWith('notification_delivery.retry_exhausted', {
+      job_id: job(1).job_id,
+      retry_number: 5,
+      error_category: 'retries_exhausted',
+    });
+  });
+
+  it('notes a reschedule the worker no longer had the right to make', async () => {
+    const f = fakeQueue([[job(1)], []]);
+    f.setRescheduleResult({ outcome: 'not_claimed', retry_number: null, scheduled_for: null });
+    const { store, sender } = scenario({ attempted: 1, sent: 0, failWith: 'temporary' });
+
+    await runNotificationDelivery({ deps: deps(f.queue, { store, sender }) });
+
+    expect(mocks.logWarn).toHaveBeenCalledWith('notification_delivery.stale_claim', {
+      job_id: job(1).job_id,
+    });
+  });
+
+  it('never reschedules a permanent refusal', async () => {
+    const { queue, rescheduled, failed } = fakeQueue([[job(1)], []]);
+    const { store, sender } = scenario({ attempted: 2, sent: 0, failWith: 'permanent' });
+
+    await runNotificationDelivery({ deps: deps(queue, { store, sender }) });
+
+    expect(rescheduled).toHaveLength(0);
+    expect(failed).toEqual([{ id: job(1).job_id, category: 'all_attempts_failed' }]);
+  });
+
+  it('never reschedules a notification with nothing to deliver to', async () => {
+    // No enabled devices is a finished job. Waiting does not create a phone.
+    const { queue, rescheduled, completed } = fakeQueue([[job(1)], []]);
+    const { store, sender } = scenario({ attempted: 0, sent: 0 });
+
+    await runNotificationDelivery({ deps: deps(queue, { store, sender }) });
+
+    expect(rescheduled).toHaveLength(0);
+    expect(completed).toHaveLength(1);
+  });
+
+  it('never reschedules an aborted dispatch — that is not a provider verdict', async () => {
+    // The store died mid-pass. That is an internal fault, and spending a
+    // provider retry on it would let a database blip drain the budget.
+    const { store, sender } = scenario({ attempted: 1, sent: 0, failWith: 'temporary' });
+    store.loadEnabledSubscriptions = vi.fn(async () => {
+      throw new Error('database went away');
+    });
+    const { queue, rescheduled, failed } = fakeQueue([[job(1)], []]);
+
+    await runNotificationDelivery({ deps: { queue, store, sender } });
+
+    expect(rescheduled).toHaveLength(0);
+    expect(failed).toEqual([{ id: job(1).job_id, category: 'dispatch_error' }]);
+  });
+
+  it('keeps processing the batch when one job is rescheduled', async () => {
+    const { queue, completed, rescheduled } = fakeQueue([[job(1), job(2), job(3)], []]);
+    let call = 0;
+    const { store, sender } = scenario({ attempted: 1, sent: 0, failWith: 'temporary' });
+    // Only the middle notification fails; the others have no devices.
+    store.loadEnabledSubscriptions = vi.fn(async () =>
+      call++ === 1
+        ? [
+            {
+              id: 'sub-0',
+              user_id: 'user-1',
+              channel: 'apns' as const,
+              device_token: 'TOKEN',
+              apns_environment: 'production' as const,
+            },
+          ]
+        : [],
+    );
+
+    const result = await runNotificationDelivery({ deps: { queue, store, sender } });
+
+    expect(result.claimed).toBe(3);
+    expect(completed).toHaveLength(2);
+    expect(rescheduled).toHaveLength(1);
+  });
+});
+
+describe('Phase 3C — a retry must not re-deliver what already arrived', () => {
+  /**
+   * A store that behaves like the real one across two worker passes.
+   *
+   * `alreadyDelivered` mirrors `push-store.ts` exactly — sent,
+   * permanent_failure and invalidated are terminal; temporary_failure is not —
+   * and `recordResult` keeps the state between passes. That is the whole
+   * mechanism partial-fanout retry rests on, so it is worth reproducing rather
+   * than stubbing.
+   */
+  function statefulStore(subscriptions: PushSubscriptionRecord[]) {
+    const attempts = new Map<string, string>();
+
+    const store: PushDispatchStore = {
+      loadNotifications: async (ids) =>
+        ids.map((id) => ({
+          id,
+          type: 'match_published' as const,
+          title: 'New match',
+          body: 'Mon 19:00',
+          deep_link: '/leagues/x/matches/y',
+        })),
+      loadRecipients: async (ids) => new Map(ids.map((id) => [id, 'user-1'])),
+      loadEnabledSubscriptions: async () => subscriptions,
+      alreadyDelivered: async (notificationId, subscriptionId) => {
+        const status = attempts.get(`${notificationId}:${subscriptionId}`);
+        return status === 'sent' || status === 'permanent_failure' || status === 'invalidated';
+      },
+      recordResult: async (notificationId, subscriptionId, status) => {
+        attempts.set(`${notificationId}:${subscriptionId}`, status);
+      },
+    };
+
+    return { store, attempts };
+  }
+
+  const APNS: PushSubscriptionRecord = {
+    id: 'sub-apns',
+    user_id: 'user-1',
+    channel: 'apns',
+    device_token: 'A'.repeat(64),
+    apns_environment: 'production',
+  };
+  const WEB: PushSubscriptionRecord = {
+    id: 'sub-web',
+    user_id: 'user-1',
+    channel: 'web_push',
+    endpoint: 'https://push.example.test/abc',
+    p256dh: 'p'.repeat(87),
+    auth_secret: 'a'.repeat(22),
+  };
+
+  it('retries only the subscription that failed, and never re-sends the one that succeeded', async () => {
+    const { store, attempts } = statefulStore([APNS, WEB]);
+    const targets: string[] = [];
+
+    // APNs accepts; Web Push is rate limited. The classic partial fanout.
+    const sender = {
+      async send(target: { channel: string; subscriptionId: string }) {
+        targets.push(`${target.channel}:${target.subscriptionId}`);
+        return target.channel === 'apns'
+          ? { ok: true as const, providerMessageId: 'APNS-ID-0001' }
+          : { ok: false as const, statusCode: 503 };
+      },
+    } as unknown as PushSender;
+
+    // ── Pass 1 ──
+    const first = fakeQueue([[job(1)], []]);
+    const one = await runNotificationDelivery({ deps: { queue: first.queue, store, sender } });
+
+    expect(one.sent).toBe(1);
+    expect(first.rescheduled).toHaveLength(1);
+    expect(first.completed).toHaveLength(0);
+    expect(targets).toEqual(['apns:sub-apns', 'web_push:sub-web']);
+    expect(attempts.get(`${job(1).job_notification_id}:sub-apns`)).toBe('sent');
+    expect(attempts.get(`${job(1).job_notification_id}:sub-web`)).toBe('temporary_failure');
+
+    // ── Pass 2: the retry, same store, same notification ──
+    targets.length = 0;
+    const second = fakeQueue([[job(1)], []]);
+    await runNotificationDelivery({ deps: { queue: second.queue, store, sender } });
+
+    // THE ASSERTION THIS PHASE TURNS ON. The phone that already buzzed is not
+    // asked again; only the endpoint that failed is retried.
+    expect(targets).toEqual(['web_push:sub-web']);
+    expect(targets).not.toContain('apns:sub-apns');
+  });
+
+  it('completes the job once the retried subscription finally succeeds', async () => {
+    const { store } = statefulStore([APNS, WEB]);
+    let webCalls = 0;
+
+    const sender = {
+      async send(target: { channel: string }) {
+        if (target.channel === 'apns') {
+          return { ok: true as const, providerMessageId: 'APNS-ID-0002' };
+        }
+        webCalls += 1;
+        // Fails once, then succeeds — the ordinary transient case.
+        return webCalls === 1
+          ? { ok: false as const, statusCode: 503 }
+          : { ok: true as const };
+      },
+    } as unknown as PushSender;
+
+    const first = fakeQueue([[job(1)], []]);
+    await runNotificationDelivery({ deps: { queue: first.queue, store, sender } });
+    expect(first.rescheduled).toHaveLength(1);
+
+    const second = fakeQueue([[job(1)], []]);
+    const result = await runNotificationDelivery({
+      deps: { queue: second.queue, store, sender },
+    });
+
+    expect(second.completed).toEqual([job(1).job_id]);
+    expect(second.rescheduled).toHaveLength(0);
+    expect(result.sent).toBe(1); // only the web push — APNs was skipped
+  });
+
+  it('does not retry a subscription that was permanently refused', async () => {
+    const { store } = statefulStore([APNS, WEB]);
+    const targets: string[] = [];
+
+    const sender = {
+      async send(target: { channel: string; subscriptionId: string }) {
+        targets.push(target.subscriptionId);
+        return target.channel === 'apns'
+          ? { ok: false as const, statusCode: 410 } // gone → invalidated, terminal
+          : { ok: false as const, statusCode: 503 }; // retryable
+      },
+    } as unknown as PushSender;
+
+    const first = fakeQueue([[job(1)], []]);
+    await runNotificationDelivery({ deps: { queue: first.queue, store, sender } });
+    expect(first.rescheduled).toHaveLength(1);
+
+    targets.length = 0;
+    const second = fakeQueue([[job(1)], []]);
+    await runNotificationDelivery({ deps: { queue: second.queue, store, sender } });
+
+    expect(targets).toEqual(['sub-web']);
   });
 });
 
@@ -455,7 +765,22 @@ describe('the worker holds no transaction across the network', () => {
  * them was the first version of this file and produced tests that passed while
  * dispatching nothing at all.
  */
-function scenario({ attempted, sent }: { attempted: number; sent: number }): {
+function scenario({
+  attempted,
+  sent,
+  failWith = 'temporary',
+}: {
+  attempted: number;
+  sent: number;
+  /**
+   * Which kind of refusal the failing sends get.
+   *
+   * 503 classifies `temporary_failure` and 400 `permanent_failure`. Since Phase
+   * 3C those lead to opposite outcomes — reschedule versus terminal — so a test
+   * that does not say which it means is not testing anything.
+   */
+  failWith?: 'temporary' | 'permanent';
+}): {
   store: PushDispatchStore;
   sender: PushSender;
 } {
@@ -489,7 +814,7 @@ function scenario({ attempted, sent }: { attempted: number; sent: number }): {
       calls += 1;
       return calls <= sent
         ? { ok: true as const, providerMessageId: 'id' }
-        : { ok: false as const, statusCode: 503 };
+        : { ok: false as const, statusCode: failWith === 'temporary' ? 503 : 400 };
     },
   } as unknown as PushSender;
 
