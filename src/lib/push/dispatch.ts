@@ -81,6 +81,20 @@ export interface PushDispatchResult {
   sent: number;
   failed: number;
   skipped: number;
+  /**
+   * The pass ended early because something threw.
+   *
+   * This function is documented never to throw, and does not — but "returned a
+   * result" and "did the work" are different claims, and until Phase 3B nothing
+   * could tell them apart. A store that becomes unreachable half way through a
+   * fanout returns `{attempted: 0, sent: 0}`, which is indistinguishable from a
+   * notification with no devices to send to.
+   *
+   * The delivery worker uses exactly that distinction to decide whether a queue
+   * job is finished or failed, so getting it wrong means silently discarding a
+   * notification nobody ever received.
+   */
+  aborted: boolean;
 }
 
 /**
@@ -94,7 +108,13 @@ export async function dispatchPushNotifications(
   notificationIds: string[],
   deps: { store: PushDispatchStore; sender: PushSender | null },
 ): Promise<PushDispatchResult> {
-  const result: PushDispatchResult = { attempted: 0, sent: 0, failed: 0, skipped: 0 };
+  const result: PushDispatchResult = {
+    attempted: 0,
+    sent: 0,
+    failed: 0,
+    skipped: 0,
+    aborted: false,
+  };
 
   if (notificationIds.length === 0) {
     return result;
@@ -215,6 +235,10 @@ export async function dispatchPushNotifications(
     // Deliberately swallowed, and deliberately not logged with the error
     // object: a failure here can carry endpoints and provider responses, and
     // this path runs after the domain transaction has already committed.
+    //
+    // Swallowed, but no longer silent: the caller is told the pass did not
+    // finish, so a queued job can be failed rather than marked done.
+    result.aborted = true;
     return result;
   }
 

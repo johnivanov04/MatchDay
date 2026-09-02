@@ -1,23 +1,24 @@
 import 'server-only';
 
 import { logError, logInfo, logWarn } from '@/lib/observability/log';
-import { dispatchPushForKeyPrefix } from '@/lib/push/notify';
 import { createSupabaseAdminClient, isServiceRoleConfigured } from '@/lib/supabase/admin';
 
 /**
  * One pass of the reminder worker.
  *
- * Two steps, deliberately in this order and with a hard boundary between them:
+ * This claims every due reminder and writes the canonical notifications. It
+ * does **not** deliver them.
  *
- *   1. the database claims every due reminder and writes the canonical
- *      notifications, committing;
- *   2. only then is push attempted, and only for the batches step 1 actually
- *      created.
+ * It used to. Phase 3B moved delivery behind a durable queue: the trigger on
+ * `notifications` enqueues a job in the same transaction that writes the row,
+ * and `/api/cron/notification-delivery` drains it. That removes the one thing
+ * this module could never bound — a generator that claimed a hundred
+ * occurrences then sat in a loop talking to Apple, inside a function with a
+ * wall clock, with no record of where it stopped if it ran out of time.
  *
- * Step 2 cannot undo step 1. A push service that is down, a device whose
- * subscription has expired, or a crash between the two leaves every reminder
- * sitting in the inbox where it belongs — which is the whole reason the
- * canonical record is the source of truth and push is a delivery channel.
+ * The property that mattered is unchanged and now holds by construction: a push
+ * that does not go out cannot cost a reminder, because the canonical record is
+ * committed before anything is owed to any provider.
  *
  * Uses the service-role client because the generator writes notifications
  * addressed to many different users, which no client session may do. The
@@ -52,14 +53,6 @@ export interface ReminderRunResult {
   /** Canonical notifications created across those occurrences. */
   notified: number;
   /**
-   * Occurrences whose push fan-out threw after the notifications had committed.
-   *
-   * Not a failure of the run: the inbox already has the reminder. Surfaced so a
-   * push pipeline that is down consistently is visible before anybody notices
-   * their phone has gone quiet.
-   */
-  pushFailures: number;
-  /**
    * Stable error code when `status` is `failed`, for correlating log lines.
    * Never the database's message, which can name constraints and other tenants.
    */
@@ -80,7 +73,7 @@ export async function runDueReminders(limit = 100): Promise<ReminderRunResult> {
     // `service_role_configured`, not `reason`: the key filter drops anything
     // containing `reason`, so the original field never reached the log line.
     logWarn('reminder.skipped', { service_role_configured: false });
-    return { status: 'skipped', claimed: 0, notified: 0, pushFailures: 0, errorCode: null };
+    return { status: 'skipped', claimed: 0, notified: 0, errorCode: null };
   }
 
   const supabase = createSupabaseAdminClient();
@@ -93,38 +86,24 @@ export async function runDueReminders(limit = 100): Promise<ReminderRunResult> {
     // PostgreSQL error can carry a constraint name or another league's id.
     const errorCode = typeof error?.code === 'string' ? error.code : 'unknown';
     logError('reminder.failed', { error_code: errorCode });
-    return { status: 'failed', claimed: 0, notified: 0, pushFailures: 0, errorCode };
+    return { status: 'failed', claimed: 0, notified: 0, errorCode };
   }
 
   const claimed = data.length;
   const notified = data.reduce((total, row) => total + row.notified, 0);
 
-  // Per claimed occurrence, so this pushes exactly what it just created rather
-  // than re-walking every reminder notification that has ever existed.
-  let pushFailures = 0;
-  for (const row of data) {
-    try {
-      await dispatchPushForKeyPrefix(`reminder:${row.reminder_id}`);
-    } catch {
-      // The notification is already committed; push is best effort. Counted,
-      // not swallowed, so a consistently failing push pipeline is visible.
-      pushFailures += 1;
-    }
-  }
-
   // Counts and ids only. No league name, no match title, no recipient — a log
   // line is read by more people and kept longer than any screen in the product.
-  logInfo('reminder.run', { claimed, notified, push_failures: pushFailures });
-
-  if (pushFailures > 0) {
-    logWarn('reminder.push_incomplete', { claimed, push_failures: pushFailures });
-  }
+  //
+  // `notified` is now the number of reminders *enqueued* for delivery as well
+  // as written, since the trigger fires on the same insert. Whether they
+  // reached a phone is the delivery worker's log line to write, not this one's.
+  logInfo('reminder.run', { claimed, notified });
 
   return {
     status: claimed === 0 ? 'idle' : 'worked',
     claimed,
     notified,
-    pushFailures,
     errorCode: null,
   };
 }

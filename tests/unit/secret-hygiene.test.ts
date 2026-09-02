@@ -114,7 +114,10 @@ describe('secret hygiene', () => {
       'src/lib/push/sender.ts',
       'src/lib/push/dispatch.ts',
       'src/lib/push/push-store.ts',
-      'src/lib/push/notify.ts',
+      // Phase 3B: the queue store and the worker both hold the service-role
+      // client and reach real devices. Neither may ever be bundled for a browser.
+      'src/lib/notifications/delivery-queue.ts',
+      'src/server/notification-delivery.ts',
       'src/lib/guidelines/guidelines.ts',
       'src/lib/matches/matches.ts',
       'src/lib/notifications/notifications.ts',

@@ -5,7 +5,6 @@ import { z } from 'zod';
 import { requireLeagueAdmin } from '@/lib/auth/authorization';
 import { actionFailure, actionSuccess, DomainError, type ActionResult } from '@/lib/errors';
 import { domainErrorFromDatabase } from '@/lib/errors-from-database';
-import { dispatchPushForKeyPrefix } from '@/lib/push/notify';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import type { SignupOutcome, SignupStatus } from '@/types/database';
 
@@ -26,22 +25,6 @@ import type { SignupOutcome, SignupStatus } from '@/types/database';
 
 const matchIdSchema = z.uuid();
 
-/**
- * Pushes a fanout the database has already committed.
- *
- * Called after the transaction and outside every `try` that decides the
- * action's result, for the reason `pushCommittedFanout` in the match actions
- * gives: the signup is recorded and the canonical notification exists, so a
- * push that does not go out must never come back to the player as a failure.
- */
-async function pushCommittedFanout(prefix: string): Promise<void> {
-  try {
-    await dispatchPushForKeyPrefix(prefix);
-  } catch {
-    /* deliberately silent — the notification is already safe in the inbox */
-  }
-}
-
 /** Shared shape for the player responses, which differ only in the RPC. */
 async function playerSignupAction(
   rpc: 'join_match' | 'request_spot' | 'mark_unavailable' | 'cancel_spot',
@@ -49,8 +32,6 @@ async function playerSignupAction(
   extra: Record<string, unknown> = {},
 ): Promise<ActionResult<SignupOutcome>> {
   let outcome: SignupOutcome;
-  let pushPrefix: string | null = null;
-  let cancellationMatchId: string | null = null;
 
   try {
     const matchId = matchIdSchema.parse(formData.get('match_id') ?? '');
@@ -68,34 +49,8 @@ async function playerSignupAction(
     }
 
     outcome = data;
-
-    // Only the outcomes that create a push-eligible notification are worth a
-    // dispatch. A cancellation's own receipt is not push-eligible — the person
-    // just did it — but the promotion and the administrator alerts it can
-    // trigger are, and they share the match in their key prefix.
-    if (rpc === 'join_match') {
-      pushPrefix =
-        outcome.status === 'confirmed'
-          ? `signup_confirmed:${matchId}`
-          : `waitlisted:${matchId}`;
-    } else if (rpc === 'cancel_spot') {
-      pushPrefix = `waitlist_promotion:${matchId}`;
-      cancellationMatchId = matchId;
-    }
   } catch (error: unknown) {
     return actionFailure(error);
-  }
-
-  if (pushPrefix !== null) {
-    await pushCommittedFanout(pushPrefix);
-  }
-
-  // A cancellation can also have alerted the administrator — a late withdrawal,
-  // or a spot that administrator-controlled mode left open. Both are committed
-  // already; these dispatches only deliver copies.
-  if (cancellationMatchId !== null) {
-    await pushCommittedFanout(`late_cancellation:${cancellationMatchId}`);
-    await pushCommittedFanout(`replacement_needed:${cancellationMatchId}`);
   }
 
   revalidatePath('/', 'layout');
@@ -202,8 +157,6 @@ export async function promoteWaitlistedPlayerAction(
   } catch (error: unknown) {
     return actionFailure(error);
   }
-
-  await pushCommittedFanout(`waitlist_promotion:${matchId}`);
 
   revalidatePath('/', 'layout');
   return actionSuccess(outcome);
@@ -378,10 +331,6 @@ export async function finalizeRosterAction(
   } catch (error: unknown) {
     return actionFailure(error);
   }
-
-  // The revision is part of the notification key, so pushing the right batch
-  // means asking for the revision the database just produced.
-  await pushCommittedFanout(`roster_outcome:${matchId}:${String(revision)}`);
 
   revalidatePath('/', 'layout');
   return actionSuccess(revision);

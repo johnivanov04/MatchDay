@@ -17,7 +17,6 @@ const mocks = vi.hoisted(() => ({
   revalidatePath: vi.fn(),
   requireLeagueAdmin: vi.fn(),
   rpc: vi.fn(),
-  dispatchPushForKeyPrefix: vi.fn(),
 }));
 
 vi.mock('next/cache', () => ({ revalidatePath: mocks.revalidatePath }));
@@ -35,9 +34,6 @@ vi.mock('@/lib/auth/session', () => ({
   requireSessionUser: vi.fn(async () => ({ id: 'user-1' })),
   getSessionUser: vi.fn(),
   getCurrentProfile: vi.fn(),
-}));
-vi.mock('@/lib/push/notify', () => ({
-  dispatchPushForKeyPrefix: mocks.dispatchPushForKeyPrefix,
 }));
 vi.mock('@/lib/supabase/server', () => ({
   createSupabaseServerClient: async () => ({ rpc: mocks.rpc }),
@@ -79,7 +75,6 @@ beforeEach(() => {
     data: { status: 'confirmed', waitlist_position: null },
     error: null,
   });
-  mocks.dispatchPushForKeyPrefix.mockResolvedValue(undefined);
 });
 
 describe('player signup actions', () => {
@@ -128,33 +123,23 @@ describe('player signup actions', () => {
     expect(result).toMatchObject({ ok: true, data: { status: 'waitlisted', waitlist_position: 3 } });
   });
 
-  it('pushes the batch matching the outcome', async () => {
+  it('returns on the RPC alone, without a provider round trip', async () => {
+    // PHASE 3B. Joining a match used to dispatch push inline — and a join can
+    // cascade, promoting somebody off the waitlist and alerting an
+    // administrator, so a single tap could mean several fanouts and every
+    // device in all of them, all inside the player's request.
+    //
+    // The notification and its delivery job now commit together and the player
+    // gets their answer immediately.
     await joinMatchAction(null, form({ match_id: MATCH_ID }));
-    expect(mocks.dispatchPushForKeyPrefix).toHaveBeenCalledWith(`signup_confirmed:${MATCH_ID}`);
 
-    vi.clearAllMocks();
-    mocks.rpc.mockResolvedValue({
-      data: { status: 'waitlisted', waitlist_position: 1 },
-      error: null,
-    });
-    await joinMatchAction(null, form({ match_id: MATCH_ID }));
-    expect(mocks.dispatchPushForKeyPrefix).toHaveBeenCalledWith(`waitlisted:${MATCH_ID}`);
+    expect(mocks.rpc).toHaveBeenCalledTimes(1);
+    expect(mocks.rpc).toHaveBeenCalledWith('join_match', { p_match_id: MATCH_ID });
   });
 
-  it('pushes nothing for responses that notify nobody', async () => {
-    mocks.rpc.mockResolvedValue({
-      data: { status: 'not_available', waitlist_position: null },
-      error: null,
-    });
-    await markUnavailableAction(null, form({ match_id: MATCH_ID }));
-    expect(mocks.dispatchPushForKeyPrefix).not.toHaveBeenCalled();
-  });
-
-  it('still succeeds when Web Push fails outright', async () => {
-    // The signup and its canonical notification are already committed. Losing
-    // the push copy must not turn a real outcome into an error.
-    mocks.dispatchPushForKeyPrefix.mockRejectedValue(new Error('push service unreachable'));
-
+  it('succeeds without any push transport being reachable at all', async () => {
+    // Nothing here can be made to fail by a provider, because nothing here
+    // talks to one. That is the guarantee 3B replaced a try/catch with.
     const result = await joinMatchAction(null, form({ match_id: MATCH_ID }));
 
     expect(result?.ok).toBe(true);
@@ -352,19 +337,11 @@ describe('administrator decisions', () => {
     }
   });
 
-  it('pushes the roster batch keyed on the revision the database produced', async () => {
-    mocks.rpc.mockResolvedValue({ data: 2, error: null });
-
-    await finalizeRosterAction(null, form({ league_id: LEAGUE_ID, match_id: MATCH_ID }));
-
-    expect(mocks.dispatchPushForKeyPrefix).toHaveBeenCalledWith(
-      `roster_outcome:${MATCH_ID}:2`,
-    );
-  });
-
-  it('publishes successfully even when Web Push fails', async () => {
+  it('finalizes on the RPC alone, without a provider round trip', async () => {
+    // Finalizing a roster is the largest fanout in the product: every player
+    // who signed up learns their outcome at once. It is exactly the case that
+    // must not be carried out inside an administrator's request.
     mocks.rpc.mockResolvedValue({ data: 1, error: null });
-    mocks.dispatchPushForKeyPrefix.mockRejectedValue(new Error('push down'));
 
     const result = await finalizeRosterAction(
       null,
@@ -372,5 +349,6 @@ describe('administrator decisions', () => {
     );
 
     expect(result).toMatchObject({ ok: true, data: 1 });
+    expect(mocks.rpc).toHaveBeenCalledTimes(1);
   });
 });
