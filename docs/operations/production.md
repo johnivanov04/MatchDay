@@ -206,9 +206,11 @@ select cron.schedule(
 );
 ```
 
-The SQL route creates the canonical in-app notifications — which is the record
-that matters — but **not** the Web Push fan-out, which lives in the application.
-Prefer the HTTP route where the platform allows it.
+The SQL route creates the canonical in-app notifications *and*, since Phase 3B,
+their delivery jobs — the trigger on `notifications` fires whoever does the
+insert, so a `pg_cron` schedule no longer loses the push. It still needs
+`/api/cron/notification-delivery` running to drain the queue. Prefer the HTTP
+route where the platform allows it, so both halves are scheduled the same way.
 
 ### What is in the repository, and what is not
 
@@ -260,9 +262,9 @@ select cron.schedule(
 );
 ```
 
-This creates the canonical in-app notifications — the record that matters — but
-**not** the Web Push fan-out, which lives in the application. Prefer the HTTP
-route wherever possible.
+This creates the canonical in-app notifications and their delivery jobs; the
+queue worker sends them. Before Phase 3B the fan-out lived in the application and
+this route lost it. Prefer the HTTP route wherever possible.
 
 ### Verify it by hand
 
