@@ -811,6 +811,14 @@ export type NotificationDeliveryJobRow = {
   status: NotificationDeliveryJobStatus;
   /** Times claimed, not times a provider was called. */
   attempts: number;
+  /**
+   * Provider delivery rounds that ended retryable. Phase 3C's retry budget.
+   * Deliberately NOT `attempts`, which a lease reclaim increments without any
+   * provider having been reached.
+   */
+  provider_attempts: number;
+  /** Earliest time this job may be claimed. Provider backoff only. */
+  next_attempt_at: string;
   claimed_at: string | null;
   claimed_by: string | null;
   /** Crashed-worker recovery only — never a provider retry schedule. */
@@ -819,6 +827,19 @@ export type NotificationDeliveryJobRow = {
   last_error_category: string | null;
   created_at: string;
   updated_at: string;
+};
+
+/**
+ * One row of `reschedule_notification_delivery_job`.
+ *
+ * `outcome` is `'scheduled'` when the job earned another round, `'exhausted'`
+ * when the budget is spent and the job is now terminally failed, and
+ * `'not_claimed'` when this worker no longer held it.
+ */
+export type RescheduledDeliveryJob = {
+  outcome: 'scheduled' | 'exhausted' | 'not_claimed';
+  retry_number: number | null;
+  scheduled_for: string | null;
 };
 
 /** One row of `claim_notification_delivery_jobs`. */
@@ -1425,6 +1446,13 @@ export interface Database {
           p_lease_seconds?: number;
         };
         Returns: ClaimedDeliveryJob[];
+      };
+      reschedule_notification_delivery_job: {
+        Args: {
+          p_job_id: string;
+          p_error_category?: string | null;
+        };
+        Returns: RescheduledDeliveryJob[];
       };
       complete_notification_delivery_job: {
         Args: {

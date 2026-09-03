@@ -66,6 +66,10 @@ export interface DeliveryRunResult {
   completed: number;
   /** Jobs that reached `failed`. */
   failed: number;
+  /** Jobs handed back for a later provider round. */
+  rescheduled: number;
+  /** Jobs that reached `failed` specifically because the retry budget ran out. */
+  exhausted: number;
   /** Individual provider sends that succeeded, across every job. */
   sent: number;
   /**
@@ -126,7 +130,16 @@ export async function runNotificationDelivery(
       service_role_configured: queue !== null && store !== null,
       transport_configured: sender !== null,
     });
-    return { status: 'skipped', claimed: 0, completed: 0, failed: 0, sent: 0, errorCode: null };
+    return {
+      status: 'skipped',
+      claimed: 0,
+      completed: 0,
+      failed: 0,
+      rescheduled: 0,
+      exhausted: 0,
+      sent: 0,
+      errorCode: null,
+    };
   }
 
   // Opaque and per-pass. Never a hostname or a deployment URL: this lands in a
@@ -138,6 +151,8 @@ export async function runNotificationDelivery(
   let claimed = 0;
   let completed = 0;
   let failed = 0;
+  let rescheduled = 0;
+  let exhausted = 0;
   let sent = 0;
 
   try {
@@ -156,7 +171,7 @@ export async function runNotificationDelivery(
         // the batch down with it. `dispatchPushNotifications` is documented
         // never to throw; the catch is what keeps that from being silently lost
         // the day it stops holding.
-        let outcome = { sent: 0, attempted: 0, aborted: false };
+        let outcome = { sent: 0, attempted: 0, retryable: 0, aborted: false };
 
         try {
           outcome = await dispatchPushNotifications([job.job_notification_id], { store, sender });
@@ -166,7 +181,7 @@ export async function runNotificationDelivery(
           // what stops that guarantee being silently lost the day it changes.
           // Deliberately not logged with the error object: a failure here can
           // carry endpoints and provider responses.
-          outcome = { sent: 0, attempted: 0, aborted: true };
+          outcome = { sent: 0, attempted: 0, retryable: 0, aborted: true };
         }
 
         // WHAT COUNTS AS A FAILED JOB.
@@ -184,25 +199,60 @@ export async function runNotificationDelivery(
         // dispatcher gave up part way and reports zero attempts, which looks
         // exactly like "nobody to send to" unless you ask. Completing such a
         // job would discard a notification nobody ever received.
-        const everyAttemptFailed = outcome.attempted > 0 && outcome.sent === 0;
         sent += outcome.sent;
 
-        const moved = outcome.aborted
-          ? await queue.fail(job.job_id, 'dispatch_error')
-          : everyAttemptFailed
-            ? await queue.fail(job.job_id, 'all_attempts_failed')
-            : await queue.complete(job.job_id);
+        // PHASE 3C — the order of these branches is the policy.
+        //
+        // `retryable` outranks everything except an aborted pass, and that is
+        // the partial-fanout rule: a notification that reached one phone and
+        // was rate limited on another is NOT finished, even though something
+        // was delivered. The successful attempt is already terminal in
+        // `push_delivery_attempts`, so the next round re-sends to nobody who
+        // already has it — `alreadyDelivered` skips `sent` pairs.
+        //
+        // Only once nothing retryable remains does the job settle: `failed` if
+        // every attempt was permanently refused, `completed` otherwise —
+        // including the case where there was nothing to attempt at all, which
+        // is a finished job and not a failure.
+        let moved: boolean;
 
-        if (outcome.aborted || everyAttemptFailed) {
+        if (outcome.aborted) {
+          moved = await queue.fail(job.job_id, 'dispatch_error');
+          failed += 1;
+        } else if (outcome.retryable > 0) {
+          const decision = await queue.reschedule(job.job_id, 'temporary_failure');
+
+          if (decision.outcome === 'exhausted') {
+            failed += 1;
+            exhausted += 1;
+            logWarn('notification_delivery.retry_exhausted', {
+              job_id: job.job_id,
+              retry_number: decision.retry_number ?? 0,
+              error_category: 'retries_exhausted',
+            });
+          } else if (decision.outcome === 'scheduled') {
+            rescheduled += 1;
+            logInfo('notification_delivery.retry_scheduled', {
+              job_id: job.job_id,
+              retry_number: decision.retry_number ?? 0,
+              error_category: 'temporary_failure',
+              next_attempt_at: decision.scheduled_for ?? '',
+            });
+          }
+
+          moved = decision.outcome !== 'not_claimed';
+        } else if (outcome.attempted > 0 && outcome.sent === 0) {
+          moved = await queue.fail(job.job_id, 'all_attempts_failed');
           failed += 1;
         } else {
+          moved = await queue.complete(job.job_id);
           completed += 1;
         }
 
-        // The job reached a terminal state under somebody else's claim — this
-        // worker's lease had expired and a second one took over. Harmless, and
-        // worth seeing, because a run that logs this repeatedly has a lease
-        // shorter than its own batches.
+        // The job moved on under somebody else's claim — this worker's lease
+        // had expired and a second one took over. Harmless, and worth seeing,
+        // because a run that logs this repeatedly has a lease shorter than its
+        // own batches.
         if (!moved) {
           logWarn('notification_delivery.stale_claim', { job_id: job.job_id });
         }
@@ -218,7 +268,7 @@ export async function runNotificationDelivery(
         ? (error as { code: string }).code
         : 'unknown';
     logError('notification_delivery.failed', { error_code: errorCode, claimed, completed, failed });
-    return { status: 'failed', claimed, completed, failed, sent, errorCode };
+    return { status: 'failed', claimed, completed, failed, rescheduled, exhausted, sent, errorCode };
   }
 
   // Counts and ids only. No recipient, no league, no title, and above all no
@@ -228,6 +278,8 @@ export async function runNotificationDelivery(
     claimed,
     completed,
     failed,
+    rescheduled,
+    exhausted,
     sent,
     duration_ms: Date.now() - startedAt,
   });
@@ -241,6 +293,8 @@ export async function runNotificationDelivery(
     claimed,
     completed,
     failed,
+    rescheduled,
+    exhausted,
     sent,
     errorCode: null,
   };

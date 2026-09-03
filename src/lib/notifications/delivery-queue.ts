@@ -1,7 +1,7 @@
 import 'server-only';
 
 import { createSupabaseAdminClient, isServiceRoleConfigured } from '@/lib/supabase/admin';
-import type { ClaimedDeliveryJob } from '@/types/database';
+import type { ClaimedDeliveryJob, RescheduledDeliveryJob } from '@/types/database';
 
 /**
  * The worker's view of the delivery queue.
@@ -28,6 +28,15 @@ export interface DeliveryQueueStore {
   /** True when this call is what moved the job; false if something else already did. */
   complete(jobId: string): Promise<boolean>;
   fail(jobId: string, errorCategory: string | null): Promise<boolean>;
+  /**
+   * Hands the job back for another provider round, or ends it if the retry
+   * budget is spent.
+   *
+   * The schedule is not passed in and is not decided here. The SQL owns it, so
+   * two workers racing on one job cannot compute two different next-attempt
+   * times, and the policy is one thing in one place.
+   */
+  reschedule(jobId: string, errorCategory: string | null): Promise<RescheduledDeliveryJob>;
 }
 
 export function createDeliveryQueueStore(): DeliveryQueueStore | null {
@@ -70,6 +79,21 @@ export function createDeliveryQueueStore(): DeliveryQueueStore | null {
         throw error;
       }
       return data === true;
+    },
+
+    async reschedule(jobId, errorCategory) {
+      const { data, error } = await client.rpc('reschedule_notification_delivery_job', {
+        p_job_id: jobId,
+        p_error_category: errorCategory,
+      });
+      if (error !== null) {
+        throw error;
+      }
+      // A set-returning function with no row means the job was not this
+      // worker's to reschedule. Treated the same as an explicit `not_claimed`.
+      return (
+        data?.[0] ?? { outcome: 'not_claimed' as const, retry_number: null, scheduled_for: null }
+      );
     },
 
     async fail(jobId, errorCategory) {

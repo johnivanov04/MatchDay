@@ -82,6 +82,20 @@ export interface PushDispatchResult {
   failed: number;
   skipped: number;
   /**
+   * Attempts that ended in a state worth trying again — `temporary_failure`.
+   *
+   * The classification has existed since Phase 3; until Phase 3C nothing acted
+   * on it, so a rate limit and a dead device token both ended a notification
+   * for good. This is the number the delivery worker uses to decide whether a
+   * queue job earns another round.
+   *
+   * Counted per (notification, subscription) attempt, so a fanout where one
+   * phone succeeded and one was rate limited reports `sent: 1, retryable: 1` —
+   * which is exactly the case that must be retried without re-sending to the
+   * phone that already has it.
+   */
+  retryable: number;
+  /**
    * The pass ended early because something threw.
    *
    * This function is documented never to throw, and does not — but "returned a
@@ -113,6 +127,7 @@ export async function dispatchPushNotifications(
     sent: 0,
     failed: 0,
     skipped: 0,
+    retryable: 0,
     aborted: false,
   };
 
@@ -229,6 +244,13 @@ export async function dispatchPushNotifications(
           providerMessageId,
         );
         result.failed += 1;
+
+        // `permanent_failure` and `invalidated` are terminal for this pair and
+        // `alreadyDelivered` will skip them on any later pass. Only a
+        // `temporary_failure` is worth coming back for.
+        if (classification.status === 'temporary_failure') {
+          result.retryable += 1;
+        }
       }
     }
   } catch {

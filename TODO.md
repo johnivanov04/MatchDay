@@ -151,11 +151,12 @@ Carried forward from Phase 3:
       writes the row, and `/api/cron/notification-delivery` drains it. The
       request no longer waits on any provider: measured locally, a 150-member
       fanout went from ~9.3 s of in-request provider time to a 2.4 ms enqueue.
-- [ ] **No retry scheduler.** A `temporary_failure` is recorded and left. There
-      is nothing that comes back to retry it; `push_delivery_attempts` holds
-      everything a worker would need. Phase 3B deliberately did not add one:
-      its lease only recovers jobs from a **crashed worker**, never from a
-      provider that said no. Phase 3C owns backoff.
+- [x] **No retry scheduler.** Done in Phase 3C. A delivery round that leaves a
+      subscription in `temporary_failure` reschedules the queue job with a
+      deterministic backoff — 1, 2, 5, 15 minutes, then terminal
+      `retries_exhausted` — held in `next_attempt_at`. The retry budget lives in
+      its own column (`provider_attempts`) so lease reclaim of a crashed worker
+      cannot spend it.
 - [ ] **Reminder scheduling is stored, not executed.** `reminder_offsets` on a
       template is future-compatible metadata; the scheduler is Phase 5.
 - [ ] **Notification retention.** 04 §3 suggests 90 days in the default UI.

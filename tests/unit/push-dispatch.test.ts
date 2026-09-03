@@ -238,7 +238,14 @@ describe('push never breaks anything', () => {
   it('does nothing for an empty batch', async () => {
     const { store } = createStore();
     const result = await dispatchPushNotifications([], { store, sender: succeedingSender });
-    expect(result).toEqual({ attempted: 0, sent: 0, failed: 0, skipped: 0, aborted: false });
+    expect(result).toEqual({
+      attempted: 0,
+      sent: 0,
+      failed: 0,
+      skipped: 0,
+      retryable: 0,
+      aborted: false,
+    });
   });
 
   it('skips a notification whose type is not push-eligible', async () => {
