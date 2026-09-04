@@ -614,6 +614,52 @@ bookkeeping — is absorbed by the provider rather than landing in an inbox
 twice. A duplicate email is worse than a duplicate push: it is permanent,
 searchable and forwardable.
 
+**Resend retains an idempotency key for 24 hours.** The complete 3C ladder is
+1 + 2 + 5 + 15 = **23 minutes of scheduled backoff**, so an ordinary retry
+sequence finishes with more than 23 hours of margin. That margin is against
+*scheduled* delay only: a worker that is not running, or a queue that is not
+drained, adds wall-clock time the ladder knows nothing about. An outage long
+enough to push a retry past 24 hours would find the key expired and the
+suppression gone — the send would be accepted as new. Rare, and worth knowing
+rather than assuming away.
+
+### The payload has to match the key as well
+
+Resend de-duplicates on the key **and** an identical payload. Same key, changed
+payload, and it answers `409 invalid_idempotent_request`.
+
+Our key is stable by construction, but the payload is not guaranteed to be:
+`to` is resolved from `auth.users` on every worker pass, and somebody can
+confirm a new address between the first attempt and the retry. `EMAIL_FROM` and
+`NEXT_PUBLIC_SITE_URL` are operator-settable too.
+
+So the first real provider request records a SHA-256 of the canonicalised
+request in `email_delivery_attempts.payload_fingerprint` — a hash, never the
+content, so the recipient is still not stored. A later retry re-renders and
+compares. If it differs, **Resend is not called**: the job's email channel ends
+with `idempotency_payload_changed`.
+
+Minting a fresh key for the new address would be worse. If the original request
+actually reached Resend and only our response was lost, a new key is a second
+email.
+
+### The two 409s
+
+| Resend `name` | meaning | treatment |
+|---|---|---|
+| `concurrent_idempotent_requests` | another request with this key is still in flight | **temporary** — `concurrent_request`, retried on the 3C ladder |
+| `invalid_idempotent_request` | this key was already used with a different payload | **permanent** — `idempotency_mismatch`, operator-visible |
+| `invalid_idempotency_key` | the key itself is malformed | **permanent** — `invalid_idempotency_key` |
+| 409 with no recognised name | ambiguous | **temporary** — one wasted retry beats a dropped notification |
+
+The structured error name is read from the response body and the message is
+discarded — a Resend error message can quote the recipient and the subject. The
+name is validated to a short machine-token shape, so a provider change cannot
+turn it into a channel for arbitrary text.
+
+Treating both 409s alike — which a bare status check does — silently drops a
+message that would have gone out a minute later.
+
 ### Failure classification
 
 | provider answer | outcome |
@@ -648,6 +694,9 @@ what it already did. The reverse holds identically.
 select status, count(*) from public.email_delivery_attempts group by status;
 
 -- Why emails failed. `unauthorized` means somebody has to fix configuration.
+--   unauthorized                → somebody must fix configuration
+--   idempotency_mismatch        → same key, different payload; a bug in us
+--   idempotency_payload_changed → the recipient or sender moved mid-retry
 select last_error_category, count(*)
   from public.email_delivery_attempts
  where status in ('temporary_failure','permanent_failure')

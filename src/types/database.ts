@@ -821,6 +821,14 @@ export type EmailDeliveryAttemptRow = {
   last_error_category: string | null;
   /** Resend's own identifier for the message, when it returned one. */
   provider_message_id: string | null;
+  /**
+   * SHA-256 of the request sent on the first real provider call.
+   *
+   * A hash, never the content: it reveals neither the address nor the message.
+   * Compared before a retry, because Resend suppresses a duplicate only when
+   * the idempotency key AND the payload both match.
+   */
+  payload_fingerprint: string | null;
   last_attempted_at: string | null;
   sent_at: string | null;
   created_at: string;
@@ -1508,6 +1516,7 @@ export interface Database {
           p_status: EmailDeliveryStatus;
           p_error_category?: string | null;
           p_provider_message_id?: string | null;
+          p_payload_fingerprint?: string | null;
         };
         Returns: undefined;
       };

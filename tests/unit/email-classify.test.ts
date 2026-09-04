@@ -85,3 +85,55 @@ describe('every category fits the database constraint', () => {
     }
   });
 });
+
+describe('the two 409s', () => {
+  it('concurrent_idempotent_requests is retryable', () => {
+    expect(classifyEmailStatusCode(409, 'concurrent_idempotent_requests')).toEqual({
+      status: 'temporary_failure',
+      category: 'concurrent_request',
+    });
+  });
+
+  it('invalid_idempotent_request is permanent and operator-visible', () => {
+    expect(classifyEmailStatusCode(409, 'invalid_idempotent_request')).toEqual({
+      status: 'permanent_failure',
+      category: 'idempotency_mismatch',
+    });
+  });
+
+  it('invalid_idempotency_key is permanent — a request we built wrong', () => {
+    expect(classifyEmailStatusCode(422, 'invalid_idempotency_key')).toEqual({
+      status: 'permanent_failure',
+      category: 'invalid_idempotency_key',
+    });
+  });
+
+  it('an unnamed 409 errs towards retrying', () => {
+    // One wasted retry costs less than a dropped notification.
+    expect(classifyEmailStatusCode(409).status).toBe('temporary_failure');
+  });
+
+  it('the name outranks the status, because 409 alone cannot decide', () => {
+    // The whole reason the structured name is extracted at all.
+    const concurrent = classifyEmailStatusCode(409, 'concurrent_idempotent_requests');
+    const mismatch = classifyEmailStatusCode(409, 'invalid_idempotent_request');
+    expect(concurrent.status).not.toBe(mismatch.status);
+  });
+
+  it('an unrecognised name falls back to the status', () => {
+    expect(classifyEmailStatusCode(500, 'some_future_error').status).toBe('temporary_failure');
+    expect(classifyEmailStatusCode(400, 'some_future_error').status).toBe('permanent_failure');
+  });
+
+  it('every new category still fits the database constraint', () => {
+    const shape = /^[a-z][a-z0-9_]{2,39}$/;
+    for (const name of [
+      'concurrent_idempotent_requests',
+      'invalid_idempotent_request',
+      'invalid_idempotency_key',
+    ]) {
+      expect(classifyEmailStatusCode(409, name).category).toMatch(shape);
+    }
+    expect(classifyEmailStatusCode(409).category).toMatch(shape);
+  });
+});

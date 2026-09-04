@@ -26,7 +26,46 @@ export interface EmailFailureClassification {
  * identical refusal forever is permanent. Retrying a malformed request or a bad
  * API key five times just makes the same mistake on a schedule.
  */
-export function classifyEmailStatusCode(statusCode: number): EmailFailureClassification {
+export function classifyEmailStatusCode(
+  statusCode: number,
+  /**
+   * Resend's own error name, when the response carried one.
+   *
+   * Two 409s mean opposite things and the HTTP status alone cannot tell them
+   * apart, so the structured name is consulted first wherever it exists.
+   */
+  providerErrorName?: string | null,
+): EmailFailureClassification {
+  // ── THE TWO 409s ─────────────────────────────────────────────────────────
+  //
+  // Resend de-duplicates on (idempotency key AND identical payload), and
+  // answers 409 in two completely different situations:
+  //
+  //   • `concurrent_idempotent_requests` — another request with this key is
+  //     still in flight. Nothing is wrong; we simply arrived while a previous
+  //     attempt was being processed. RETRYABLE, and the 3C ladder is exactly
+  //     the right way to come back — a busy-loop would just hammer Resend with
+  //     the same collision.
+  //
+  //   • `invalid_idempotent_request` — this key was already used with a
+  //     DIFFERENT payload. That is our bug, not Resend's, and retrying sends
+  //     the same contradiction again. PERMANENT and operator-visible.
+  //
+  // Treating both as permanent — which a bare status check does — silently
+  // drops a message that would have gone out a minute later.
+  if (providerErrorName === 'concurrent_idempotent_requests') {
+    return { status: 'temporary_failure', category: 'concurrent_request' };
+  }
+
+  if (providerErrorName === 'invalid_idempotent_request') {
+    return { status: 'permanent_failure', category: 'idempotency_mismatch' };
+  }
+
+  // A malformed key is a request we built wrong. No amount of waiting fixes it.
+  if (providerErrorName === 'invalid_idempotency_key') {
+    return { status: 'permanent_failure', category: 'invalid_idempotency_key' };
+  }
+
   // Rate limited. The single most retry-worthy answer a provider gives.
   if (statusCode === 429) {
     return { status: 'temporary_failure', category: 'rate_limited' };
@@ -52,6 +91,13 @@ export function classifyEmailStatusCode(statusCode: number): EmailFailureClassif
 
   if (statusCode === 404) {
     return { status: 'permanent_failure', category: 'not_found' };
+  }
+
+  // A 409 whose name we did not recognise. Conservatively retryable: an
+  // unnamed conflict is more likely to be the concurrent case than a payload
+  // mismatch, and one wasted retry costs less than a dropped notification.
+  if (statusCode === 409) {
+    return { status: 'temporary_failure', category: 'conflict' };
   }
 
   if (statusCode === 413) {

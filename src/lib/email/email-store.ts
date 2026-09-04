@@ -1,6 +1,10 @@
 import 'server-only';
 
-import type { EmailDispatchNotification, EmailDispatchStore } from '@/lib/email/dispatch';
+import type {
+  EmailAttemptState,
+  EmailDispatchNotification,
+  EmailDispatchStore,
+} from '@/lib/email/dispatch';
 import { createSupabaseAdminClient, isServiceRoleConfigured } from '@/lib/supabase/admin';
 import type { EmailDeliveryStatus } from '@/types/database';
 
@@ -57,17 +61,24 @@ export function createEmailDispatchStore(): EmailDispatchStore | null {
       return data ?? null;
     },
 
-    async alreadySettled(notificationId: string): Promise<boolean> {
+    async loadAttempt(notificationId: string): Promise<EmailAttemptState | null> {
       const { data } = await client
         .from('email_delivery_attempts')
-        .select('status')
+        .select('status, payload_fingerprint')
         .eq('notification_id', notificationId)
         .maybeSingle();
 
-      // Only a terminal state stops a retry. A previous `temporary_failure` is
-      // exactly the case Phase 3C exists to come back for — the same rule
-      // `push-store.ts` applies per subscription.
-      return data !== null && (data.status === 'sent' || data.status === 'permanent_failure');
+      if (data === null) {
+        return null;
+      }
+
+      return {
+        // Only a terminal state stops a retry. A previous `temporary_failure`
+        // is exactly the case Phase 3C exists to come back for — the same rule
+        // `push-store.ts` applies per subscription.
+        settled: data.status === 'sent' || data.status === 'permanent_failure',
+        payloadFingerprint: data.payload_fingerprint,
+      };
     },
 
     async recordResult(
@@ -75,12 +86,14 @@ export function createEmailDispatchStore(): EmailDispatchStore | null {
       status: EmailDeliveryStatus,
       errorCategory: string | null,
       providerMessageId: string | null = null,
+      payloadFingerprint: string | null = null,
     ): Promise<void> {
       await client.rpc('record_email_delivery_result', {
         p_notification_id: notificationId,
         p_status: status,
         p_error_category: errorCategory,
         p_provider_message_id: providerMessageId,
+        p_payload_fingerprint: payloadFingerprint,
       });
     },
   };

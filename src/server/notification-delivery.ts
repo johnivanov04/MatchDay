@@ -113,6 +113,7 @@ export interface DeliveryRunOptions {
     emailStore?: EmailDispatchStore | null;
     emailSender?: EmailSender | null;
     baseUrl?: string;
+    emailFrom?: string;
   };
 }
 
@@ -136,7 +137,7 @@ export async function runNotificationDelivery(
   const timeBudgetMs = options.timeBudgetMs ?? DEFAULTS.timeBudgetMs;
   const leaseSeconds = options.leaseSeconds ?? DEFAULTS.leaseSeconds;
 
-  const { queue, store, sender, emailStore, emailSender, baseUrl } =
+  const { queue, store, sender, emailStore, emailSender, baseUrl, emailFrom } =
     options.deps ?? buildDependencies();
 
   // NOTHING IS CLAIMED WHEN THERE IS NOWHERE TO SEND.
@@ -222,6 +223,7 @@ export async function runNotificationDelivery(
                   store: emailStore,
                   sender: emailSender ?? null,
                   baseUrl: baseUrl ?? '',
+                  from: emailFrom ?? '',
                 });
 
           mailSent += email.sent;
@@ -381,6 +383,7 @@ function buildDependencies(): {
   emailStore: EmailDispatchStore | null;
   emailSender: EmailSender | null;
   baseUrl: string;
+  emailFrom: string;
 } {
   const vapid = readVapidConfiguration();
   const apns = readApnsConfiguration();
@@ -404,5 +407,7 @@ function buildDependencies(): {
     emailSender: email === null ? null : createResendSender(email),
     // Links in an email must be absolute and must point at the real product.
     baseUrl: process.env.NEXT_PUBLIC_SITE_URL ?? '',
+    // Part of the request, and therefore part of its fingerprint.
+    emailFrom: email?.from ?? '',
   };
 }

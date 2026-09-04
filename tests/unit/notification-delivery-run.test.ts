@@ -982,6 +982,7 @@ describe('Phase 3D — two channels on one job', () => {
    * their real counterparts do, so a second worker pass sees exactly what
    * production would see.
    */
+  const FROM = 'MatchDay <notifications@example.test>';
   const APNS: PushSubscriptionRecord = {
     id: 'sub-apns',
     user_id: 'user-1',
@@ -1023,6 +1024,7 @@ describe('Phase 3D — two channels on one job', () => {
 
   function emailSide(recipient: string | null = 'player@example.test') {
     let settled = false;
+    let fingerprint: string | null = null;
     const store: EmailDispatchStore = {
       loadNotifications: async (ids) =>
         ids.map((id) => ({
@@ -1033,8 +1035,11 @@ describe('Phase 3D — two channels on one job', () => {
           deep_link: '/leagues/x/matches/y',
         })),
       resolveRecipient: async () => recipient,
-      alreadySettled: async () => settled,
-      recordResult: async (_n, status) => {
+      loadAttempt: async () => ({ settled, payloadFingerprint: fingerprint }),
+      recordResult: async (_n, status, _c, _p, printed) => {
+        if (printed != null) {
+          fingerprint ??= printed;
+        }
         if (status === 'sent' || status === 'permanent_failure') {
           settled = true;
         }
@@ -1067,7 +1072,7 @@ describe('Phase 3D — two channels on one job', () => {
       },
     };
 
-    const deps = { store, sender, emailStore, emailSender, baseUrl: 'https://app.matchdayapps.com' };
+    const deps = { store, sender, emailStore, emailSender, baseUrl: 'https://app.matchdayapps.com', emailFrom: FROM };
 
     // ── Pass 1 ──
     const first = fakeQueue([[job(1)], []]);
@@ -1118,7 +1123,7 @@ describe('Phase 3D — two channels on one job', () => {
       },
     };
 
-    const deps = { store, sender, emailStore, emailSender, baseUrl: 'https://app.matchdayapps.com' };
+    const deps = { store, sender, emailStore, emailSender, baseUrl: 'https://app.matchdayapps.com', emailFrom: FROM };
 
     const first = fakeQueue([[job(1)], []]);
     const one = await runNotificationDelivery({ deps: { queue: first.queue, ...deps } });
@@ -1157,6 +1162,7 @@ describe('Phase 3D — two channels on one job', () => {
         emailStore,
         emailSender,
         baseUrl: 'https://app.matchdayapps.com',
+        emailFrom: FROM,
       },
     });
 
@@ -1180,6 +1186,7 @@ describe('Phase 3D — two channels on one job', () => {
         emailStore,
         emailSender,
         baseUrl: 'https://app.matchdayapps.com',
+        emailFrom: FROM,
       },
     });
 
@@ -1203,6 +1210,7 @@ describe('Phase 3D — two channels on one job', () => {
         emailStore,
         emailSender,
         baseUrl: 'https://app.matchdayapps.com',
+        emailFrom: FROM,
       },
     });
 
@@ -1253,6 +1261,7 @@ describe('Phase 3D — two channels on one job', () => {
         emailStore,
         emailSender,
         baseUrl: 'https://app.matchdayapps.com',
+        emailFrom: FROM,
       },
     });
 

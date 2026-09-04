@@ -1,5 +1,6 @@
 import 'server-only';
 
+import { createHash } from 'node:crypto';
 import { classifyEmailError, classifyEmailStatusCode } from '@/lib/email/classify';
 import { emailIdempotencyKey, type EmailSender } from '@/lib/email/resend';
 import { absoluteAppUrl, renderNotificationEmail } from '@/lib/email/template';
@@ -41,14 +42,47 @@ export interface EmailDispatchStore {
    * account. `null` is a legitimate no-op and never an error.
    */
   resolveRecipient(notificationId: string): Promise<string | null>;
-  /** True when this notification's email already reached a terminal state. */
-  alreadySettled(notificationId: string): Promise<boolean>;
+  /**
+   * What we already know about this notification's email.
+   *
+   * One read rather than two: the dispatcher needs both whether the channel is
+   * finished and what payload was last sent under this idempotency key.
+   */
+  loadAttempt(notificationId: string): Promise<EmailAttemptState | null>;
   recordResult(
     notificationId: string,
     status: EmailDeliveryStatus,
     errorCategory: string | null,
     providerMessageId?: string | null,
+    payloadFingerprint?: string | null,
   ): Promise<void>;
+}
+
+export interface EmailAttemptState {
+  /** Terminal — `sent` or `permanent_failure`. Nothing more is owed. */
+  settled: boolean;
+  /** SHA-256 of the request sent on the first real provider call, if any. */
+  payloadFingerprint: string | null;
+}
+
+/**
+ * A stable fingerprint of exactly what Resend is being asked to send.
+ *
+ * Canonicalised by construction — a fixed field order and an explicit
+ * separator, never `JSON.stringify` of an object whose key order is an
+ * implementation detail. The separator is a control character that cannot
+ * occur in any of the fields, so no combination of values can be made to
+ * collide by moving a boundary.
+ */
+export function payloadFingerprint(input: {
+  from: string;
+  to: string;
+  subject: string;
+  html: string;
+  text: string;
+}): string {
+  const canonical = [input.from, input.to, input.subject, input.html, input.text].join('\u0000');
+  return createHash('sha256').update(canonical, 'utf8').digest('hex');
 }
 
 export interface EmailDispatchResult {
@@ -65,6 +99,14 @@ export interface EmailDispatchDeps {
   sender: EmailSender | null;
   /** Absolute origin for links. Production passes the deployment's own site URL. */
   baseUrl: string;
+  /**
+   * The configured from-address, needed to fingerprint the request.
+   *
+   * Passed in rather than read here so the dispatcher stays free of
+   * configuration, and so a test can change it between two passes — which is
+   * exactly the drift this fingerprint exists to catch.
+   */
+  from: string;
 }
 
 /**
@@ -110,10 +152,12 @@ export async function dispatchEmailNotifications(
         continue;
       }
 
+      const attempt = await deps.store.loadAttempt(notification.id);
+
       // Already delivered, or already permanently refused. This is what stops a
       // Phase 3C retry — scheduled because a *push* was rate limited — from
       // sending a second copy of an email that already arrived.
-      if (await deps.store.alreadySettled(notification.id)) {
+      if (attempt?.settled === true) {
         result.skipped += 1;
         continue;
       }
@@ -147,6 +191,42 @@ export async function dispatchEmailNotifications(
         settingsUrl,
       });
 
+      // ── THE IDEMPOTENCY KEY AND THE PAYLOAD MUST AGREE ───────────────────
+      //
+      // Resend suppresses a duplicate only when the key AND the payload match;
+      // the same key with a changed payload is a 409 `invalid_idempotent_request`.
+      // Our key is stable by construction, but the payload is not: `to` is
+      // resolved from `auth.users` on every pass, and somebody can confirm a
+      // new address between the first attempt and the retry. `from` and the
+      // link base are operator-settable too.
+      //
+      // Minting a new key for the new address would be worse. If the original
+      // request actually reached Resend and only our response was lost, a fresh
+      // key is a second email — and a duplicate email is permanent, searchable
+      // and forwardable in a way a duplicate push is not.
+      //
+      // So a changed payload ends the channel, visibly, rather than guessing.
+      const fingerprint = payloadFingerprint({
+        from: deps.from,
+        to: recipient,
+        subject: rendered.subject,
+        html: rendered.html,
+        text: rendered.text,
+      });
+
+      if (attempt?.payloadFingerprint != null && attempt.payloadFingerprint !== fingerprint) {
+        await deps.store.recordResult(
+          notification.id,
+          'permanent_failure',
+          'idempotency_payload_changed',
+          null,
+          null,
+        );
+        result.attempted += 1;
+        result.failed += 1;
+        continue;
+      }
+
       const outcome = await deps.sender.send({
         to: recipient,
         rendered,
@@ -166,6 +246,7 @@ export async function dispatchEmailNotifications(
           'sent',
           null,
           outcome.providerMessageId ?? null,
+          fingerprint,
         );
         result.sent += 1;
         continue;
@@ -173,14 +254,18 @@ export async function dispatchEmailNotifications(
 
       const classification =
         'statusCode' in outcome
-          ? classifyEmailStatusCode(outcome.statusCode)
+          ? classifyEmailStatusCode(outcome.statusCode, outcome.providerErrorName ?? null)
           : classifyEmailError(outcome.error);
 
+      // The fingerprint is recorded on a failure too, and the RPC keeps the
+      // FIRST one. A request that reached Resend and was rate limited still
+      // consumed the idempotency key for that payload.
       await deps.store.recordResult(
         notification.id,
         classification.status,
         classification.category,
         null,
+        fingerprint,
       );
       result.failed += 1;
 

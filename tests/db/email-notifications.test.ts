@@ -387,6 +387,61 @@ describe('email notifications', () => {
       expect(error.code).toBe(PG_ERROR.checkViolation);
     });
 
+    it('keeps the FIRST payload fingerprint, never overwriting it', async () => {
+      // The fingerprint records what was sent to Resend under this idempotency
+      // key the first time. Letting a later attempt overwrite it would erase
+      // the very thing the comparison depends on — the opposite rule to
+      // `provider_message_id`, which prefers the newest.
+      const id = await notificationFor(SEED_USERS.rmvfcPlayer, 'email-fingerprint-1');
+      const first = 'a'.repeat(64);
+      const second = 'b'.repeat(64);
+
+      await asServiceRoleCommitting(db, (client) =>
+        client.query('select public.record_email_delivery_result($1, $2, $3, null, $4)', [
+          id,
+          'temporary_failure',
+          'rate_limited',
+          first,
+        ]),
+      );
+      await asServiceRoleCommitting(db, (client) =>
+        client.query('select public.record_email_delivery_result($1, $2, $3, null, $4)', [
+          id,
+          'temporary_failure',
+          'server_error',
+          second,
+        ]),
+      );
+
+      const row = await asServiceRole(db, async (client) => {
+        const { rows } = await client.query<{ payload_fingerprint: string }>(
+          'select payload_fingerprint from public.email_delivery_attempts where notification_id = $1',
+          [id],
+        );
+        return rows[0]!;
+      });
+
+      expect(row.payload_fingerprint).toBe(first);
+    });
+
+    it('refuses anything that is not a SHA-256 in the fingerprint column', async () => {
+      // The shape is what stops a future caller writing an address or a
+      // subject line into this column by misunderstanding it.
+      const id = await notificationFor(SEED_USERS.rmvfcPlayer, 'email-fingerprint-2');
+
+      const error = await expectDatabaseError(() =>
+        asServiceRole(db, (client) =>
+          client.query('select public.record_email_delivery_result($1, $2, null, null, $3)', [
+            id,
+            'sent',
+            'player@example.test',
+          ]),
+        ),
+      );
+
+      expect(error.code).toBe(PG_ERROR.checkViolation);
+    });
+
     it('stores no recipient address column at all', async () => {
       // Deliberate: a copy of somebody's email here would sit outside
       // `auth.users`, where account deletion already knows how to scrub it.

@@ -106,6 +106,29 @@ create table public.email_delivery_attempts (
 
   last_error_category text,
   provider_message_id text,
+
+  -- ── WHAT WE ALREADY ASKED RESEND TO SEND ─────────────────────────────────
+  --
+  -- SHA-256 of the canonicalised Resend request, recorded on the first real
+  -- provider call and never overwritten.
+  --
+  -- Resend de-duplicates on (idempotency key AND identical payload). Send the
+  -- same key with a different payload and it answers 409
+  -- `invalid_idempotent_request`. Our key is derived from the notification id
+  -- and is deliberately stable across retries — but the payload is not
+  -- guaranteed to be: `to` is resolved from `auth.users` on every worker pass,
+  -- and somebody can confirm a new address between the first attempt and the
+  -- retry.
+  --
+  -- Minting a fresh key for the new address is the wrong fix: if the original
+  -- request actually reached Resend and only our response was lost, a new key
+  -- is a second email. So the fingerprint is compared instead, and a changed
+  -- payload ends the channel rather than guessing.
+  --
+  -- A HASH, NOT THE CONTENT. This is 64 hex characters and reveals neither the
+  -- address nor the message — the recipient is still never stored here.
+  payload_fingerprint text,
+
   last_attempted_at timestamptz,
   sent_at timestamptz,
 
@@ -133,6 +156,12 @@ create table public.email_delivery_attempts (
   constraint email_delivery_attempts_provider_message_id_shape
     check (provider_message_id is null
            or provider_message_id ~ '^[A-Za-z0-9._:-]{1,128}$'),
+
+  -- Exactly a SHA-256 in lowercase hex. The shape is the guarantee that
+  -- nothing else — an address, a subject line — can be written into this
+  -- column by a future caller that misunderstands it.
+  constraint email_delivery_attempts_payload_fingerprint_shape
+    check (payload_fingerprint is null or payload_fingerprint ~ '^[0-9a-f]{64}$'),
 
   constraint email_delivery_attempts_sent_when_sent
     check ((status = 'sent') = (sent_at is not null))
@@ -235,7 +264,8 @@ create function public.record_email_delivery_result(
   p_notification_id uuid,
   p_status public.email_delivery_status,
   p_error_category text default null,
-  p_provider_message_id text default null
+  p_provider_message_id text default null,
+  p_payload_fingerprint text default null
 )
 returns void
 language plpgsql
@@ -250,13 +280,13 @@ begin
 
   insert into public.email_delivery_attempts (
     notification_id, status, attempt_count, last_error_category,
-    last_attempted_at, sent_at, provider_message_id
+    last_attempted_at, sent_at, provider_message_id, payload_fingerprint
   )
   values (
     p_notification_id, p_status, 1, p_error_category,
     now(),
     case when p_status = 'sent' then now() else null end,
-    p_provider_message_id
+    p_provider_message_id, p_payload_fingerprint
   )
   on conflict (notification_id) do update
     set status = excluded.status,
@@ -269,6 +299,14 @@ begin
         provider_message_id = coalesce(
           excluded.provider_message_id,
           public.email_delivery_attempts.provider_message_id
+        ),
+        -- THE EXISTING VALUE WINS, which is the opposite of the rule above.
+        -- The fingerprint records what was sent to Resend under this
+        -- idempotency key the FIRST time. Letting a later attempt overwrite it
+        -- would erase the very thing the comparison depends on.
+        payload_fingerprint = coalesce(
+          public.email_delivery_attempts.payload_fingerprint,
+          excluded.payload_fingerprint
         );
 end;
 $$;
@@ -277,8 +315,8 @@ $$;
 -- ── Execution ──────────────────────────────────────────────────────────────
 revoke execute on function public.notification_email_recipient(uuid) from public;
 revoke execute on function public.record_email_delivery_result(
-  uuid, public.email_delivery_status, text, text) from public;
+  uuid, public.email_delivery_status, text, text, text) from public;
 
 grant execute on function public.notification_email_recipient(uuid) to service_role;
 grant execute on function public.record_email_delivery_result(
-  uuid, public.email_delivery_status, text, text) to service_role;
+  uuid, public.email_delivery_status, text, text, text) to service_role;

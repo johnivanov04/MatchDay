@@ -227,3 +227,90 @@ describe('readEmailConfiguration', () => {
     });
   });
 });
+
+describe('the provider error name', () => {
+  it('is extracted so the two 409s can be told apart', async () => {
+    const { transport } = createTransport({
+      status: 409,
+      json: { name: 'concurrent_idempotent_requests', message: 'still processing' },
+    });
+
+    expect(await createResendSender(CONFIG, transport).send(message())).toEqual({
+      ok: false,
+      statusCode: 409,
+      providerErrorName: 'concurrent_idempotent_requests',
+    });
+  });
+
+  it('reads a nested error object too', async () => {
+    const { transport } = createTransport({
+      status: 409,
+      json: { error: { name: 'invalid_idempotent_request' } },
+    });
+
+    const outcome = await createResendSender(CONFIG, transport).send(message());
+    expect(outcome).toMatchObject({ providerErrorName: 'invalid_idempotent_request' });
+  });
+
+  it('still carries no message, address or subject', async () => {
+    const { transport } = createTransport({
+      status: 409,
+      json: {
+        name: 'invalid_idempotent_request',
+        message: 'payload differs for player@example.test — subject "New match"',
+      },
+    });
+
+    const outcome = await createResendSender(CONFIG, transport).send(message());
+
+    expect(JSON.stringify(outcome)).not.toContain('player@example.test');
+    expect(JSON.stringify(outcome)).not.toContain('New match');
+    expect(JSON.stringify(outcome)).not.toContain('payload differs');
+  });
+
+  it('ignores a name that is not a short machine token', async () => {
+    // A provider change must not turn this into a channel for arbitrary text.
+    const { transport } = createTransport({
+      status: 409,
+      json: { name: 'Something With Spaces And <html>' },
+    });
+
+    expect(await createResendSender(CONFIG, transport).send(message())).toEqual({
+      ok: false,
+      statusCode: 409,
+    });
+  });
+
+  it('omits the field entirely when the body has no name', async () => {
+    const { transport } = createTransport({ status: 500, json: { message: 'boom' } });
+    expect(await createResendSender(CONFIG, transport).send(message())).toEqual({
+      ok: false,
+      statusCode: 500,
+    });
+  });
+});
+
+describe('the request payload is deterministic', () => {
+  it('contains no timestamp, nonce or generated identifier', async () => {
+    // Resend suppresses a duplicate only when the payload matches byte for
+    // byte. Anything varying per attempt would defeat the idempotency key.
+    const { transport, requests } = createTransport({ status: 200, json: { id: 'x' } });
+    const sender = createResendSender(CONFIG, transport);
+
+    await sender.send(message());
+    await sender.send(message());
+
+    expect(requests).toHaveLength(2);
+    expect(JSON.stringify(requests[0]?.body)).toBe(JSON.stringify(requests[1]?.body));
+    expect(requests[0]?.idempotencyKey).toBe(requests[1]?.idempotencyKey);
+
+    // And the exact field set — a new field added later must be a deliberate act.
+    expect(Object.keys(requests[0]?.body as object).sort()).toEqual([
+      'from',
+      'html',
+      'subject',
+      'text',
+      'to',
+    ]);
+  });
+});

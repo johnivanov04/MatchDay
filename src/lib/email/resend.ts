@@ -28,7 +28,19 @@ export interface EmailConfiguration {
 export type EmailSendOutcome =
   | { ok: true; providerMessageId?: string }
   | { ok: false; unsupported: true }
-  | { ok: false; statusCode: number }
+  | {
+      ok: false;
+      statusCode: number;
+      /**
+       * Resend's own error name, when the body carried a recognisable one.
+       *
+       * Only the NAME — never the message, which can quote the recipient
+       * address and the subject line. The name is a short machine token like
+       * `concurrent_idempotent_requests`, and it is the only thing that can
+       * tell the two 409s apart.
+       */
+      providerErrorName?: string;
+    }
   | { ok: false; error: unknown };
 
 export interface EmailMessage {
@@ -140,6 +152,31 @@ export function createResendTransport(): EmailTransport {
   };
 }
 
+/**
+ * Pulls Resend's error NAME out of a failure body, if it is there.
+ *
+ * Resend returns `{ "name": "...", "message": "..." }` on an error. The message
+ * is deliberately discarded — it can quote the recipient and the subject — and
+ * the name is validated to a short machine-token shape so that a provider
+ * change cannot turn this into a channel for arbitrary text.
+ */
+function providerErrorNameFrom(json: unknown): string | undefined {
+  if (typeof json !== 'object' || json === null) {
+    return undefined;
+  }
+
+  const candidate =
+    'name' in json
+      ? (json as { name: unknown }).name
+      : 'error' in json && typeof (json as { error: unknown }).error === 'object'
+        ? ((json as { error: { name?: unknown } }).error?.name ?? undefined)
+        : undefined;
+
+  return typeof candidate === 'string' && /^[a-z][a-z0-9_]{2,63}$/.test(candidate)
+    ? candidate
+    : undefined;
+}
+
 /** Pulls Resend's message id out of a success body, if it is there. */
 function providerMessageIdFrom(json: unknown): string | undefined {
   if (typeof json !== 'object' || json === null || !('id' in json)) {
@@ -177,10 +214,14 @@ export function createResendSender(
           return id === undefined ? { ok: true } : { ok: true, providerMessageId: id };
         }
 
-        // The status only. A Resend error body can quote the recipient address
-        // and the message subject, and neither belongs in anything a caller
-        // might log.
-        return { ok: false, statusCode: status };
+        // The status and the error NAME only. A Resend error body can quote the
+        // recipient address and the message subject, and neither belongs in
+        // anything a caller might log — but the name is what distinguishes a
+        // retryable conflict from a permanent one, so it is worth extracting.
+        const name = providerErrorNameFrom(json);
+        return name === undefined
+          ? { ok: false, statusCode: status }
+          : { ok: false, statusCode: status, providerErrorName: name };
       } catch (error: unknown) {
         // Handed on unmodified for `classifyEmailError` to inspect
         // structurally, and never logged: a fetch error can carry the request
