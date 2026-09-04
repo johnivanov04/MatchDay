@@ -124,6 +124,9 @@ describe('secret hygiene', () => {
       'src/lib/email/resend.ts',
       'src/lib/email/dispatch.ts',
       'src/lib/email/email-store.ts',
+      // Phase 3E: the resolver reads `auth.users` for a confirmed address
+      // through a service-role RPC. It must never be bundled for a browser.
+      'src/lib/notifications/channel-eligibility.ts',
       'src/lib/guidelines/guidelines.ts',
       'src/lib/matches/matches.ts',
       'src/lib/notifications/notifications.ts',
