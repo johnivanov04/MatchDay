@@ -547,6 +547,123 @@ push-eligible notification present when it ran had already been through the
 inline dispatcher, and enqueueing them would have made the worker's first run
 light up every phone in the product with alerts about matches played weeks ago.
 
+## 6c. Email notifications
+
+Phase 3D added a second delivery channel to the same queue. One canonical
+notification, one delivery job, two channels — the job is finished when every
+applicable channel has reached a terminal outcome.
+
+### Nobody is emailed by default
+
+`notification_preferences.email_enabled` defaults to **false**, and no row
+exists for anybody until they switch it on at `/settings/notifications`.
+Absence means off, so shipping the phase emailed nobody and no backfill ran.
+Turning it on affects notifications created afterwards; it does not reach back
+for last week's matches, because those jobs reached a terminal state long ago.
+
+### Who an email actually goes to
+
+`notification_email_recipient(notification_id)` is the single gate, and returns
+NULL for "nobody":
+
+1. the notification exists
+2. the recipient has `email_enabled = true`
+3. the account is not being deleted
+4. `auth.users.email` is present **and** `email_confirmed_at` is not null
+
+`auth.users` is the source, not `profiles.email_normalized` — the latter is a
+lowercased copy of a JWT claim and knows nothing about verification. An
+unverified address may belong to somebody else entirely, and sending league
+activity to it would leak one member's matches into a stranger's inbox.
+
+NULL is a **legitimate no-op**: no attempt row, no provider call, and no retry
+work. Waiting does not conjure a confirmed address.
+
+### Provider
+
+Resend, over its HTTPS API. No SMTP — there is no SMTP infrastructure here to
+reuse, and a long-lived socket is the wrong shape for a function that may be
+frozen between two sends.
+
+```
+RESEND_API_KEY   server-only
+EMAIL_FROM       server-only; its domain must be verified with Resend
+```
+
+Both optional. With either unset the channel is unavailable, push is unaffected,
+and nothing reads them at startup — a deployment without email starts and serves
+exactly as before.
+
+### Duplicate protection, and what it is not
+
+Every send carries an `Idempotency-Key` header:
+
+```
+matchday/notification/<notification-id>/email/v1
+```
+
+Deterministic per notification and identical on every retry, so Resend
+de-duplicates a repeat within its 24-hour window. The notification id and
+nothing else: no address, no user id, no secret — the key travels to a third
+party and is echoed in their dashboards.
+
+**This does not make delivery exactly-once.** The queue is still at-least-once;
+the provider call still precedes the row that records it. What the key buys is
+that the most likely duplicate — a worker killed between acceptance and
+bookkeeping — is absorbed by the provider rather than landing in an inbox
+twice. A duplicate email is worse than a duplicate push: it is permanent,
+searchable and forwardable.
+
+### Failure classification
+
+| provider answer | outcome |
+|---|---|
+| 429 | `temporary_failure` / `rate_limited` |
+| 5xx | `temporary_failure` / `server_error` |
+| timeout, network fault | `temporary_failure` / `timeout`, `network` |
+| **401, 403** | `permanent_failure` / `unauthorized` — **operator action needed** |
+| 400, 422 | `permanent_failure` / `invalid_request` |
+| 404, 413, other 4xx | `permanent_failure` |
+
+Retries use Phase 3C's existing ladder — 1m, 2m, 5m, 15m, then
+`retries_exhausted`. There is no separate email retry loop and no sleeping in
+the worker.
+
+A bad or revoked API key, or an unverified sending domain, is **permanent**.
+Retrying it five times only asks the same question on a schedule; the fix is a
+person changing configuration.
+
+### Partial fanout across channels
+
+A notification that reached both phones but was rate limited by Resend is **not**
+finished. The job is rescheduled and the next pass sends only the email —
+`push_delivery_attempts` marks the delivered pairs terminal and
+`email_delivery_attempts` does the same for the address, so each channel skips
+what it already did. The reverse holds identically.
+
+### Operating it
+
+```sql
+-- Email outcomes.
+select status, count(*) from public.email_delivery_attempts group by status;
+
+-- Why emails failed. `unauthorized` means somebody has to fix configuration.
+select last_error_category, count(*)
+  from public.email_delivery_attempts
+ where status in ('temporary_failure','permanent_failure')
+ group by 1 order by 2 desc;
+
+-- How many people have opted in.
+select count(*) filter (where email_enabled) as opted_in,
+       count(*)                              as rows_present
+  from public.notification_preferences;
+```
+
+The attempt table stores **no recipient address**, deliberately: a copy there
+would sit outside `auth.users`, where account deletion already knows how to
+scrub it, and would need its own erasure path to avoid outliving the account.
+`provider_message_id` is the handle Resend's own tooling answers to.
+
 ## 7. Observability
 
 Server logs are single-line JSON on stdout, which every host collects and
@@ -561,7 +678,7 @@ indexes. There is no agent and no vendor.
 | `reminder.run` | info | A reminder pass completed, with `claimed` / `notified`. Emitted on empty passes too, so its **absence** is the signal |
 | `reminder.failed` | error | The generator errored; nothing was claimed. **Alert on this** |
 | `reminder.skipped` | warn | No service-role key configured, so nothing ran |
-| `notification_delivery.run` | info | A delivery pass completed, with `claimed` / `completed` / `failed` / `sent` / `duration_ms`. Emitted on empty passes too |
+| `notification_delivery.run` | info | A delivery pass completed, with `claimed` / `completed` / `failed` / `rescheduled` / `exhausted` / `sent` / `mail_sent` / `duration_ms`. Emitted on empty passes too |
 | `notification_delivery.failed` | error | The queue itself could not be read or written; nothing was drained. **Alert on this** |
 | `notification_delivery.skipped` | warn | No service-role key, or no push transport configured. **Jobs are accumulating unsent** |
 | `notification_delivery.incomplete` | warn | At least one notification reached none of its devices |

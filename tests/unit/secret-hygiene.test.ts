@@ -118,6 +118,12 @@ describe('secret hygiene', () => {
       // client and reach real devices. Neither may ever be bundled for a browser.
       'src/lib/notifications/delivery-queue.ts',
       'src/server/notification-delivery.ts',
+      // Phase 3D: the email modules hold the provider API key and resolve
+      // recipients' account addresses out of `auth.users`. Neither may ever be
+      // bundled for a browser.
+      'src/lib/email/resend.ts',
+      'src/lib/email/dispatch.ts',
+      'src/lib/email/email-store.ts',
       'src/lib/guidelines/guidelines.ts',
       'src/lib/matches/matches.ts',
       'src/lib/notifications/notifications.ts',

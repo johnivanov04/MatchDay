@@ -1,6 +1,13 @@
 import 'server-only';
 
 import { randomUUID } from 'node:crypto';
+import { dispatchEmailNotifications, type EmailDispatchStore } from '@/lib/email/dispatch';
+import { createEmailDispatchStore } from '@/lib/email/email-store';
+import {
+  createResendSender,
+  readEmailConfiguration,
+  type EmailSender,
+} from '@/lib/email/resend';
 import {
   createDeliveryQueueStore,
   type DeliveryQueueStore,
@@ -70,8 +77,17 @@ export interface DeliveryRunResult {
   rescheduled: number;
   /** Jobs that reached `failed` specifically because the retry budget ran out. */
   exhausted: number;
-  /** Individual provider sends that succeeded, across every job. */
+  /** Individual provider sends that succeeded, across every job and channel. */
   sent: number;
+  /**
+   * Messages the email provider accepted, a subset of `sent`.
+   *
+   * NOT named after the channel. The observability filter drops any key
+   * containing "email" — see `FORBIDDEN_KEY_PARTS` — so the obvious name would
+   * have been stripped from every log line without a word, which is exactly
+   * what happened to `reminder.skipped`'s `reason` field in Phase 5.
+   */
+  mailSent: number;
   /**
    * Stable error code when `status` is `failed`, for correlating log lines.
    * Never the database's message, which can name constraints and other tenants.
@@ -93,6 +109,10 @@ export interface DeliveryRunOptions {
     queue: DeliveryQueueStore | null;
     store: PushDispatchStore | null;
     sender: PushSender | null;
+    /** Phase 3D. Absent means the email channel is not configured. */
+    emailStore?: EmailDispatchStore | null;
+    emailSender?: EmailSender | null;
+    baseUrl?: string;
   };
 }
 
@@ -116,7 +136,8 @@ export async function runNotificationDelivery(
   const timeBudgetMs = options.timeBudgetMs ?? DEFAULTS.timeBudgetMs;
   const leaseSeconds = options.leaseSeconds ?? DEFAULTS.leaseSeconds;
 
-  const { queue, store, sender } = options.deps ?? buildDependencies();
+  const { queue, store, sender, emailStore, emailSender, baseUrl } =
+    options.deps ?? buildDependencies();
 
   // NOTHING IS CLAIMED WHEN THERE IS NOWHERE TO SEND.
   //
@@ -138,6 +159,7 @@ export async function runNotificationDelivery(
       rescheduled: 0,
       exhausted: 0,
       sent: 0,
+      mailSent: 0,
       errorCode: null,
     };
   }
@@ -154,6 +176,7 @@ export async function runNotificationDelivery(
   let rescheduled = 0;
   let exhausted = 0;
   let sent = 0;
+  let mailSent = 0;
 
   try {
     while (claimed < maxJobs && Date.now() - startedAt < timeBudgetMs) {
@@ -171,16 +194,50 @@ export async function runNotificationDelivery(
         // the batch down with it. `dispatchPushNotifications` is documented
         // never to throw; the catch is what keeps that from being silently lost
         // the day it stops holding.
+        // ── PHASE 3D: TWO CHANNELS, ONE VERDICT ──────────────────────────
+        //
+        // Push and email are dispatched independently and their results added
+        // together, so everything below — the retry decision, the terminal
+        // states, the 3C backoff — works on a total rather than on a channel.
+        //
+        // That addition is what makes cross-channel partial fanout fall out
+        // rather than be special-cased. APNs sent, Web Push sent, email rate
+        // limited gives `retryable: 1`, the job is rescheduled, and the next
+        // pass re-sends to nobody: each channel's own store already treats a
+        // delivered pair as terminal and skips it.
         let outcome = { sent: 0, attempted: 0, retryable: 0, aborted: false };
 
         try {
-          outcome = await dispatchPushNotifications([job.job_notification_id], { store, sender });
+          const push = await dispatchPushNotifications([job.job_notification_id], {
+            store,
+            sender,
+          });
+
+          // A deployment with no email configured contributes nothing at all —
+          // not a skip that could be mistaken for work, and not a failure.
+          const email =
+            emailStore == null
+              ? { sent: 0, attempted: 0, retryable: 0, aborted: false }
+              : await dispatchEmailNotifications([job.job_notification_id], {
+                  store: emailStore,
+                  sender: emailSender ?? null,
+                  baseUrl: baseUrl ?? '',
+                });
+
+          mailSent += email.sent;
+
+          outcome = {
+            sent: push.sent + email.sent,
+            attempted: push.attempted + email.attempted,
+            retryable: push.retryable + email.retryable,
+            aborted: push.aborted || email.aborted,
+          };
         } catch {
-          // `dispatchPushNotifications` is documented never to throw, and
-          // reports an incomplete pass through `aborted` instead. This catch is
-          // what stops that guarantee being silently lost the day it changes.
-          // Deliberately not logged with the error object: a failure here can
-          // carry endpoints and provider responses.
+          // Both dispatchers are documented never to throw and report an
+          // incomplete pass through `aborted` instead. This catch is what stops
+          // that guarantee being silently lost the day it changes. Deliberately
+          // not logged with the error object: a failure here can carry
+          // endpoints, addresses and provider responses.
           outcome = { sent: 0, attempted: 0, retryable: 0, aborted: true };
         }
 
@@ -268,7 +325,17 @@ export async function runNotificationDelivery(
         ? (error as { code: string }).code
         : 'unknown';
     logError('notification_delivery.failed', { error_code: errorCode, claimed, completed, failed });
-    return { status: 'failed', claimed, completed, failed, rescheduled, exhausted, sent, errorCode };
+    return {
+      status: 'failed',
+      claimed,
+      completed,
+      failed,
+      rescheduled,
+      exhausted,
+      sent,
+      mailSent,
+      errorCode,
+    };
   }
 
   // Counts and ids only. No recipient, no league, no title, and above all no
@@ -281,6 +348,7 @@ export async function runNotificationDelivery(
     rescheduled,
     exhausted,
     sent,
+    mail_sent: mailSent,
     duration_ms: Date.now() - startedAt,
   });
 
@@ -296,6 +364,7 @@ export async function runNotificationDelivery(
     rescheduled,
     exhausted,
     sent,
+    mailSent,
     errorCode: null,
   };
 }
@@ -309,9 +378,17 @@ function buildDependencies(): {
   queue: DeliveryQueueStore | null;
   store: PushDispatchStore | null;
   sender: PushSender | null;
+  emailStore: EmailDispatchStore | null;
+  emailSender: EmailSender | null;
+  baseUrl: string;
 } {
   const vapid = readVapidConfiguration();
   const apns = readApnsConfiguration();
+
+  // Read here rather than at module load, so a deployment with no
+  // `RESEND_API_KEY` starts and delivers push exactly as before. Email is the
+  // only thing missing, and it is missing quietly.
+  const email = readEmailConfiguration();
 
   return {
     queue: createDeliveryQueueStore(),
@@ -323,5 +400,9 @@ function buildDependencies(): {
             web_push: vapid === null ? null : createWebPushSender(vapid),
             apns: apns === null ? null : createApnsSender(apns),
           }),
+    emailStore: email === null ? null : createEmailDispatchStore(),
+    emailSender: email === null ? null : createResendSender(email),
+    // Links in an email must be absolute and must point at the real product.
+    baseUrl: process.env.NEXT_PUBLIC_SITE_URL ?? '',
   };
 }

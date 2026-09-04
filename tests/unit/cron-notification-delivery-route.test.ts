@@ -45,6 +45,7 @@ function result(overrides: Partial<DeliveryRunResult> = {}): DeliveryRunResult {
     rescheduled: 0,
     exhausted: 0,
     sent: 0,
+    mailSent: 0,
     errorCode: null,
     ...overrides,
   };
@@ -188,6 +189,7 @@ describe('the response body', () => {
       rescheduled: 0,
       exhausted: 0,
       sent: 0,
+      mailSent: 0,
       errorCode: '42501',
     });
   });
