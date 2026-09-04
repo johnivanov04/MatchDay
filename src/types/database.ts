@@ -789,6 +789,52 @@ export type PushDeliveryAttemptRow = {
   updated_at: string;
 };
 
+// ── Phase 3D ───────────────────────────────────────────────────────────────
+
+/**
+ * How a notification's email is getting on.
+ *
+ * Deliberately NOT `PushDeliveryStatus`, which carries `invalidated` — a
+ * "retire this subscription" concept with no email analogue. Sharing the type
+ * would make an impossible state writable.
+ */
+export type EmailDeliveryStatus =
+  | 'pending'
+  | 'sent'
+  | 'temporary_failure'
+  | 'permanent_failure';
+
+export type NotificationPreferencesRow = {
+  user_id: string;
+  /** Transactional MatchDay notifications only. Never marketing. */
+  email_enabled: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type EmailDeliveryAttemptRow = {
+  id: string;
+  notification_id: string;
+  status: EmailDeliveryStatus;
+  /** Real provider requests only — a no-op pass does not touch this. */
+  attempt_count: number;
+  last_error_category: string | null;
+  /** Resend's own identifier for the message, when it returned one. */
+  provider_message_id: string | null;
+  /**
+   * SHA-256 of the request sent on the first real provider call.
+   *
+   * A hash, never the content: it reveals neither the address nor the message.
+   * Compared before a retry, because Resend suppresses a duplicate only when
+   * the idempotency key AND the payload both match.
+   */
+  payload_fingerprint: string | null;
+  last_attempted_at: string | null;
+  sent_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 // ── Phase 3B ───────────────────────────────────────────────────────────────
 
 /**
@@ -1002,6 +1048,19 @@ export interface Database {
       };
       notification_delivery_jobs: {
         Row: NotificationDeliveryJobRow;
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      notification_preferences: {
+        Row: NotificationPreferencesRow;
+        Insert: Pick<NotificationPreferencesRow, 'user_id'> &
+          Partial<Pick<NotificationPreferencesRow, 'email_enabled'>>;
+        Update: Partial<Pick<NotificationPreferencesRow, 'email_enabled'>>;
+        Relationships: [];
+      };
+      email_delivery_attempts: {
+        Row: EmailDeliveryAttemptRow;
         Insert: never;
         Update: never;
         Relationships: [];
@@ -1447,6 +1506,20 @@ export interface Database {
         };
         Returns: ClaimedDeliveryJob[];
       };
+      notification_email_recipient: {
+        Args: { p_notification_id: string };
+        Returns: string | null;
+      };
+      record_email_delivery_result: {
+        Args: {
+          p_notification_id: string;
+          p_status: EmailDeliveryStatus;
+          p_error_category?: string | null;
+          p_provider_message_id?: string | null;
+          p_payload_fingerprint?: string | null;
+        };
+        Returns: undefined;
+      };
       reschedule_notification_delivery_job: {
         Args: {
           p_job_id: string;
@@ -1486,6 +1559,7 @@ export interface Database {
       notification_type: NotificationType;
       push_delivery_status: PushDeliveryStatus;
       notification_delivery_job_status: NotificationDeliveryJobStatus;
+      email_delivery_status: EmailDeliveryStatus;
       push_channel: PushChannel;
       apns_environment: ApnsEnvironment;
     };

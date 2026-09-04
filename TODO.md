@@ -159,6 +159,10 @@ Carried forward from Phase 3:
       cannot spend it.
 - [ ] **Reminder scheduling is stored, not executed.** `reminder_offsets` on a
       template is future-compatible metadata; the scheduler is Phase 5.
+- [ ] **Per-type notification preferences.** Phase 3D shipped one global email
+      switch (`notification_preferences.email_enabled`). A member cannot yet say
+      "email me about cancellations but not team sheets". Phase 3E adds the
+      per-type matrix on top of the same table without a rewrite.
 - [ ] **Notification retention.** 04 §3 suggests 90 days in the default UI.
       Nothing prunes or paginates yet; `archived_at` exists for it.
 - [ ] **Per-type notification preferences.** One enabled/disabled switch per

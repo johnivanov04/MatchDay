@@ -11,6 +11,8 @@ import {
   resetProviderTokenCache,
   type ApnsConfiguration,
 } from '@/lib/push/apns';
+import type { EmailDispatchStore } from '@/lib/email/dispatch';
+import type { EmailSender } from '@/lib/email/resend';
 import type { PushSender } from '@/lib/push/sender';
 import type { ClaimedDeliveryJob, RescheduledDeliveryJob } from '@/types/database';
 
@@ -172,6 +174,7 @@ describe('claiming', () => {
       rescheduled: 0,
       exhausted: 0,
       sent: 0,
+      mailSent: 0,
       errorCode: null,
     });
     expect(deliveryRunFailed(result)).toBe(false);
@@ -964,6 +967,307 @@ describe("Phase 3C does not disturb the APNs sender's own token refresh", () => 
     expect(requests).toHaveLength(2);
     expect(recorded).toEqual([{ subscriptionId: 'sub-apns', status: 'temporary_failure' }]);
     expect(q.rescheduled).toEqual([{ id: job(1).job_id, category: 'temporary_failure' }]);
+  });
+});
+
+describe('Phase 3D — two channels on one job', () => {
+  /**
+   * THE ARCHITECTURE TEST FOR THIS PHASE.
+   *
+   * A job now owes work to push AND email. It is finished only when every
+   * applicable channel has reached a terminal outcome, and a retry must resend
+   * to nobody who already received it — across channels, not just within one.
+   *
+   * Both stores keep state between passes and apply the same terminal rule
+   * their real counterparts do, so a second worker pass sees exactly what
+   * production would see.
+   */
+  const FROM = 'MatchDay <notifications@example.test>';
+  const APNS: PushSubscriptionRecord = {
+    id: 'sub-apns',
+    user_id: 'user-1',
+    channel: 'apns',
+    device_token: 'A'.repeat(64),
+    apns_environment: 'production',
+  };
+  const WEB: PushSubscriptionRecord = {
+    id: 'sub-web',
+    user_id: 'user-1',
+    channel: 'web_push',
+    endpoint: 'https://push.example.test/abc',
+    p256dh: 'p'.repeat(87),
+    auth_secret: 'a'.repeat(22),
+  };
+
+  function pushSide(subscriptions: PushSubscriptionRecord[]) {
+    const terminal = new Set<string>();
+    const store: PushDispatchStore = {
+      loadNotifications: async (ids) =>
+        ids.map((id) => ({
+          id,
+          type: 'match_published' as const,
+          title: 'T',
+          body: 'B',
+          deep_link: '/leagues/x/matches/y',
+        })),
+      loadRecipients: async (ids) => new Map(ids.map((id) => [id, 'user-1'])),
+      loadEnabledSubscriptions: async () => subscriptions,
+      alreadyDelivered: async (_n, subscriptionId) => terminal.has(subscriptionId),
+      recordResult: async (_n, subscriptionId, status) => {
+        if (status === 'sent' || status === 'permanent_failure' || status === 'invalidated') {
+          terminal.add(subscriptionId);
+        }
+      },
+    };
+    return store;
+  }
+
+  function emailSide(recipient: string | null = 'player@example.test') {
+    let settled = false;
+    let fingerprint: string | null = null;
+    const store: EmailDispatchStore = {
+      loadNotifications: async (ids) =>
+        ids.map((id) => ({
+          id,
+          type: 'match_published' as const,
+          title: 'T',
+          body: 'B',
+          deep_link: '/leagues/x/matches/y',
+        })),
+      resolveRecipient: async () => recipient,
+      loadAttempt: async () => ({ settled, payloadFingerprint: fingerprint }),
+      recordResult: async (_n, status, _c, _p, printed) => {
+        if (printed != null) {
+          fingerprint ??= printed;
+        }
+        if (status === 'sent' || status === 'permanent_failure') {
+          settled = true;
+        }
+      },
+    };
+    return store;
+  }
+
+  it('APNs sent + Web Push sent + email rate limited → retry sends EMAIL ONLY', async () => {
+    const store = pushSide([APNS, WEB]);
+    const emailStore = emailSide();
+    const pushTargets: string[] = [];
+    const emailSends: string[] = [];
+
+    const sender = {
+      async send(target: { channel: string; subscriptionId: string }) {
+        pushTargets.push(target.subscriptionId);
+        return { ok: true as const, providerMessageId: 'p' };
+      },
+    } as unknown as PushSender;
+
+    let emailCalls = 0;
+    const emailSender: EmailSender = {
+      async send(message) {
+        emailCalls += 1;
+        emailSends.push(message.to);
+        return emailCalls === 1
+          ? { ok: false as const, statusCode: 429 }
+          : { ok: true as const, providerMessageId: 'r' };
+      },
+    };
+
+    const deps = { store, sender, emailStore, emailSender, baseUrl: 'https://app.matchdayapps.com', emailFrom: FROM };
+
+    // ── Pass 1 ──
+    const first = fakeQueue([[job(1)], []]);
+    const one = await runNotificationDelivery({ deps: { queue: first.queue, ...deps } });
+
+    expect(pushTargets).toEqual(['sub-apns', 'sub-web']);
+    expect(emailSends).toHaveLength(1);
+    expect(one.sent).toBe(2); // both pushes; the email failed
+    expect(one.mailSent).toBe(0);
+    // NOT completed — email still owes work.
+    expect(first.rescheduled).toHaveLength(1);
+    expect(first.completed).toHaveLength(0);
+
+    // ── Pass 2: the retry ──
+    pushTargets.length = 0;
+    emailSends.length = 0;
+    const second = fakeQueue([[job(1)], []]);
+    const two = await runNotificationDelivery({ deps: { queue: second.queue, ...deps } });
+
+    // THE ASSERTION THIS PHASE TURNS ON.
+    expect(pushTargets).toEqual([]); // neither phone asked again
+    expect(emailSends).toHaveLength(1); // only the email retried
+    expect(two.mailSent).toBe(1);
+    expect(second.completed).toEqual([job(1).job_id]);
+  });
+
+  it('email sent + push rate limited → retry sends PUSH ONLY', async () => {
+    const store = pushSide([APNS]);
+    const emailStore = emailSide();
+    const pushTargets: string[] = [];
+    const emailSends: string[] = [];
+
+    let pushCalls = 0;
+    const sender = {
+      async send(target: { subscriptionId: string }) {
+        pushCalls += 1;
+        pushTargets.push(target.subscriptionId);
+        return pushCalls === 1
+          ? { ok: false as const, statusCode: 503 }
+          : { ok: true as const, providerMessageId: 'p' };
+      },
+    } as unknown as PushSender;
+
+    const emailSender: EmailSender = {
+      async send(message) {
+        emailSends.push(message.to);
+        return { ok: true as const, providerMessageId: 'r' };
+      },
+    };
+
+    const deps = { store, sender, emailStore, emailSender, baseUrl: 'https://app.matchdayapps.com', emailFrom: FROM };
+
+    const first = fakeQueue([[job(1)], []]);
+    const one = await runNotificationDelivery({ deps: { queue: first.queue, ...deps } });
+
+    expect(emailSends).toHaveLength(1);
+    expect(one.mailSent).toBe(1);
+    expect(first.rescheduled).toHaveLength(1);
+
+    pushTargets.length = 0;
+    emailSends.length = 0;
+    const second = fakeQueue([[job(1)], []]);
+    await runNotificationDelivery({ deps: { queue: second.queue, ...deps } });
+
+    expect(pushTargets).toEqual(['sub-apns']); // push retried
+    expect(emailSends).toEqual([]); // the email is NOT sent twice
+    expect(second.completed).toEqual([job(1).job_id]);
+  });
+
+  it('email sent + push permanently refused → completed, not retried', async () => {
+    const store = pushSide([APNS]);
+    const emailStore = emailSide();
+
+    const sender = {
+      async send() {
+        return { ok: false as const, statusCode: 400 }; // permanent
+      },
+    } as unknown as PushSender;
+    const emailSender: EmailSender = { async send() { return { ok: true as const }; } };
+
+    const q = fakeQueue([[job(1)], []]);
+    const result = await runNotificationDelivery({
+      deps: {
+        queue: q.queue,
+        store,
+        sender,
+        emailStore,
+        emailSender,
+        baseUrl: 'https://app.matchdayapps.com',
+        emailFrom: FROM,
+      },
+    });
+
+    // Something was delivered and nothing retryable remains.
+    expect(q.rescheduled).toHaveLength(0);
+    expect(q.completed).toEqual([job(1).job_id]);
+    expect(result.mailSent).toBe(1);
+  });
+
+  it('no push subscriptions at all + a successful email still completes', async () => {
+    const store = pushSide([]);
+    const emailStore = emailSide();
+    const emailSender: EmailSender = { async send() { return { ok: true as const }; } };
+
+    const q = fakeQueue([[job(1)], []]);
+    const result = await runNotificationDelivery({
+      deps: {
+        queue: q.queue,
+        store,
+        sender: { send: vi.fn() } as unknown as PushSender,
+        emailStore,
+        emailSender,
+        baseUrl: 'https://app.matchdayapps.com',
+        emailFrom: FROM,
+      },
+    });
+
+    expect(q.completed).toEqual([job(1).job_id]);
+    expect(result.mailSent).toBe(1);
+    expect(result.sent).toBe(1);
+  });
+
+  it('no enabled channel at all remains a completed no-op', async () => {
+    // No devices, and email switched off. Nothing is owed and nothing waits.
+    const store = pushSide([]);
+    const emailStore = emailSide(null);
+    const emailSender: EmailSender = { async send() { throw new Error('must not be called'); } };
+
+    const q = fakeQueue([[job(1)], []]);
+    const result = await runNotificationDelivery({
+      deps: {
+        queue: q.queue,
+        store,
+        sender: { send: vi.fn() } as unknown as PushSender,
+        emailStore,
+        emailSender,
+        baseUrl: 'https://app.matchdayapps.com',
+        emailFrom: FROM,
+      },
+    });
+
+    expect(q.completed).toEqual([job(1).job_id]);
+    expect(q.rescheduled).toHaveLength(0);
+    expect(result.sent).toBe(0);
+    expect(result.mailSent).toBe(0);
+  });
+
+  it('a deployment with no email configured behaves exactly as Phase 3C did', async () => {
+    const store = pushSide([APNS]);
+    const sender = {
+      async send() {
+        return { ok: true as const, providerMessageId: 'p' };
+      },
+    } as unknown as PushSender;
+
+    const q = fakeQueue([[job(1)], []]);
+    const result = await runNotificationDelivery({
+      deps: { queue: q.queue, store, sender, emailStore: null, emailSender: null },
+    });
+
+    expect(q.completed).toEqual([job(1).job_id]);
+    expect(result.sent).toBe(1);
+    expect(result.mailSent).toBe(0);
+  });
+
+  it('an email switched off does not stop push, and calls no provider', async () => {
+    const store = pushSide([APNS]);
+    const emailStore = emailSide(null);
+    const emailSender: EmailSender = {
+      async send() {
+        throw new Error('the provider must not be called when email is off');
+      },
+    };
+    const sender = {
+      async send() {
+        return { ok: true as const, providerMessageId: 'p' };
+      },
+    } as unknown as PushSender;
+
+    const q = fakeQueue([[job(1)], []]);
+    const result = await runNotificationDelivery({
+      deps: {
+        queue: q.queue,
+        store,
+        sender,
+        emailStore,
+        emailSender,
+        baseUrl: 'https://app.matchdayapps.com',
+        emailFrom: FROM,
+      },
+    });
+
+    expect(result.sent).toBe(1);
+    expect(result.mailSent).toBe(0);
+    expect(q.completed).toEqual([job(1).job_id]);
   });
 });
 
