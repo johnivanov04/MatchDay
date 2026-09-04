@@ -6,6 +6,8 @@ import { requireSessionUser } from '@/lib/auth/session';
 import { actionFailure, actionSuccess, type ActionResult } from '@/lib/errors';
 import { domainErrorFromDatabase } from '@/lib/errors-from-database';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
+import { NOTIFICATION_TYPE_META } from '@/lib/notifications/notification-types';
+import type { NotificationChannel, NotificationType } from '@/types/database';
 
 /**
  * The global email-notifications switch.
@@ -64,6 +66,81 @@ export async function setEmailNotificationsEnabledAction(
 
     revalidatePath('/settings/notifications');
     return actionSuccess(parsed.data.email_enabled);
+  } catch (error: unknown) {
+    return actionFailure(error);
+  }
+}
+
+/**
+ * One per-type external delivery override.
+ *
+ * ── SPARSE, AND UPSERTED ───────────────────────────────────────────────────
+ *
+ * Absence of a row means enabled, and this writes an explicit row either way
+ * rather than deleting on a return to the default. One consistent model: every
+ * toggle is the same idempotent upsert, and the primary key on (user, type,
+ * channel) is what makes two browser tabs racing produce one row instead of
+ * two.
+ *
+ * The alternative — delete when returning to default — would mean the write
+ * path has to decide which operation it is performing, and a lost delete would
+ * silently leave a member disabled.
+ *
+ * ── NO PROVIDER CODE, AGAIN ────────────────────────────────────────────────
+ *
+ * This writes a boolean. It cannot send anything, and a settings screen is
+ * exactly where a provider call would be easy to reintroduce by accident.
+ */
+const typePreferenceSchema = z.object({
+  notification_type: z.string().refine(
+    (value): value is NotificationType =>
+      Object.hasOwn(NOTIFICATION_TYPE_META, value) &&
+      NOTIFICATION_TYPE_META[value as NotificationType].configurable,
+    // A type that is in-app only has no external delivery to configure, so a
+    // request naming one is a broken client rather than a preference.
+    { message: 'That notification type cannot be configured.' },
+  ),
+  channel: z.enum(['push', 'email']),
+  enabled: z.enum(['true', 'false']).transform((value) => value === 'true'),
+});
+
+export async function setNotificationTypePreferenceAction(
+  _previous: ActionResult<undefined> | null,
+  formData: FormData,
+): Promise<ActionResult<undefined>> {
+  try {
+    const parsed = typePreferenceSchema.safeParse({
+      notification_type: formData.get('notification_type') ?? '',
+      channel: formData.get('channel') ?? '',
+      enabled: formData.get('enabled') ?? 'true',
+    });
+
+    if (!parsed.success) {
+      throw domainErrorFromDatabase({ code: 'invalid_input', message: 'invalid preference' });
+    }
+
+    // From the session, never the form. RLS would refuse a mismatch anyway, but
+    // taking it from the request would make the policy the only thing between
+    // one member and another's settings.
+    const user = await requireSessionUser();
+    const supabase = await createSupabaseServerClient();
+
+    const { error } = await supabase.from('notification_type_preferences').upsert(
+      {
+        user_id: user.id,
+        notification_type: parsed.data.notification_type,
+        channel: parsed.data.channel as NotificationChannel,
+        enabled: parsed.data.enabled,
+      },
+      { onConflict: 'user_id,notification_type,channel' },
+    );
+
+    if (error !== null) {
+      throw domainErrorFromDatabase(error);
+    }
+
+    revalidatePath('/settings/notifications');
+    return actionSuccess();
   } catch (error: unknown) {
     return actionFailure(error);
   }

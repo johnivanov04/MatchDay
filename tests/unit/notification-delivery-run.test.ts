@@ -173,6 +173,8 @@ describe('claiming', () => {
       failed: 0,
       rescheduled: 0,
       exhausted: 0,
+      pushPreferenceSkipped: 0,
+      mailPreferenceSkipped: 0,
       sent: 0,
       mailSent: 0,
       errorCode: null,
@@ -1268,6 +1270,301 @@ describe('Phase 3D — two channels on one job', () => {
     expect(result.sent).toBe(1);
     expect(result.mailSent).toBe(0);
     expect(q.completed).toEqual([job(1).job_id]);
+  });
+});
+
+describe('Phase 3E — preferences decide what is owed', () => {
+  /**
+   * A channel switched off is NOT a failure. It is not owed: no provider call,
+   * no attempt row, no Phase 3C retry budget, no `temporary_failure`. That
+   * distinction is the whole reason eligibility resolves before dispatch rather
+   * than inside it.
+   */
+  const FROM3E = 'MatchDay <notifications@example.test>';
+
+  const APNS3E: PushSubscriptionRecord = {
+    id: 'sub-apns',
+    user_id: 'user-1',
+    channel: 'apns',
+    device_token: 'A'.repeat(64),
+    apns_environment: 'production',
+  };
+
+  function channels(subscriptions: PushSubscriptionRecord[]) {
+    const pushTargets: string[] = [];
+    const emailSends: string[] = [];
+    const terminal = new Set<string>();
+    let emailSettled = false;
+
+    const store: PushDispatchStore = {
+      loadNotifications: async (ids) =>
+        ids.map((id) => ({
+          id,
+          type: 'match_published' as const,
+          title: 'T',
+          body: 'B',
+          deep_link: '/leagues/x/matches/y',
+        })),
+      loadRecipients: async (ids) => new Map(ids.map((id) => [id, 'user-1'])),
+      loadEnabledSubscriptions: async () => subscriptions,
+      alreadyDelivered: async (_n, s) => terminal.has(s),
+      recordResult: async (_n, s, status) => {
+        if (status === 'sent' || status === 'permanent_failure' || status === 'invalidated') {
+          terminal.add(s);
+        }
+      },
+    };
+
+    const emailStore: EmailDispatchStore = {
+      loadNotifications: async (ids) =>
+        ids.map((id) => ({
+          id,
+          type: 'match_published' as const,
+          title: 'T',
+          body: 'B',
+          deep_link: '/leagues/x/matches/y',
+        })),
+      resolveRecipient: async () => 'player@example.test',
+      loadAttempt: async () => ({ settled: emailSettled, payloadFingerprint: null }),
+      recordResult: async (_n, status) => {
+        if (status === 'sent' || status === 'permanent_failure') emailSettled = true;
+      },
+    };
+
+    return { store, emailStore, pushTargets, emailSends };
+  }
+
+  function senders(pushTargets: string[], emailSends: string[], opts: {
+    pushOutcome?: 'ok' | 'temporary';
+    emailOutcome?: 'ok' | 'temporary';
+  } = {}) {
+    let pushCalls = 0;
+    let emailCalls = 0;
+    const sender = {
+      async send(target: { subscriptionId: string }) {
+        pushCalls += 1;
+        pushTargets.push(target.subscriptionId);
+        return opts.pushOutcome === 'temporary' && pushCalls === 1
+          ? { ok: false as const, statusCode: 503 }
+          : { ok: true as const, providerMessageId: 'p' };
+      },
+    } as unknown as PushSender;
+
+    const emailSender: EmailSender = {
+      async send(message) {
+        emailCalls += 1;
+        emailSends.push(message.to);
+        return opts.emailOutcome === 'temporary' && emailCalls === 1
+          ? { ok: false as const, statusCode: 429 }
+          : { ok: true as const, providerMessageId: 'r' };
+      },
+    };
+
+    return { sender, emailSender };
+  }
+
+  function eligibility(pushAllowed: boolean, emailAddress: string | null) {
+    return { resolve: async () => ({ pushAllowed, emailAddress }) };
+  }
+
+  it('both enabled sends on both channels', async () => {
+    const c = channels([APNS3E]);
+    const s = senders(c.pushTargets, c.emailSends);
+    const q = fakeQueue([[job(1)], []]);
+
+    const result = await runNotificationDelivery({
+      deps: {
+        queue: q.queue, store: c.store, sender: s.sender,
+        emailStore: c.emailStore, emailSender: s.emailSender,
+        baseUrl: 'https://app.matchdayapps.com', emailFrom: FROM3E,
+        eligibility: eligibility(true, 'player@example.test'),
+      },
+    });
+
+    expect(c.pushTargets).toEqual(['sub-apns']);
+    expect(c.emailSends).toHaveLength(1);
+    expect(result.mailSent).toBe(1);
+    expect(q.completed).toEqual([job(1).job_id]);
+  });
+
+  it('push disabled calls no push provider and still emails', async () => {
+    const c = channels([APNS3E]);
+    const s = senders(c.pushTargets, c.emailSends);
+    const q = fakeQueue([[job(1)], []]);
+
+    const result = await runNotificationDelivery({
+      deps: {
+        queue: q.queue, store: c.store, sender: s.sender,
+        emailStore: c.emailStore, emailSender: s.emailSender,
+        baseUrl: 'https://app.matchdayapps.com', emailFrom: FROM3E,
+        eligibility: eligibility(false, 'player@example.test'),
+      },
+    });
+
+    expect(c.pushTargets).toEqual([]);
+    expect(c.emailSends).toHaveLength(1);
+    expect(result.pushPreferenceSkipped).toBe(1);
+    expect(result.mailPreferenceSkipped).toBe(0);
+    // A disabled channel spends no retry budget and is not a failure.
+    expect(q.rescheduled).toHaveLength(0);
+    expect(q.failed).toHaveLength(0);
+    expect(q.completed).toEqual([job(1).job_id]);
+  });
+
+  it('email disabled calls no Resend and still pushes', async () => {
+    const c = channels([APNS3E]);
+    const s = senders(c.pushTargets, c.emailSends);
+    const q = fakeQueue([[job(1)], []]);
+
+    const result = await runNotificationDelivery({
+      deps: {
+        queue: q.queue, store: c.store, sender: s.sender,
+        emailStore: c.emailStore, emailSender: s.emailSender,
+        baseUrl: 'https://app.matchdayapps.com', emailFrom: FROM3E,
+        eligibility: eligibility(true, null),
+      },
+    });
+
+    expect(c.pushTargets).toEqual(['sub-apns']);
+    expect(c.emailSends).toEqual([]);
+    expect(result.mailPreferenceSkipped).toBe(1);
+    expect(result.mailSent).toBe(0);
+    expect(q.completed).toEqual([job(1).job_id]);
+  });
+
+  it('both disabled completes as a legitimate no-op', async () => {
+    const c = channels([APNS3E]);
+    const s = senders(c.pushTargets, c.emailSends);
+    const q = fakeQueue([[job(1)], []]);
+
+    const result = await runNotificationDelivery({
+      deps: {
+        queue: q.queue, store: c.store, sender: s.sender,
+        emailStore: c.emailStore, emailSender: s.emailSender,
+        baseUrl: 'https://app.matchdayapps.com', emailFrom: FROM3E,
+        eligibility: eligibility(false, null),
+      },
+    });
+
+    expect(c.pushTargets).toEqual([]);
+    expect(c.emailSends).toEqual([]);
+    expect(result.sent).toBe(0);
+    // NOT failed, NOT rescheduled. Nothing was owed.
+    expect(q.failed).toHaveLength(0);
+    expect(q.rescheduled).toHaveLength(0);
+    expect(q.completed).toEqual([job(1).job_id]);
+  });
+
+  it('a disabled channel consumes no provider attempt and no retry budget', async () => {
+    const c = channels([APNS3E]);
+    const s = senders(c.pushTargets, c.emailSends);
+    const q = fakeQueue([[job(1)], []]);
+
+    const result = await runNotificationDelivery({
+      deps: {
+        queue: q.queue, store: c.store, sender: s.sender,
+        emailStore: c.emailStore, emailSender: s.emailSender,
+        baseUrl: 'https://app.matchdayapps.com', emailFrom: FROM3E,
+        eligibility: eligibility(false, null),
+      },
+    });
+
+    expect(result.failed).toBe(0);
+    expect(result.rescheduled).toBe(0);
+    expect(result.exhausted).toBe(0);
+  });
+
+  // ── Mid-flight preference changes ──────────────────────────────────────
+
+  it('email fails, member disables email, next pass completes without Resend', async () => {
+    // Phase 3C scheduled a retry for the email. Before it runs the member
+    // switches email off for that type — so it is no longer owed, and the
+    // already-sent push is not repeated either.
+    const c = channels([APNS3E]);
+    const s = senders(c.pushTargets, c.emailSends, { emailOutcome: 'temporary' });
+
+    const first = fakeQueue([[job(1)], []]);
+    await runNotificationDelivery({
+      deps: {
+        queue: first.queue, store: c.store, sender: s.sender,
+        emailStore: c.emailStore, emailSender: s.emailSender,
+        baseUrl: 'https://app.matchdayapps.com', emailFrom: FROM3E,
+        eligibility: eligibility(true, 'player@example.test'),
+      },
+    });
+    expect(first.rescheduled).toHaveLength(1);
+    expect(c.pushTargets).toEqual(['sub-apns']);
+
+    c.pushTargets.length = 0;
+    c.emailSends.length = 0;
+
+    const second = fakeQueue([[job(1)], []]);
+    await runNotificationDelivery({
+      deps: {
+        queue: second.queue, store: c.store, sender: s.sender,
+        emailStore: c.emailStore, emailSender: s.emailSender,
+        baseUrl: 'https://app.matchdayapps.com', emailFrom: FROM3E,
+        eligibility: eligibility(true, null), // email now switched off
+      },
+    });
+
+    expect(c.emailSends).toEqual([]);
+    expect(c.pushTargets).toEqual([]); // the sent push is terminal
+    expect(second.completed).toEqual([job(1).job_id]);
+  });
+
+  it('push fails, member disables push, next pass completes without a push call', async () => {
+    const c = channels([APNS3E]);
+    const s = senders(c.pushTargets, c.emailSends, { pushOutcome: 'temporary' });
+
+    const first = fakeQueue([[job(1)], []]);
+    await runNotificationDelivery({
+      deps: {
+        queue: first.queue, store: c.store, sender: s.sender,
+        emailStore: c.emailStore, emailSender: s.emailSender,
+        baseUrl: 'https://app.matchdayapps.com', emailFrom: FROM3E,
+        eligibility: eligibility(true, 'player@example.test'),
+      },
+    });
+    expect(first.rescheduled).toHaveLength(1);
+    expect(c.emailSends).toHaveLength(1);
+
+    c.pushTargets.length = 0;
+    c.emailSends.length = 0;
+
+    const second = fakeQueue([[job(1)], []]);
+    await runNotificationDelivery({
+      deps: {
+        queue: second.queue, store: c.store, sender: s.sender,
+        emailStore: c.emailStore, emailSender: s.emailSender,
+        baseUrl: 'https://app.matchdayapps.com', emailFrom: FROM3E,
+        eligibility: eligibility(false, 'player@example.test'), // push now off
+      },
+    });
+
+    expect(c.pushTargets).toEqual([]);
+    expect(c.emailSends).toEqual([]); // the sent email is terminal
+    expect(second.completed).toEqual([job(1).job_id]);
+  });
+
+  it('behaves exactly as Phase 3D when no resolver is injected', async () => {
+    // The pre-3E behaviour, which is what an older deployment does.
+    const c = channels([APNS3E]);
+    const s = senders(c.pushTargets, c.emailSends);
+    const q = fakeQueue([[job(1)], []]);
+
+    const result = await runNotificationDelivery({
+      deps: {
+        queue: q.queue, store: c.store, sender: s.sender,
+        emailStore: c.emailStore, emailSender: s.emailSender,
+        baseUrl: 'https://app.matchdayapps.com', emailFrom: FROM3E,
+      },
+    });
+
+    expect(c.pushTargets).toEqual(['sub-apns']);
+    expect(c.emailSends).toHaveLength(1);
+    expect(result.pushPreferenceSkipped).toBe(0);
+    expect(result.mailPreferenceSkipped).toBe(0);
   });
 });
 

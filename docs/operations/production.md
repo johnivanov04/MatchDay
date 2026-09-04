@@ -713,6 +713,97 @@ would sit outside `auth.users`, where account deletion already knows how to
 scrub it, and would need its own erasure path to avoid outliving the account.
 `provider_message_id` is the handle Resend's own tooling answers to.
 
+## 6d. Per-type delivery preferences
+
+Phase 3E lets a member choose which notifications reach them by push and by
+email. It governs **delivery only**: every business rule that decides a
+notification exists is untouched, and the canonical in-app record is always
+written.
+
+### Absence means enabled
+
+`notification_type_preferences` is **sparse**. No row exists for anybody until
+they move a toggle, and the resolver treats a missing row as "yes".
+
+That is what made the migration safe: the moment it landed, delivery behaviour
+was byte-for-byte what Phase 3D did. Defaulting to disabled and backfilling
+everyone to enabled would have meant a migration that silently switches
+notifications off for anybody it failed to reach.
+
+### Resolution order
+
+`notification_channel_eligibility(notification_id)` answers both channels at
+once and is the only place these rules live:
+
+**Push** — allowed unless an explicit per-type row says `enabled = false`.
+There is no global push switch; somebody who wants no push at all turns their
+devices off, which is a per-device control that already exists.
+
+**Email** — in this order:
+
+1. global `notification_preferences.email_enabled` must be **true** (the master)
+2. no per-type email row saying `false`
+3. account not being deleted
+4. `auth.users.email` present **and** `email_confirmed_at` not null
+
+The master dominates: with it off, no per-type row turns email back on. Turning
+it off does **not** erase those rows, so turning it on again restores exactly
+the choices somebody made.
+
+### A disabled channel is not a failure
+
+It is **not owed**. No provider call, no attempt row, no Phase 3C retry budget,
+no `temporary_failure`. If both channels are off the job completes as a
+legitimate no-op — there is nothing to come back for.
+
+Preference state is read on **each** worker pass, so a member who switches a
+channel off while a job is waiting for a retry is not sent to on the next pass.
+Preferences govern future evaluation and never rewrite an already-terminal
+attempt row; re-enabling a type does not resurrect a completed job.
+
+### The queue trigger is unchanged
+
+Still `delivery_metadata->>'push_eligible' = 'true'`. A job is created even for
+a member who has switched both channels off, and the worker completes it as a
+no-op.
+
+That is deliberate. Moving preferences into the trigger would put a per-user
+lookup inside every domain transaction, and would freeze the decision at
+creation time — so a member who re-enabled a channel a minute later would never
+get the notification that was already in flight.
+
+### Operating it
+
+```sql
+-- How many people have overridden anything at all.
+select channel, enabled, count(*)
+  from public.notification_type_preferences
+ group by channel, enabled order by channel, enabled;
+
+-- The most commonly switched-off notifications, which is product feedback.
+select notification_type, channel, count(*)
+  from public.notification_type_preferences
+ where not enabled
+ group by 1, 2 order by 3 desc limit 10;
+```
+
+The worker's `notification_delivery.run` line carries `push_preference_skipped`
+and `mail_preference_skipped`. Both are counters, not warnings: a member
+switching a channel off is intent, not an operator problem. Neither is named
+after the email channel, because the observability filter drops any key
+containing "email".
+
+### Settings
+
+`/settings/notifications` shows the global email master and, beneath it, a
+matrix of the **17 externally deliverable** types. The eight in-app-only types
+are absent — there is no external delivery to configure, and a switch governing
+nothing is worse than none.
+
+`src/lib/notifications/notification-types.ts` is the registry of labels and is
+**display metadata only**. `PUSH_ELIGIBLE_TYPES` remains the authority on what
+may leave the building; a test holds the two to each other so they cannot drift.
+
 ## 7. Observability
 
 Server logs are single-line JSON on stdout, which every host collects and
@@ -727,7 +818,7 @@ indexes. There is no agent and no vendor.
 | `reminder.run` | info | A reminder pass completed, with `claimed` / `notified`. Emitted on empty passes too, so its **absence** is the signal |
 | `reminder.failed` | error | The generator errored; nothing was claimed. **Alert on this** |
 | `reminder.skipped` | warn | No service-role key configured, so nothing ran |
-| `notification_delivery.run` | info | A delivery pass completed, with `claimed` / `completed` / `failed` / `rescheduled` / `exhausted` / `sent` / `mail_sent` / `duration_ms`. Emitted on empty passes too |
+| `notification_delivery.run` | info | A delivery pass completed, with `claimed` / `completed` / `failed` / `rescheduled` / `exhausted` / `push_preference_skipped` / `mail_preference_skipped` / `sent` / `mail_sent` / `duration_ms`. Emitted on empty passes too |
 | `notification_delivery.failed` | error | The queue itself could not be read or written; nothing was drained. **Alert on this** |
 | `notification_delivery.skipped` | warn | No service-role key, or no push transport configured. **Jobs are accumulating unsent** |
 | `notification_delivery.incomplete` | warn | At least one notification reached none of its devices |
