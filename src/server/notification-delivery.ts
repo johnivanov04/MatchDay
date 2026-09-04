@@ -9,6 +9,10 @@ import {
   type EmailSender,
 } from '@/lib/email/resend';
 import {
+  createChannelEligibilityStore,
+  type ChannelEligibilityStore,
+} from '@/lib/notifications/channel-eligibility';
+import {
   createDeliveryQueueStore,
   type DeliveryQueueStore,
 } from '@/lib/notifications/delivery-queue';
@@ -77,6 +81,15 @@ export interface DeliveryRunResult {
   rescheduled: number;
   /** Jobs that reached `failed` specifically because the retry budget ran out. */
   exhausted: number;
+  /**
+   * Channels not attempted because the member switched them off.
+   *
+   * Ordinary user intent, not an operator problem, so these are counters on the
+   * run rather than a warning per notification. Named without "email" because
+   * the observability filter drops any key containing it.
+   */
+  pushPreferenceSkipped: number;
+  mailPreferenceSkipped: number;
   /** Individual provider sends that succeeded, across every job and channel. */
   sent: number;
   /**
@@ -114,6 +127,8 @@ export interface DeliveryRunOptions {
     emailSender?: EmailSender | null;
     baseUrl?: string;
     emailFrom?: string;
+    /** Phase 3E. Absent means every channel is treated as allowed. */
+    eligibility?: ChannelEligibilityStore | null;
   };
 }
 
@@ -137,7 +152,7 @@ export async function runNotificationDelivery(
   const timeBudgetMs = options.timeBudgetMs ?? DEFAULTS.timeBudgetMs;
   const leaseSeconds = options.leaseSeconds ?? DEFAULTS.leaseSeconds;
 
-  const { queue, store, sender, emailStore, emailSender, baseUrl, emailFrom } =
+  const { queue, store, sender, emailStore, emailSender, baseUrl, emailFrom, eligibility } =
     options.deps ?? buildDependencies();
 
   // NOTHING IS CLAIMED WHEN THERE IS NOWHERE TO SEND.
@@ -159,6 +174,8 @@ export async function runNotificationDelivery(
       failed: 0,
       rescheduled: 0,
       exhausted: 0,
+      pushPreferenceSkipped: 0,
+      mailPreferenceSkipped: 0,
       sent: 0,
       mailSent: 0,
       errorCode: null,
@@ -176,6 +193,8 @@ export async function runNotificationDelivery(
   let failed = 0;
   let rescheduled = 0;
   let exhausted = 0;
+  let pushPreferenceSkipped = 0;
+  let mailPreferenceSkipped = 0;
   let sent = 0;
   let mailSent = 0;
 
@@ -209,16 +228,48 @@ export async function runNotificationDelivery(
         let outcome = { sent: 0, attempted: 0, retryable: 0, aborted: false };
 
         try {
-          const push = await dispatchPushNotifications([job.job_notification_id], {
-            store,
-            sender,
-          });
+          // ── PHASE 3E: ASK WHAT IS OWED BEFORE DISPATCHING ────────────────
+          //
+          // Resolved once per job, from current preference state — so a member
+          // who switches a channel off while a job is waiting for a Phase 3C
+          // retry is not sent to on the next pass. Preferences govern future
+          // evaluation, never already-terminal attempt rows.
+          //
+          // A channel that is not owed is NOT a failure: no provider call, no
+          // attempt row, no retry budget, no `temporary_failure`. It simply has
+          // nothing to come back for, which is why this is resolved here rather
+          // than inside a dispatcher that only knows how to succeed or fail.
+          //
+          // With no resolver injected, every channel is treated as allowed —
+          // the behaviour of every phase before this one.
+          const allowed =
+            eligibility == null
+              ? { pushAllowed: true, emailAddress: 'unresolved' }
+              : await eligibility.resolve(job.job_notification_id);
+
+          const ZERO = { sent: 0, attempted: 0, retryable: 0, aborted: false };
+
+          if (!allowed.pushAllowed) {
+            pushPreferenceSkipped += 1;
+          }
+
+          const push = allowed.pushAllowed
+            ? await dispatchPushNotifications([job.job_notification_id], { store, sender })
+            : ZERO;
+
+          // The email side is gated twice over, and deliberately: the resolver
+          // decides here whether to call the dispatcher at all, and the
+          // dispatcher's own `resolveRecipient` re-asks the database. The
+          // second check is what keeps the Phase 3D path honest on its own.
+          if (eligibility != null && allowed.emailAddress === null && emailStore != null) {
+            mailPreferenceSkipped += 1;
+          }
 
           // A deployment with no email configured contributes nothing at all —
           // not a skip that could be mistaken for work, and not a failure.
           const email =
-            emailStore == null
-              ? { sent: 0, attempted: 0, retryable: 0, aborted: false }
+            emailStore == null || (eligibility != null && allowed.emailAddress === null)
+              ? ZERO
               : await dispatchEmailNotifications([job.job_notification_id], {
                   store: emailStore,
                   sender: emailSender ?? null,
@@ -334,6 +385,8 @@ export async function runNotificationDelivery(
       failed,
       rescheduled,
       exhausted,
+      pushPreferenceSkipped,
+      mailPreferenceSkipped,
       sent,
       mailSent,
       errorCode,
@@ -349,6 +402,8 @@ export async function runNotificationDelivery(
     failed,
     rescheduled,
     exhausted,
+    push_preference_skipped: pushPreferenceSkipped,
+    mail_preference_skipped: mailPreferenceSkipped,
     sent,
     mail_sent: mailSent,
     duration_ms: Date.now() - startedAt,
@@ -365,6 +420,8 @@ export async function runNotificationDelivery(
     failed,
     rescheduled,
     exhausted,
+    pushPreferenceSkipped,
+    mailPreferenceSkipped,
     sent,
     mailSent,
     errorCode: null,
@@ -384,6 +441,7 @@ function buildDependencies(): {
   emailSender: EmailSender | null;
   baseUrl: string;
   emailFrom: string;
+  eligibility: ChannelEligibilityStore | null;
 } {
   const vapid = readVapidConfiguration();
   const apns = readApnsConfiguration();
@@ -409,5 +467,6 @@ function buildDependencies(): {
     baseUrl: process.env.NEXT_PUBLIC_SITE_URL ?? '',
     // Part of the request, and therefore part of its fingerprint.
     emailFrom: email?.from ?? '',
+    eligibility: createChannelEligibilityStore(),
   };
 }

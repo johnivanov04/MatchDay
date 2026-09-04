@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import { EmailNotificationsToggle } from '@/components/email-notifications-toggle';
+import { NotificationTypePreferences } from '@/components/notification-type-preferences';
 import { requireOnboardedUser } from '@/lib/auth/page-guards';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { PageHeader } from '@/components/ui/page-header';
@@ -29,6 +30,18 @@ export default async function NotificationSettingsPage() {
 
   const emailEnabled = data?.email_enabled ?? false;
 
+  // Sparse: only the overrides this member has actually set. Everything absent
+  // is on, which is what the delivery worker does, so the page shows the truth
+  // without writing a row just by being visited.
+  const { data: overrideRows } = await supabase
+    .from('notification_type_preferences')
+    .select('notification_type, channel, enabled');
+
+  const overrides: Record<string, boolean> = {};
+  for (const row of overrideRows ?? []) {
+    overrides[`${row.notification_type}:${row.channel}`] = row.enabled;
+  }
+
   return (
     <>
       <PageHeader
@@ -36,8 +49,12 @@ export default async function NotificationSettingsPage() {
         description="Get the same match alerts by email. These are transactional notifications about your leagues and matches — never marketing. Everything also stays in your in-app inbox, so turning this off loses nothing."
       />
 
-      <section className="mt-6 max-w-xl rounded-lg border border-line p-4">
+      <section className="mt-6 max-w-2xl rounded-lg border border-line p-4">
         <EmailNotificationsToggle enabled={emailEnabled} />
+      </section>
+
+      <section className="max-w-2xl">
+        <NotificationTypePreferences emailEnabled={emailEnabled} overrides={overrides} />
       </section>
     </>
   );
