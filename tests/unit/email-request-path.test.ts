@@ -27,6 +27,7 @@ const FORBIDDEN_IN_REQUEST_PATH = [
   '@/lib/push/sender',
   '@/lib/push/dispatch',
   '@/lib/push/push-store',
+  '@/lib/notifications/channel-eligibility',
   '@/server/notification-delivery',
   'api.resend.com',
   'RESEND_API_KEY',

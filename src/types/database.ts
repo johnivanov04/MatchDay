@@ -789,6 +789,26 @@ export type PushDeliveryAttemptRow = {
   updated_at: string;
 };
 
+// ── Phase 3E ───────────────────────────────────────────────────────────────
+
+/** The external delivery channels a member may configure. In-app is not one. */
+export type NotificationChannel = 'push' | 'email';
+
+export type NotificationTypePreferenceRow = {
+  user_id: string;
+  notification_type: NotificationType;
+  channel: NotificationChannel;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+/** One row of `notification_channel_eligibility`. */
+export type ChannelEligibilityRow = {
+  push_allowed: boolean;
+  email_address: string | null;
+};
+
 // ── Phase 3D ───────────────────────────────────────────────────────────────
 
 /**
@@ -1050,6 +1070,13 @@ export interface Database {
         Row: NotificationDeliveryJobRow;
         Insert: never;
         Update: never;
+        Relationships: [];
+      };
+      notification_type_preferences: {
+        Row: NotificationTypePreferenceRow;
+        Insert: Pick<NotificationTypePreferenceRow,
+          'user_id' | 'notification_type' | 'channel' | 'enabled'>;
+        Update: Partial<Pick<NotificationTypePreferenceRow, 'enabled'>>;
         Relationships: [];
       };
       notification_preferences: {
@@ -1506,6 +1533,10 @@ export interface Database {
         };
         Returns: ClaimedDeliveryJob[];
       };
+      notification_channel_eligibility: {
+        Args: { p_notification_id: string };
+        Returns: ChannelEligibilityRow[];
+      };
       notification_email_recipient: {
         Args: { p_notification_id: string };
         Returns: string | null;
@@ -1560,6 +1591,7 @@ export interface Database {
       push_delivery_status: PushDeliveryStatus;
       notification_delivery_job_status: NotificationDeliveryJobStatus;
       email_delivery_status: EmailDeliveryStatus;
+      notification_channel: NotificationChannel;
       push_channel: PushChannel;
       apns_environment: ApnsEnvironment;
     };
