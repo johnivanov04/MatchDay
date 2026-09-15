@@ -28,6 +28,11 @@ const alias = { '@': srcAlias, 'server-only': serverOnlyStub };
 export default defineConfig({
   resolve: { alias },
   test: {
+    // `default` is the normal console output; the second is the guard that
+    // makes a failing run exit non-zero. See tests/reporters/fail-the-run.ts —
+    // without it, a failing `db` test printed its failure and exited 0, so CI
+    // showed green over a red suite.
+    reporters: ['default', './tests/reporters/fail-the-run.ts'],
     projects: [
       {
         resolve: { alias },
