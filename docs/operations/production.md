@@ -761,6 +761,18 @@ channel off while a job is waiting for a retry is not sent to on the next pass.
 Preferences govern future evaluation and never rewrite an already-terminal
 attempt row; re-enabling a type does not resurrect a completed job.
 
+**One race, documented rather than engineered away.** Eligibility is resolved at
+the start of a pass. A member who changes a preference after that resolution but
+before the provider request finishes will still receive that one message — the
+HTTP call is already in flight and there is nothing to cancel. The window is the
+duration of a single send, and the next pass uses current preferences.
+
+Closing it would mean holding a lock across a third-party network call, which is
+precisely what Phase 3B removed from the request path. The cost of the race is
+one extra notification somebody had just decided they did not want; the cost of
+the fix would be a queue that stalls whenever a provider is slow. No stronger
+guarantee is claimed anywhere in the code.
+
 ### The queue trigger is unchanged
 
 Still `delivery_metadata->>'push_eligible' = 'true'`. A job is created even for

@@ -109,6 +109,30 @@ describe('per-type delivery preferences', () => {
       expect((await resolve(id)).email).toBe(SEED_USERS.rmvfcPlayer.email);
     });
 
+    it('a Phase 3D opted-in account with zero type rows behaves exactly as before 3E', async () => {
+      // This is production's actual state: one account with the global switch
+      // on and no per-type rows at all. It must keep receiving precisely what
+      // it received yesterday.
+      await setGlobal(SEED_USERS.rmvfcPlayer, true);
+
+      const rows = await asServiceRole(db, async (client) => {
+        const { rows } = await client.query<{ c: string }>(
+          'select count(*)::text as c from public.notification_type_preferences where user_id = $1',
+          [SEED_USERS.rmvfcPlayer.id],
+        );
+        return Number(rows[0]!.c);
+      });
+      expect(rows).toBe(0);
+
+      // Every externally deliverable type still resolves to both channels.
+      for (const type of ['match_published', 'reminder', 'waitlist_promotion', 'teams_published']) {
+        const id = await notify(SEED_USERS.rmvfcPlayer, `pref-3d-parity-${type}`, type);
+        const r = await resolve(id);
+        expect(r.push, type).toBe(true);
+        expect(r.email, type).toBe(SEED_USERS.rmvfcPlayer.email);
+      }
+    });
+
     it('creates no preference rows just by resolving', async () => {
       await setGlobal(SEED_USERS.rmvfcPlayer, true);
       const id = await notify(SEED_USERS.rmvfcPlayer, 'pref-default-mail-3');
@@ -388,6 +412,167 @@ describe('per-type delivery preferences', () => {
       });
 
       expect(seen).toBe(1);
+    });
+  });
+
+  // ── Hostile writes ───────────────────────────────────────────────────────
+
+  describe('a member cannot reach another member\'s preferences', () => {
+    it('refuses moving an OWNED row to another user_id', async () => {
+      // THE ATTACK THE WITH CHECK EXISTS FOR. The USING clause lets somebody
+      // update their own row; without a matching WITH CHECK they could rewrite
+      // `user_id` and hand the row — and every future preference decision it
+      // drives — to somebody else's account.
+      await setType(SEED_USERS.rmvfcPlayer, 'match_published', 'push', false);
+
+      const error = await expectDatabaseError(() =>
+        asUser(db, SEED_USERS.rmvfcPlayer, (client) =>
+          client.query(
+            'update public.notification_type_preferences set user_id = $1 where user_id = $2',
+            [SEED_USERS.rmvfcAdmin.id, SEED_USERS.rmvfcPlayer.id],
+          ),
+        ),
+      );
+
+      expect(error.code).toBe(PG_ERROR.insufficientPrivilege);
+    });
+
+    it('leaves the victim with no row at all after that attempt', async () => {
+      await setType(SEED_USERS.rmvfcPlayer, 'match_published', 'push', false);
+
+      await expectDatabaseError(() =>
+        asUser(db, SEED_USERS.rmvfcPlayer, (client) =>
+          client.query(
+            'update public.notification_type_preferences set user_id = $1',
+            [SEED_USERS.rmvfcAdmin.id],
+          ),
+        ),
+      );
+
+      const victimRows = await asServiceRole(db, async (client) => {
+        const { rows } = await client.query<{ c: string }>(
+          'select count(*)::text as c from public.notification_type_preferences where user_id = $1',
+          [SEED_USERS.rmvfcAdmin.id],
+        );
+        return Number(rows[0]!.c);
+      });
+
+      expect(victimRows).toBe(0);
+    });
+
+    it('refuses an insert naming another user even with a valid type and channel', async () => {
+      const error = await expectDatabaseError(() =>
+        asUser(db, SEED_USERS.rmvfcPlayer, (client) =>
+          client.query(
+            `insert into public.notification_type_preferences
+               (user_id, notification_type, channel, enabled)
+             values ($1, 'reminder', 'email', false)`,
+            [SEED_USERS.rmvfcAdmin.id],
+          ),
+        ),
+      );
+
+      expect(error.code).toBe(PG_ERROR.insufficientPrivilege);
+    });
+
+    it('gives an ordinary member no DELETE at all', async () => {
+      // Not granted, deliberately: the write path is an idempotent upsert, so
+      // there is nothing a member needs DELETE for.
+      await setType(SEED_USERS.rmvfcPlayer, 'match_published', 'push', false);
+
+      const error = await expectDatabaseError(() =>
+        asUser(db, SEED_USERS.rmvfcPlayer, (client) =>
+          client.query('delete from public.notification_type_preferences'),
+        ),
+      );
+
+      expect(error.code).toBe(PG_ERROR.insufficientPrivilege);
+    });
+
+    it('cannot probe another member\'s state through the resolver', async () => {
+      // The resolver returns an email address and reads `auth.users`. A session
+      // must not be able to point it at an arbitrary notification.
+      await setGlobal(SEED_USERS.rmvfcAdmin, true);
+      const theirs = await notify(SEED_USERS.rmvfcAdmin, 'pref-probe-0001');
+
+      const error = await expectDatabaseError(() =>
+        asUser(db, SEED_USERS.rmvfcPlayer, (client) =>
+          client.query('select * from public.notification_channel_eligibility($1)', [theirs]),
+        ),
+      );
+
+      expect(error.code).toBe(PG_ERROR.insufficientPrivilege);
+    });
+  });
+
+  // ── In-app-only types ────────────────────────────────────────────────────
+
+  describe('a preference row for an in-app-only type is inert', () => {
+    it('can be stored — the table does not police product policy', async () => {
+      // Not a defect. The column is the notification_type enum, and adding a
+      // CHECK listing seventeen values would be a second place for the
+      // externally-eligible set to drift from `PUSH_ELIGIBLE_TYPES`.
+      await setType(SEED_USERS.rmvfcPlayer, 'attendance_recorded', 'push', true);
+
+      const stored = await asServiceRole(db, async (client) => {
+        const { rows } = await client.query<{ c: string }>(
+          `select count(*)::text as c from public.notification_type_preferences
+            where notification_type = 'attendance_recorded'`,
+        );
+        return Number(rows[0]!.c);
+      });
+
+      expect(stored).toBe(1);
+    });
+
+    it('creates no queue job, because the trigger never fires for it', async () => {
+      // The first and strongest layer: `attendance_recorded` is written with
+      // `push_eligible: false`, so there is no delivery job for a preference to
+      // influence.
+      await setGlobal(SEED_USERS.rmvfcPlayer, true);
+      await setType(SEED_USERS.rmvfcPlayer, 'attendance_recorded', 'push', true);
+      await setType(SEED_USERS.rmvfcPlayer, 'attendance_recorded', 'email', true);
+
+      await asServiceRoleCommitting(db, (client) =>
+        client.query(
+          `insert into public.notifications
+             (recipient_user_id, league_id, type, title, body, deep_link,
+              idempotency_key, delivery_metadata)
+           values ($1, $2, 'attendance_recorded', 'T', 'B', '/x/y', 'pref-inapp-0001',
+                   jsonb_build_object('push_eligible', false))`,
+          [SEED_USERS.rmvfcPlayer.id, SEED_LEAGUES.rmvfc],
+        ),
+      );
+
+      const jobs = await asServiceRole(db, async (client) => {
+        const { rows } = await client.query<{ c: string }>(
+          'select count(*)::text as c from public.notification_delivery_jobs',
+        );
+        return Number(rows[0]!.c);
+      });
+
+      expect(jobs).toBe(0);
+    });
+
+    it('does not make the canonical notification any different', async () => {
+      await setType(SEED_USERS.rmvfcPlayer, 'attendance_recorded', 'push', true);
+
+      const id = await asServiceRoleCommitting(db, async (client) => {
+        const { rows } = await client.query<{ id: string; delivery_metadata: unknown }>(
+          `insert into public.notifications
+             (recipient_user_id, league_id, type, title, body, deep_link,
+              idempotency_key, delivery_metadata)
+           values ($1, $2, 'attendance_recorded', 'T', 'B', '/x/y', 'pref-inapp-0002',
+                   jsonb_build_object('push_eligible', false))
+           returning id, delivery_metadata`,
+          [SEED_USERS.rmvfcPlayer.id, SEED_LEAGUES.rmvfc],
+        );
+        return rows[0]!;
+      });
+
+      // The in-app record is written exactly as always — preferences govern
+      // delivery, never creation.
+      expect(id.delivery_metadata).toEqual({ push_eligible: false });
     });
   });
 

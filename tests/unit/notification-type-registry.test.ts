@@ -89,3 +89,103 @@ describe('the new worker counters survive the log filter', () => {
     expect(assertLoggable({ email_preference_skipped: 1 })).toBe(false);
   });
 });
+
+describe('the registry cannot authorize delivery', () => {
+  /**
+   * The registry is display metadata. If a malicious client stored a preference
+   * row for an in-app-only type — which the table permits, because policing
+   * product policy in a CHECK would be a second place for the eligible set to
+   * drift — nothing downstream may act on it.
+   *
+   * Three independent layers say no, and this proves the two that live in
+   * TypeScript. The third is the queue trigger, which never fires for a
+   * notification written with `push_eligible: false`; that one is proved
+   * against the real database in `tests/db/notification-type-preferences`.
+   */
+  const IN_APP_ONLY: NotificationType[] = (
+    Object.keys(NOTIFICATION_TYPE_META) as NotificationType[]
+  ).filter((t) => !NOTIFICATION_TYPE_META[t].configurable);
+
+  it('has eight in-app-only types to defend', () => {
+    expect(IN_APP_ONLY).toHaveLength(8);
+  });
+
+  it('builds NO push payload for any of them, whatever a preference says', async () => {
+    const { buildPushPayload } = await import('@/lib/push/payload');
+
+    for (const type of IN_APP_ONLY) {
+      expect(
+        buildPushPayload({
+          id: '11111111-1111-4111-8111-000000000001',
+          type,
+          title: 'T',
+          body: 'B',
+          deep_link: '/leagues/x/matches/y',
+        }),
+        type,
+      ).toBeNull();
+    }
+  });
+
+  it('the email dispatcher skips all of them, whatever a preference says', async () => {
+    const { dispatchEmailNotifications } = await import('@/lib/email/dispatch');
+
+    for (const type of IN_APP_ONLY) {
+      const sent: string[] = [];
+      const recorded: string[] = [];
+
+      const result = await dispatchEmailNotifications(['11111111-1111-4111-8111-000000000001'], {
+        store: {
+          loadNotifications: async (ids) =>
+            ids.map((id) => ({
+              id,
+              type,
+              title: 'T',
+              body: 'B',
+              deep_link: '/leagues/x/matches/y',
+            })),
+          // Deliberately generous: the address resolves, the channel is not
+          // settled, and a preference row says yes. The type is still refused.
+          resolveRecipient: async () => 'player@example.test',
+          loadAttempt: async () => null,
+          recordResult: async (_id, status) => {
+            recorded.push(status);
+          },
+        },
+        sender: {
+          send: async (m) => {
+            sent.push(m.to);
+            return { ok: true as const };
+          },
+        },
+        baseUrl: 'https://app.matchdayapps.com',
+        from: 'MatchDay <notifications@example.test>',
+      });
+
+      expect(sent, type).toEqual([]);
+      expect(recorded, type).toEqual([]);
+      expect(result.attempted, type).toBe(0);
+      // Skipped, not failed — and therefore no retry work either.
+      expect(result.retryable, type).toBe(0);
+    }
+  });
+
+  it('the authority is isPushEligible, not the registry', async () => {
+    // Stated directly: flipping a registry entry would change what Settings
+    // offers and nothing else. The delivery rule is a separate list.
+    const { buildPushPayload } = await import('@/lib/push/payload');
+
+    // `attendance_recorded` is marked non-configurable AND is not push
+    // eligible. The second fact is the one that governs.
+    expect(NOTIFICATION_TYPE_META.attendance_recorded.configurable).toBe(false);
+    expect(
+      buildPushPayload({
+        id: '11111111-1111-4111-8111-000000000001',
+        type: 'attendance_recorded',
+        title: 'T',
+        body: 'B',
+        deep_link: '/x/y',
+      }),
+    ).toBeNull();
+  });
+});
