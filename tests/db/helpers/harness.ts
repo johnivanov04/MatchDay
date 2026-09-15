@@ -78,6 +78,29 @@ export const SEED_TEMPLATES = {
   fivesThursday: '99999999-9999-4999-8999-000000000011',
 } as const;
 
+/**
+ * A match date far enough ahead that the suite cannot age into a different
+ * answer.
+ *
+ * THE DEFECT THIS REPLACES: these tests hardcoded `2026-09-14`. That was months
+ * away when they were written and is now in the past, which quietly changed
+ * what one of them asserted — `priority_window_ends_at` is
+ * `least(published_at + priority_window, signup_closes_at)`, so once the
+ * deadline is behind us the `least()` clamps and two timestamps that should
+ * differ compare equal. The test had not become wrong; the calendar had moved
+ * underneath it.
+ *
+ * Derived from the runtime clock, so it is correct on any day it is run, and
+ * fixed for the whole of a single run. Ninety days is chosen to be far larger
+ * than anything a test manipulates — the longest priority window here is three
+ * hours and the longest signup offset two — and comfortably past any
+ * UTC-versus-league-timezone day boundary, so no assertion can land on the edge
+ * of one.
+ */
+export function futureMatchDate(daysAhead = 90): string {
+  return new Date(Date.now() + daysAhead * 86_400_000).toISOString().slice(0, 10);
+}
+
 export const SEED_MATCHES = {
   rmvfcOpen: 'aaaaaaaa-aaaa-4aaa-8aaa-000000000001',
   rmvfcDraft: 'aaaaaaaa-aaaa-4aaa-8aaa-000000000002',

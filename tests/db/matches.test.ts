@@ -11,6 +11,7 @@ import {
   SEED_TEMPLATES,
   SEED_USERS,
   type TestDatabase,
+  futureMatchDate,
 } from './helpers/harness';
 
 describe('match templates and matches', () => {
@@ -204,7 +205,7 @@ describe('match templates and matches', () => {
       const input = {
         league: SEED_LEAGUES.rmvfc,
         title: 'Test match',
-        date: '2026-09-14',
+        date: futureMatchDate(),
         arrival: '18:30',
         kickoff: '19:00',
         end: '20:30',
@@ -283,7 +284,7 @@ describe('match templates and matches', () => {
       const error = await expectDatabaseError(() =>
         asUser(db, SEED_USERS.rmvfcAdmin, (client) =>
           client.query(
-            `select public.create_match($1,'X','2026-09-14','18:30','19:00','20:30','P',22,14,
+            `select public.create_match($1,'X','${futureMatchDate()}','18:30','19:00','20:30','P',22,14,
                                         'admin_approval','admin_controlled',2,$2)`,
             [SEED_LEAGUES.rmvfc, SEED_TEMPLATES.fivesThursday],
           ),
@@ -316,7 +317,7 @@ describe('match templates and matches', () => {
                (league_id, title, match_date, timezone, arrival_at, kickoff_at, end_at,
                 location_name, capacity, min_players, selection_mode, waitlist_mode,
                 signup_closes_at, cancellation_cutoff_at, status, published_at)
-             values ($1,'Forged','2026-09-14','UTC', now(), now()+interval '1 hour',
+             values ($1,'Forged','${futureMatchDate()}','UTC', now(), now()+interval '1 hour',
                      now()+interval '2 hours','P',10,0,'first_come','automatic',
                      now(), now(), 'open', now())`,
             [SEED_LEAGUES.rmvfc],

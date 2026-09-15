@@ -9,6 +9,7 @@ import {
   SEED_TEMPLATES,
   SEED_USERS,
   type TestDatabase,
+  futureMatchDate,
 } from './helpers/harness';
 
 /**
@@ -29,7 +30,14 @@ import {
  */
 
 /** The arguments both paths take, so the two can be compared like for like. */
-const ARGS = `$1,'Wrapper match','2026-09-14','18:30','19:00','20:30','Pitch 3',22,14,
+/**
+ * Computed once per run, never hardcoded: a match dated in the past changes
+ * what `least(published_at + priority_window, signup_closes_at)` returns. See
+ * `futureMatchDate`.
+ */
+const MATCH_DATE = futureMatchDate();
+
+const ARGS = `$1,'Wrapper match','${MATCH_DATE}','18:30','19:00','20:30','Pitch 3',22,14,
               'first_come','automatic'`;
 
 describe('create_and_publish_match', () => {
@@ -125,7 +133,7 @@ describe('create_and_publish_match', () => {
       const matchId = await asUserCommitting(db, SEED_USERS.rmvfcAdmin, async (client) => {
         const result = await client.query<{ id: string }>(
           `select public.create_and_publish_match(
-             $1,'Priority window','2026-09-14','18:30','19:00','20:30','Pitch 3',22,14,
+             $1,'Priority window','${MATCH_DATE}','18:30','19:00','20:30','Pitch 3',22,14,
              'first_come','automatic',2,null,null,
              interval '3 hours',      -- priority window
              interval '2 hours'       -- signup closes before kickoff
@@ -231,7 +239,7 @@ describe('create_and_publish_match', () => {
         asUser(db, SEED_USERS.rmvfcAdmin, (client) =>
           client.query(
             `select public.create_and_publish_match(
-               $1,'Too small','2026-09-14','18:30','19:00','20:30','Pitch 3',1,0,
+               $1,'Too small','${MATCH_DATE}','18:30','19:00','20:30','Pitch 3',1,0,
                'first_come','automatic')`,
             [SEED_LEAGUES.rmvfc],
           ),
@@ -252,7 +260,7 @@ describe('create_and_publish_match', () => {
         asUser(db, SEED_USERS.rmvfcAdmin, (client) =>
           client.query(
             `select public.create_and_publish_match(
-               $1,'Foreign template','2026-09-14','18:30','19:00','20:30','P',22,14,
+               $1,'Foreign template','${MATCH_DATE}','18:30','19:00','20:30','P',22,14,
                'first_come','automatic',2,$2)`,
             [SEED_LEAGUES.rmvfc, SEED_TEMPLATES.fivesThursday],
           ),

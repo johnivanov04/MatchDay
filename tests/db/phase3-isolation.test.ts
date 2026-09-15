@@ -10,6 +10,7 @@ import {
   SEED_TEMPLATES,
   SEED_USERS,
   type TestDatabase,
+  futureMatchDate,
 } from './helpers/harness';
 
 /**
@@ -105,7 +106,7 @@ describe('Phase 3 cross-league isolation', () => {
       ],
       [
         'creating a match in another league',
-        `select public.create_match('${SEED_LEAGUES.weeknightFives}','X','2026-09-14',
+        `select public.create_match('${SEED_LEAGUES.weeknightFives}','X','${futureMatchDate()}',
                                     '18:30','19:00','20:30','P',10,8,
                                     'first_come','automatic')`,
       ],
