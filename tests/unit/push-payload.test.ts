@@ -69,6 +69,43 @@ describe('isSafePushUrl', () => {
   });
 });
 
+describe('isSafePushUrl rejects the whole control range', () => {
+  // The class this exercises was once written with the control characters
+  // themselves sitting in the source, rather than as `\x00` escapes. It behaved
+  // correctly — but `git grep` reads a file containing a NUL as binary and skips
+  // it without a word, so the module holding PUSH_ELIGIBLE_TYPES was invisible to
+  // every grep-based audit and secret scan we run. These tests pin the behaviour
+  // so the escape rewrite cannot have changed it, and pin the encoding so the
+  // raw bytes cannot come back.
+
+  it('rejects every C0 control character and DEL', () => {
+    const rejected: number[] = [];
+    for (let code = 0; code <= 0x7f; code += 1) {
+      if (!isSafePushUrl(`/dashboard${String.fromCharCode(code)}`)) {
+        rejected.push(code);
+      }
+    }
+    const expected = [...Array.from({ length: 0x20 }, (_, i) => i), 0x7f];
+    expect(rejected).toEqual(expected);
+  });
+
+  it('still accepts the printable ASCII a real deep link is made of', () => {
+    for (const char of 'abzAZ09-_/?=&.:~%') {
+      expect(isSafePushUrl(`/leagues/x${char}`)).toBe(true);
+    }
+  });
+
+  it('keeps the source greppable — no literal control bytes in the module', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const url = new URL('../../src/lib/push/payload.ts', import.meta.url);
+    const bytes = await readFile(url);
+    const offending = [...bytes].filter(
+      (b) => (b < 0x20 && b !== 0x09 && b !== 0x0a && b !== 0x0d) || b === 0x7f,
+    );
+    expect(offending).toEqual([]);
+  });
+});
+
 describe('buildPushPayload', () => {
   it('carries only title, body, url and id', () => {
     const payload = buildPushPayload(BASE);
