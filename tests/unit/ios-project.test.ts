@@ -230,12 +230,17 @@ describe('what an upload depends on', () => {
     expect(INFO_PLIST).toContain('<key>ITSAppUsesNonExemptEncryption</key>');
   });
 
-  it('is build 2', () => {
-    // Build #1 is already on TestFlight; App Store Connect rejects a re-upload
-    // of the same build number outright.
+  it('is build 3', () => {
+    // Earlier builds already occupy 1 and 2 on TestFlight; App Store Connect
+    // rejects a re-upload of the same build number outright.
+    //
+    // Both occurrences, because Debug and Release each carry the setting and the
+    // project has always moved them together. Leaving Debug behind would mean a
+    // build run from Xcode reported a different version from the one testers
+    // have, which is exactly the confusion this assertion exists to prevent.
     expect([...PROJECT.matchAll(/CURRENT_PROJECT_VERSION = (\d+);/g)].map((m) => m[1])).toEqual([
-      '2',
-      '2',
+      '3',
+      '3',
     ]);
   });
 });
