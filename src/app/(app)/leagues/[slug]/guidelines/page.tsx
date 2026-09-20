@@ -1,3 +1,4 @@
+import { ReportContent } from '@/components/report-content';
 import type { Metadata } from 'next';
 import { AcceptGuidelinesForm } from '@/components/guidelines';
 import { requireLeagueMemberPage } from '@/lib/auth/page-guards';
@@ -97,6 +98,9 @@ export default async function LeagueGuidelinesPage({
           <article className="whitespace-pre-wrap rounded-[var(--radius-md)] border border-[var(--border-subtle)] p-3 text-sm">
             {view.required.body}
           </article>
+          <div className="mt-3 border-t border-line pt-3">
+            <ReportContent targetType="guideline" targetId={view.required.id} />
+          </div>
 
           {view.required.document_url === null ? null : (
             <a

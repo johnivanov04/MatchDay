@@ -794,6 +794,74 @@ export type PushDeliveryAttemptRow = {
 /** The external delivery channels a member may configure. In-app is not one. */
 export type NotificationChannel = 'push' | 'email';
 
+// ── Guideline 1.2: reporting and blocking ──────────────────────────────────
+
+export type ReportTargetType = 'user' | 'league' | 'match' | 'guideline';
+
+export type ReportReason =
+  | 'harassment'
+  | 'hate_speech'
+  | 'sexual_content'
+  | 'violence_or_threats'
+  | 'spam'
+  | 'impersonation'
+  | 'other';
+
+export type ReportStatus = 'open' | 'reviewing' | 'actioned' | 'dismissed';
+
+export const REPORT_REASONS: readonly ReportReason[] = [
+  'harassment',
+  'hate_speech',
+  'sexual_content',
+  'violence_or_threats',
+  'spam',
+  'impersonation',
+  'other',
+];
+
+export type ContentReportRow = {
+  id: string;
+  reporter_user_id: string;
+  target_type: ReportTargetType;
+  target_id: string;
+  league_id: string | null;
+  reason: ReportReason;
+  details: string | null;
+  status: ReportStatus;
+  created_at: string;
+  updated_at: string;
+  resolved_at: string | null;
+  resolution_note: string | null;
+  escalated_at: string | null;
+};
+
+export type UserBlockRow = {
+  blocker_user_id: string;
+  blocked_user_id: string;
+  created_at: string;
+};
+
+export type RosterSafetyRow = {
+  membership_id: string;
+  user_id: string;
+  is_blocked: boolean;
+};
+
+export type BlockedMemberRow = {
+  user_id: string;
+  first_name: string;
+  last_name: string;
+  blocked_at: string;
+};
+
+/** One row of `claim_unescalated_reports`. Carries no member identity. */
+export type UnescalatedReportRow = {
+  report_id: string;
+  target_type: ReportTargetType;
+  reason: ReportReason;
+  created_at: string;
+};
+
 export type NotificationTypePreferenceRow = {
   user_id: string;
   notification_type: NotificationType;
@@ -1069,6 +1137,18 @@ export interface Database {
       notification_delivery_jobs: {
         Row: NotificationDeliveryJobRow;
         Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      content_reports: {
+        Row: ContentReportRow;
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      user_blocks: {
+        Row: UserBlockRow;
+        Insert: Pick<UserBlockRow, 'blocker_user_id' | 'blocked_user_id'>;
         Update: never;
         Relationships: [];
       };
@@ -1532,6 +1612,47 @@ export interface Database {
           p_lease_seconds?: number;
         };
         Returns: ClaimedDeliveryJob[];
+      };
+      match_roster_safety: {
+        Args: { p_match_id: string };
+        Returns: RosterSafetyRow[];
+      };
+      my_blocked_members: {
+        Args: Record<string, never>;
+        Returns: BlockedMemberRow[];
+      };
+      submit_content_report: {
+        Args: {
+          p_target_type: ReportTargetType;
+          p_target_id: string;
+          p_reason: ReportReason;
+          p_details?: string | null;
+        };
+        Returns: string;
+      };
+      block_user: {
+        Args: { p_user_id: string };
+        Returns: undefined;
+      };
+      unblock_user: {
+        Args: { p_user_id: string };
+        Returns: undefined;
+      };
+      is_blocked_between: {
+        Args: { p_a: string; p_b: string };
+        Returns: boolean;
+      };
+      claim_unescalated_reports: {
+        Args: { p_limit?: number };
+        Returns: UnescalatedReportRow[];
+      };
+      resolve_content_report: {
+        Args: {
+          p_report_id: string;
+          p_status: ReportStatus;
+          p_resolution_note?: string | null;
+        };
+        Returns: undefined;
       };
       notification_channel_eligibility: {
         Args: { p_notification_id: string };
