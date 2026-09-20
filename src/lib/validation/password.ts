@@ -86,6 +86,16 @@ export const signUpSchema = z
     email: emailSchema,
     password: passwordSchema,
     confirm_password: z.string(),
+    /**
+     * App Review Guideline 1.2 asks that people agree to the rules before they
+     * can contribute content. A checkbox posts its value only when ticked, so
+     * an absent field is a person who did not agree — which is why this is
+     * `literal('on')` and not a coerced boolean that would read "" as false and
+     * quietly let the form through.
+     */
+    accept_terms: z.literal('on', {
+      message: 'Please accept the terms and content policy to continue.',
+    }),
   })
   .superRefine((value, ctx) => {
     if (value.password !== value.confirm_password) {

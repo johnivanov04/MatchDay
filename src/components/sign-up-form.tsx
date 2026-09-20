@@ -71,6 +71,25 @@ export function SignUpForm({ nextPath }: { nextPath: string }) {
           error={fieldError('confirm_password')}
         />
 
+        <div className="space-y-1">
+          <label className="flex items-start gap-2 text-sm">
+            <input type="checkbox" name="accept_terms" className="mt-1" />
+            <span>
+              I agree to the{' '}
+              <Link href="/terms" className="font-semibold underline underline-offset-4">
+                terms and content policy
+              </Link>
+              . Objectionable content and abusive behaviour are not allowed, and accounts that post
+              them can be removed.
+            </span>
+          </label>
+          {fieldError('accept_terms') === undefined ? null : (
+            <p role="alert" className="text-sm text-danger">
+              {fieldError('accept_terms')}
+            </p>
+          )}
+        </div>
+
         <SubmitButton pending={pending}>Create account</SubmitButton>
       </form>
 

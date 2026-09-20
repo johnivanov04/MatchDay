@@ -66,6 +66,56 @@ export default async function SupportPage() {
         )}
       </LegalSection>
 
+      <LegalSection title="Reporting someone, and blocking them">
+        <P>
+          MatchDay has no public feed, no comments and no direct messages, but members do write
+          things other members read — league and match details, guidelines, and their own name —
+          and anything a person writes, a person can misuse.
+        </P>
+        <Definitions>
+          <Definition term="Reporting a member or something they wrote">
+            Open the member on a roster or team sheet and choose <em>Report this member</em>. A
+            league, a match and a league&rsquo;s guidelines each carry a <em>Report</em> control on
+            their own page. Pick the reason that fits and add a note if you want to; the note is
+            optional, because the reason is usually the whole story.
+          </Definition>
+          <Definition term="What happens to a report">
+            Every report reaches us automatically as soon as it is filed — it does not sit in a
+            queue waiting for somebody to notice it. We read all of them and act on what needs
+            acting on, which can mean removing content or removing an account. The person you
+            reported is never told who reported them.
+          </Definition>
+          <Definition term="Blocking a member">
+            Choose <em>Block this member</em> in the same place. You will not see their name on
+            rosters or team sheets, and neither of you can send the other a request to join a
+            league. Blocking is not the same as leaving a league, and it cannot take somebody off a
+            match you have both already signed up for — if you need that, contact your league
+            administrator, who can suspend or remove a member.
+          </Definition>
+          <Definition term="If you cannot use the in-app controls">
+            {supportEmail === null ? (
+              <>Use the support contact shown in the app footer or on any error screen.</>
+            ) : (
+              <>
+                Email{' '}
+                <a
+                  href={`mailto:${supportEmail}`}
+                  className="font-semibold underline underline-offset-4"
+                >
+                  {supportEmail}
+                </a>{' '}
+                and tell us which league and which member or match you mean. Use this if the member
+                has already left, or if you cannot reach the screen you need.
+              </>
+            )}
+          </Definition>
+          <Definition term="Someone is in danger">
+            Contact your local emergency services first. We can remove an account; we cannot help
+            with an emergency.
+          </Definition>
+        </Definitions>
+      </LegalSection>
+
       <LegalSection title="Account and signing in">
         <Definitions>
           <Definition term="I cannot sign in">
