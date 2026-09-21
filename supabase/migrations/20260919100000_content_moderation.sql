@@ -39,10 +39,14 @@ as $$
       regexp_replace(
         regexp_replace(
           regexp_replace(
+            -- Both arguments are the SAME LENGTH. `translate` silently DELETES
+            -- any source character without a destination, so an uneven pair
+            -- removes characters instead of folding them — a difference that
+            -- does not show up until a specific glyph goes missing.
             translate(
               lower(coalesce(p_text, '')),
-              '0134578@$!¡|',
-              'oieastbasil'
+              '0134578@$!',
+              'oieastbasi'
             ),
             '[^a-z0-9]+', ' ', 'g'      -- punctuation becomes a separator
           ),

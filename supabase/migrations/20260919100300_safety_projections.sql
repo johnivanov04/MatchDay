@@ -81,3 +81,19 @@ $$;
 
 revoke execute on function public.my_blocked_members() from public, anon;
 grant execute on function public.my_blocked_members() to authenticated;
+
+
+-- ── OPERATIONAL ACCESS, STATED RATHER THAN INHERITED ───────────────────────
+--
+-- `service_role` bypasses RLS but still needs a table privilege, and the
+-- defaults gave it TRUNCATE and TRIGGER without SELECT — which is the worst
+-- possible combination to inherit silently. The escalation worker only calls
+-- SECURITY DEFINER functions and so never noticed, but whoever investigates a
+-- report reads the row itself.
+grant select, update on public.content_reports to service_role;
+grant select on public.user_blocks to service_role;
+
+-- Still nothing for anon, and `authenticated` keeps exactly what it had:
+-- SELECT on its own reports, and insert/delete on its own blocks.
+revoke all on public.content_reports from anon;
+revoke all on public.user_blocks from anon;
