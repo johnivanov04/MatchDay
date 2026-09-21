@@ -57,6 +57,9 @@ async function requestConfirmationLink(page: Page, email: string): Promise<URL> 
   await page.getByLabel('Email address').fill(email);
   await page.getByLabel('Password', { exact: true }).fill(SIGN_UP_PASSWORD);
   await page.getByLabel('Confirm password').fill(SIGN_UP_PASSWORD);
+  // Required since Guideline 1.2: the account cannot be created without
+  // agreeing to the content policy.
+  await page.getByRole('checkbox', { name: /terms and content policy/i }).check();
   await page.getByRole('button', { name: 'Create account' }).click();
   await expect(page.getByText('Check your email')).toBeVisible();
 

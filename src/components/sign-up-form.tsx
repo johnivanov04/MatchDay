@@ -72,8 +72,15 @@ export function SignUpForm({ nextPath }: { nextPath: string }) {
         />
 
         <div className="space-y-1">
-          <label className="flex items-start gap-2 text-sm">
-            <input type="checkbox" name="accept_terms" className="mt-1" />
+          <label className="flex items-center gap-2 text-sm">
+            {/* 44px, like every other control in the product. A 13px native
+                checkbox is the default and fails the same touch-target rule
+                the auth screens are held to at 320px. */}
+            <input
+              type="checkbox"
+              name="accept_terms"
+              className="size-11 shrink-0 accent-[var(--pitch-600)]"
+            />
             <span>
               I agree to the{' '}
               <Link href="/terms" className="font-semibold underline underline-offset-4">

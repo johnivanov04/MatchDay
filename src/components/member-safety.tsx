@@ -39,13 +39,27 @@ export function MemberSafety({
   const state = blockState ?? unblockState;
 
   return (
-    <div className={compact ? 'flex shrink-0 items-center gap-1' : 'space-y-2'}>
-      <ReportContent targetType="user" targetId={userId} label="Report this member" />
+    <div
+      className={
+        compact ? 'flex shrink-0 flex-wrap items-center justify-end gap-1 text-xs' : 'space-y-2'
+      }
+    >
+      <ReportContent
+        targetType="user"
+        targetId={userId}
+        label={compact ? 'Report' : 'Report this member'}
+      />
 
       <form action={isBlocked ? unblock : block}>
         <input type="hidden" name="user_id" value={userId} />
         <SubmitButton variant="secondary" block={false} pending={blockPending || unblockPending}>
-          {isBlocked ? 'Unblock this member' : 'Block this member'}
+          {compact
+            ? isBlocked
+              ? 'Unblock'
+              : 'Block'
+            : isBlocked
+              ? 'Unblock this member'
+              : 'Block this member'}
         </SubmitButton>
       </form>
 

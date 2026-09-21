@@ -350,7 +350,10 @@ export default async function MatchDetailPage({
           // size of the queue in the line above, never who is in it or where.
           <ul className="mt-2 flex flex-col gap-1.5">
             {roster.map((player) => (
-              <li key={player.membership_id} className="flex items-center gap-2 text-sm">
+              <li
+                key={player.membership_id}
+                className="flex flex-wrap items-center gap-2 text-sm"
+              >
                 {/* 24px: the row was a single line of `text-sm`, so this adds
                     four pixels of height rather than turning a twenty-player
                     roster into a scroll. `min-w-0` + `truncate` on the name is
