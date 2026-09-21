@@ -64,6 +64,10 @@ describe('Vercel does not deploy production by itself', () => {
       '/api/cron/account-deletion',
       '/api/cron/notification-delivery',
       '/api/cron/reminders',
+      // Guideline 1.2's escalation path. A report that reaches nobody is a
+      // reporting mechanism in name only, so this cron is load-bearing for
+      // App Review rather than an optimisation.
+      '/api/cron/report-escalation',
     ]);
   });
 });

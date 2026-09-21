@@ -167,14 +167,34 @@ describe('player avatar projections', () => {
       await setAvatarPath(members[0]!.user, AVATAR_PATH(members[0]!.user.id));
     });
 
-    it('gives an active member another member managed avatar path', async () => {
+    it('gives an active member NO path for another member', async () => {
+      // This assertion was inverted by App Review Guideline 1.2. A profile
+      // photo is user-uploaded content that nothing moderates, so it is no
+      // longer handed to other members — the path is not returned at all,
+      // rather than returned and then ignored by the renderer.
       const rows = await rowsFor<{ membership_id: string; profile_photo_path: string | null }>(
         SQL,
         members[1]!.user,
       );
 
       const other = rows.find((row) => row.membership_id === members[0]!.membershipId);
-      expect(other?.profile_photo_path).toBe(AVATAR_PATH(members[0]!.user.id));
+      expect(other).toBeDefined();
+      expect(other?.profile_photo_path).toBeNull();
+    });
+
+    it('still gives a member their OWN path', async () => {
+      // The photo is not deleted and is not hidden from the person who chose
+      // it. Without this, "returns null for everybody" would pass just as well
+      // and would be a different, worse product.
+      await setAvatarPath(members[1]!.user, AVATAR_PATH(members[1]!.user.id));
+
+      const rows = await rowsFor<{ membership_id: string; profile_photo_path: string | null }>(
+        SQL,
+        members[1]!.user,
+      );
+
+      const mine = rows.find((row) => row.membership_id === members[1]!.membershipId);
+      expect(mine?.profile_photo_path).toBe(AVATAR_PATH(members[1]!.user.id));
     });
 
     it('returns nothing to somebody outside the league, exactly as before', async () => {
@@ -462,7 +482,10 @@ describe('player avatar projections', () => {
       await publishTeams();
     });
 
-    it('gives a confirmed player their teammates avatar paths', async () => {
+    it('gives a confirmed player NO path for their teammates', async () => {
+      // Inverted by Guideline 1.2, like the roster above. A team sheet is the
+      // densest surface in the product — twenty faces at once — and so the one
+      // where distributing unmoderated photographs mattered most.
       const rows = await rowsFor<{ membership_id: string; profile_photo_path: string | null }>(
         SQL,
         members[1]!.user,
@@ -471,7 +494,7 @@ describe('player avatar projections', () => {
       expect(rows.length).toBeGreaterThan(0);
       expect(
         rows.find((row) => row.membership_id === members[0]!.membershipId)?.profile_photo_path,
-      ).toBe(AVATAR_PATH(members[0]!.user.id));
+      ).toBeNull();
     });
 
     it('still returns nothing to a league member who is not playing', async () => {

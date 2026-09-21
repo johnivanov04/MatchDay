@@ -97,6 +97,10 @@ describe('signing up', () => {
       email: '  Player@MatchDay.TEST ',
       password: ' a-long-enough-password ',
       confirm_password: ' a-long-enough-password ',
+      // Required since Guideline 1.2. Covered on its own in signup-terms.test.ts;
+      // here it is just the rest of the form being allowed to reach the part
+      // under test.
+      accept_terms: 'on',
     });
 
     expect(result.success).toBe(true);

@@ -172,7 +172,7 @@ describe('report escalation', () => {
 
     const { assertLoggable } = await import('@/lib/observability/log');
     for (const call of mocks.logInfo.mock.calls) {
-      expect(assertLoggable(call[1] as Record<string, unknown>)).toBe(true);
+      expect(assertLoggable(call[1] as Parameters<typeof assertLoggable>[0])).toBe(true);
     }
   });
 });
