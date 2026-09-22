@@ -133,6 +133,10 @@ export async function signUpWithPasswordAction(
     email: formData.get('email') ?? '',
     password: formData.get('password') ?? '',
     confirm_password: formData.get('confirm_password') ?? '',
+    // Absent when the box is unticked — a checkbox posts nothing at all rather
+    // than posting "false". The schema rejects that rather than reading a
+    // missing field as agreement.
+    accept_terms: formData.get('accept_terms') ?? '',
   });
 
   if (!parsed.success) {

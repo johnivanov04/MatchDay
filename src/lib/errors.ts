@@ -56,6 +56,11 @@ export const DOMAIN_ERROR_CODES = [
   // The server, not the caller, is wrong. See `errors-from-database.ts`.
   'SERVER_MISCONFIGURED',
   'LEAGUE_CLOSED',
+  // Guideline 1.2. The content filter's refusal, the block's refusal, and the
+  // one report you have already filed.
+  'CONTENT_REJECTED',
+  'BLOCKED_INTERACTION',
+  'REPORT_ALREADY_OPEN',
 ] as const;
 
 export type DomainErrorCode = (typeof DOMAIN_ERROR_CODES)[number];
@@ -132,6 +137,10 @@ const USER_FACING_MESSAGES: Record<DomainErrorCode, string> = {
   ATTENDANCE_REVISION_STALE:
     'Somebody else changed this player’s attendance while you were looking at it. Reload the page and try again.',
   ATTENDANCE_INCOMPLETE: 'Record an outcome for everybody before completing the match.',
+  CONTENT_REJECTED:
+    'That wording is not allowed here. Please rephrase it and try again.',
+  BLOCKED_INTERACTION: 'That league is not available to you.',
+  REPORT_ALREADY_OPEN: 'You have already reported this. We are looking into it.',
 };
 
 export class DomainError extends Error {

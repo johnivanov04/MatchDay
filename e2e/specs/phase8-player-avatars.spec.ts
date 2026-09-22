@@ -69,17 +69,24 @@ function rosterRow(page: Page, player: TestUser) {
 }
 
 test.describe('player avatars', () => {
-  test('two uploaded avatars appear on the roster and on published teams', async ({
+  test('an uploaded avatar never reaches another member, on either projection', async ({
     factory,
     asUser,
   }) => {
+    // INVERTED BY APP REVIEW GUIDELINE 1.2.
+    //
+    // This test used to assert that Alice's and Bob's faces appeared on Carol's
+    // roster. A profile photo is the one piece of user content in MatchDay that
+    // the text filter cannot read, and 1.2 asks that unmoderated material not be
+    // distributed — so it is not, and this is the assertion that it is not.
+    //
+    // The photos are still genuinely uploaded, because "no photo ever existed"
+    // would pass against a product that had simply lost the feature.
     const league = await factory.createLeague();
     const match = await factory.createMatch(league, { capacity: 8 });
 
     const alice = await factory.createMember(league);
     const bob = await factory.createMember(league);
-    // A third member who never uploads anything — the initials case, tested in
-    // the same list rather than in a separate world where nobody has a photo.
     const carol = await factory.createMember(league);
 
     const alicePage = await asUser(alice.email);
@@ -88,9 +95,6 @@ test.describe('player avatars', () => {
 
     const aliceAvatar = await uploadAvatar(alicePage, LANDSCAPE);
     const bobAvatar = await uploadAvatar(bobPage, PORTRAIT);
-
-    // Distinct objects: each upload writes a new uuid, so two people cannot
-    // collide and one cannot be served the other's cached face.
     expect(aliceAvatar).not.toBe(bobAvatar);
 
     for (const player of [alice, bob, carol]) {
@@ -101,29 +105,19 @@ test.describe('player avatars', () => {
     await carolPage.goto(`/leagues/${league.slug}/matches/${match.id}`);
     await expectNoServerError(carolPage);
 
-    const aliceRow = rosterRow(carolPage, alice);
-    const bobRow = rosterRow(carolPage, bob);
-    const carolRow = rosterRow(carolPage, carol);
-
-    await expect(aliceRow.locator('img')).toHaveAttribute('src', aliceAvatar);
-    await expect(bobRow.locator('img')).toHaveAttribute('src', bobAvatar);
-
-    // Carol uploaded nothing, so her own row shows initials — no <img> at all,
-    // rather than a broken one.
-    await expect(carolRow.locator('img')).toHaveCount(0);
-    await expect(carolRow).toContainText(carol.firstName.slice(0, 1).toUpperCase());
-
-    // ── The images genuinely load ─────────────────────────────────────────
-    for (const [label, url] of [
-      ['alice', aliceAvatar],
-      ['bob', bobAvatar],
-    ] as const) {
-      const response = await carolPage.request.get(url);
-      expect(response.status(), label).toBe(200);
-      expect(response.headers()['content-type'], label).toContain('image/jpeg');
+    for (const player of [alice, bob, carol]) {
+      const row = rosterRow(carolPage, player);
+      await expect(row.locator('img')).toHaveCount(0);
+      await expect(row).toContainText(player.firstName.slice(0, 1).toUpperCase());
     }
 
-    // ── Published teams ───────────────────────────────────────────────────
+    // Not merely unrendered — the object key never reaches the page at all, so
+    // it cannot be recovered from the markup and fetched by hand.
+    const rosterHtml = await carolPage.content();
+    expect(rosterHtml).not.toContain(aliceAvatar);
+    expect(rosterHtml).not.toContain(bobAvatar);
+
+    // ── Published teams, a different projection ───────────────────────────
     await factory.callAs(league.admin, 'select public.ensure_match_teams($1)', [match.id]);
     await factory.callAs(league.admin, 'select public.randomize_match_teams($1)', [match.id]);
     await factory.callAs(league.admin, 'select public.publish_match_teams($1)', [match.id]);
@@ -132,38 +126,16 @@ test.describe('player avatars', () => {
     const teams = carolPage.getByRole('group');
     await expect(teams.first()).toBeVisible();
 
-    // A different projection — `match_published_teams` rather than
-    // `match_confirmed_roster` — so the avatar has to have been added to both.
     const teamsSection = carolPage.locator('section').filter({ hasText: 'Teams' }).last();
-    await expect(teamsSection.locator(`img[src="${aliceAvatar}"]`)).toHaveCount(1);
-    await expect(teamsSection.locator(`img[src="${bobAvatar}"]`)).toHaveCount(1);
-  });
+    await expect(teamsSection.locator('img')).toHaveCount(0);
+    expect(await carolPage.content()).not.toContain(aliceAvatar);
 
-  test('a removed avatar disappears from other members rosters', async ({ factory, asUser }) => {
-    const league = await factory.createLeague();
-    const match = await factory.createMatch(league, { capacity: 8 });
-    const alice = await factory.createMember(league);
-    const bob = await factory.createMember(league);
-
-    const alicePage = await asUser(alice.email);
-    const bobPage = await asUser(bob.email);
-
-    await uploadAvatar(alicePage, LANDSCAPE);
-    await factory.joinMatch(match, alice);
-    await factory.joinMatch(match, bob);
-
-    await bobPage.goto(`/leagues/${league.slug}/matches/${match.id}`);
-    await expect(rosterRow(bobPage, alice).locator('img')).toHaveCount(1);
-
-    await alicePage.getByRole('button', { name: 'Remove photo' }).click();
-    await expect(alicePage.getByText('Photo removed.')).toBeVisible();
-
-    await bobPage.reload();
-    // Back to initials for everybody, not just for Alice — removal is a real
-    // withdrawal of the photo, not a change only its owner can see.
-    await expect(rosterRow(bobPage, alice).locator('img')).toHaveCount(0);
-    await expect(rosterRow(bobPage, alice)).toContainText(
-      alice.firstName.slice(0, 1).toUpperCase(),
+    // ── Alice still has her own photo ─────────────────────────────────────
+    // Nothing was deleted. The person who chose the photo still sees it.
+    await alicePage.goto('/profile');
+    await expect(alicePage.getByTestId('avatar-picker').locator('img')).toHaveAttribute(
+      'src',
+      aliceAvatar,
     );
   });
 
@@ -193,7 +165,8 @@ test.describe('player avatars', () => {
     );
 
     // Bob does not, anywhere. Rendering it would send Bob's IP address and user
-    // agent to a host neither of them chose.
+    // agent to a host neither of them chose — and since 1.2, no member's
+    // photograph reaches another member by any route at all.
     await bobPage.goto(`/leagues/${league.slug}/matches/${match.id}`);
     await expect(rosterRow(bobPage, alice).locator('img')).toHaveCount(0);
     expect(await bobPage.content()).not.toContain('cdn.elsewhere.test');

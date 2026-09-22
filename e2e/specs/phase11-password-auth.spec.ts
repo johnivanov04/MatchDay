@@ -52,6 +52,9 @@ async function createAccount(page: Page, email: string, password = PASSWORD): Pr
   await page.getByLabel('Email address').fill(email);
   await page.getByLabel('Password', { exact: true }).fill(password);
   await page.getByLabel('Confirm password').fill(password);
+  // Required since Guideline 1.2: the account cannot be created without
+  // agreeing to the content policy.
+  await page.getByRole('checkbox', { name: /terms and content policy/i }).check();
   await page.getByRole('button', { name: 'Create account' }).click();
   await expect(page.getByRole('heading', { name: 'Check your email' })).toBeVisible();
 }
@@ -183,6 +186,9 @@ test.describe('creating an account with a password', () => {
       await page.getByLabel('Email address').fill(email);
       await page.getByLabel('Password', { exact: true }).fill(password);
       await page.getByLabel('Confirm password').fill(confirm);
+      // Required since Guideline 1.2: the account cannot be created without
+      // agreeing to the content policy.
+      await page.getByRole('checkbox', { name: /terms and content policy/i }).check();
       await page.getByRole('button', { name: 'Create account' }).click();
 
       await expect(page.getByText(message)).toBeVisible();

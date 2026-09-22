@@ -26,6 +26,9 @@ import {
 } from '@/components/ui/icon';
 import { PageHeader } from '@/components/ui/page-header';
 import { PlayerAvatar } from '@/components/ui/player-avatar';
+import { MemberSafety } from '@/components/member-safety';
+import { getRosterSafety } from '@/lib/safety/roster-safety';
+import { ReportContent } from '@/components/report-content';
 import { Notice } from '@/components/ui/status';
 import { formatMatchClock, formatMatchDate, formatMatchTime } from '@/lib/matches/match-timing';
 import { getMatch, getMatchAdminNotes } from '@/lib/matches/matches';
@@ -103,6 +106,12 @@ export default async function MatchDetailPage({
   ]);
 
   const publishedTeams = groupPublishedTeams(teamEntries);
+  // Who on this roster can be reported or blocked. A separate read because the
+  // roster projection returns membership ids and deliberately not user ids —
+  // see `match_roster_safety`. Excludes the caller, so "block yourself" is not
+  // a control that has to be disabled.
+  const safetyByMembership = await getRosterSafety(match.id);
+
   const isConfirmed = mySignup?.status === 'confirmed';
 
   const state = deriveMatchParticipationState(
@@ -341,20 +350,32 @@ export default async function MatchDetailPage({
           // size of the queue in the line above, never who is in it or where.
           <ul className="mt-2 flex flex-col gap-1.5">
             {roster.map((player) => (
-              <li key={player.membership_id} className="flex items-center gap-2 text-sm">
+              <li
+                key={player.membership_id}
+                className="flex flex-wrap items-center gap-2 text-sm"
+              >
                 {/* 24px: the row was a single line of `text-sm`, so this adds
                     four pixels of height rather than turning a twenty-player
                     roster into a scroll. `min-w-0` + `truncate` on the name is
                     what keeps a long one from pushing the row past 320px. */}
                 <PlayerAvatar player={player} size={24} />
-                <span className="min-w-0 truncate">
+                <span className="min-w-0 flex-1 truncate">
                   {player.first_name} {player.last_name}
                   {player.is_self ? <span className="ml-1.5 text-xs text-muted">(you)</span> : null}
                 </span>
+                {(() => {
+                  const safety = safetyByMembership.get(player.membership_id);
+                  return safety === undefined ? null : (
+                    <MemberSafety userId={safety.user_id} isBlocked={safety.is_blocked} compact />
+                  );
+                })()}
               </li>
             ))}
           </ul>
         )}
+        <div className="mt-3 border-t border-line pt-3">
+          <ReportContent targetType="match" targetId={match.id} />
+        </div>
       </section>
 
       {/*

@@ -71,6 +71,32 @@ export function SignUpForm({ nextPath }: { nextPath: string }) {
           error={fieldError('confirm_password')}
         />
 
+        <div className="space-y-1">
+          <label className="flex items-center gap-2 text-sm">
+            {/* 44px, like every other control in the product. A 13px native
+                checkbox is the default and fails the same touch-target rule
+                the auth screens are held to at 320px. */}
+            <input
+              type="checkbox"
+              name="accept_terms"
+              className="size-11 shrink-0 accent-[var(--pitch-600)]"
+            />
+            <span>
+              I agree to the{' '}
+              <Link href="/terms" className="font-semibold underline underline-offset-4">
+                terms and content policy
+              </Link>
+              . Objectionable content and abusive behaviour are not allowed, and accounts that post
+              them can be removed.
+            </span>
+          </label>
+          {fieldError('accept_terms') === undefined ? null : (
+            <p role="alert" className="text-sm text-danger">
+              {fieldError('accept_terms')}
+            </p>
+          )}
+        </div>
+
         <SubmitButton pending={pending}>Create account</SubmitButton>
       </form>
 

@@ -1,5 +1,5 @@
 import { Avatar } from '@/components/ui/avatar';
-import { avatarInitials, avatarLabel, managedAvatarUrl } from '@/lib/profile/avatar';
+import { avatarInitials, avatarLabel } from '@/lib/profile/avatar';
 
 /**
  * Another member's face, next to their name.
@@ -29,6 +29,26 @@ import { avatarInitials, avatarLabel, managedAvatarUrl } from '@/lib/profile/ava
  * Not a server component and not a client component: it renders no state and
  * no handlers, so it works in either, and the `'use client'` boundary is where
  * it belongs — inside `Avatar`, which owns the broken-image fallback.
+ *
+ * ── IT RENDERS INITIALS, NOT PHOTOGRAPHS. THAT IS THE POINT. ───────────────
+ *
+ * A profile photo is a user-uploaded image and nothing moderates it. App Review
+ * Guideline 1.2 asks that objectionable material not be distributed, and an
+ * unmoderated photograph shown to twenty other members on a roster is exactly
+ * that — the one piece of user content here that a text filter cannot read.
+ *
+ * So this renders initials for everybody. The member-facing projections already
+ * return `profile_photo_path` as null for anybody but the viewer, which stops
+ * the path being transmitted at all; this stops it being rendered even if a
+ * future query forgets. Two independent guarantees, because "we filter it in
+ * the query" is one refactor away from being false.
+ *
+ * A member's own photo still exists and still appears on their own profile,
+ * where the only person who sees it is the person who chose it. Nothing was
+ * deleted. `PlayerIdentity` keeps `profile_photo_path` so call sites and the
+ * projections need not change shape, and so restoring photographs later is a
+ * change to this file rather than to nine others — once something moderates
+ * them.
  */
 
 /** Exactly what an avatar needs. Everything else is somebody else's business. */
@@ -50,7 +70,7 @@ export function PlayerAvatar({
 }) {
   return (
     <Avatar
-      src={managedAvatarUrl(player.profile_photo_path)}
+      src={null}
       initials={avatarInitials(player.first_name, player.last_name)}
       label={avatarLabel(player.first_name, player.last_name)}
       size={size}

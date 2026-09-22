@@ -168,7 +168,11 @@ test.describe('on a 320px phone', () => {
     const admin = await asUser(league.admin.email);
     await admin.goto(`/leagues/${league.slug}/matches/${match.id}/attendance`);
     await expect(admin.getByRole('heading', { name: 'Attendance', exact: true })).toBeVisible();
-    await expect(admin.locator('img')).not.toHaveCount(0);
+    // Avatars render as initials since Guideline 1.2, so this guard counts the
+    // avatar ELEMENT rather than an <img>. Its job is unchanged: prove the
+    // layout assertions below are measuring a page that actually has avatars
+    // on it, rather than passing because the list came back empty.
+    await expect(admin.locator('[role="img"][aria-label*="no profile photo"]')).not.toHaveCount(0);
 
     await expectUsableOnAPhone(admin, 'the attendance register');
     await expectNamesTruncate(admin, 'the attendance register');
@@ -203,7 +207,11 @@ test.describe('on a 320px phone', () => {
     const admin = await asUser(league.admin.email);
     await admin.goto(`/leagues/${league.slug}/matches/${match.id}/roster`);
     await expect(admin.getByRole('heading', { name: 'Roster', exact: true })).toBeVisible();
-    await expect(admin.locator('img')).not.toHaveCount(0);
+    // Avatars render as initials since Guideline 1.2, so this guard counts the
+    // avatar ELEMENT rather than an <img>. Its job is unchanged: prove the
+    // layout assertions below are measuring a page that actually has avatars
+    // on it, rather than passing because the list came back empty.
+    await expect(admin.locator('[role="img"][aria-label*="no profile photo"]')).not.toHaveCount(0);
 
     await expectUsableOnAPhone(admin, 'the roster workspace');
     await expectNamesTruncate(admin, 'the roster workspace');
@@ -229,7 +237,11 @@ test.describe('on a 320px phone', () => {
     const admin = await asUser(league.admin.email);
     await admin.goto(`/leagues/${league.slug}/matches/${match.id}/teams`);
     await expect(admin.getByRole('heading', { name: 'Teams', exact: true })).toBeVisible();
-    await expect(admin.locator('img')).not.toHaveCount(0);
+    // Avatars render as initials since Guideline 1.2, so this guard counts the
+    // avatar ELEMENT rather than an <img>. Its job is unchanged: prove the
+    // layout assertions below are measuring a page that actually has avatars
+    // on it, rather than passing because the list came back empty.
+    await expect(admin.locator('[role="img"][aria-label*="no profile photo"]')).not.toHaveCount(0);
 
     await expectUsableOnAPhone(admin, 'the team builder');
     await expectNamesTruncate(admin, 'the team builder');
@@ -249,7 +261,11 @@ test.describe('on a 320px phone', () => {
     const admin = await asUser(league.admin.email);
     await admin.goto(`/leagues/${league.slug}/members`);
     await expect(admin.getByRole('heading', { name: 'Members', exact: true })).toBeVisible();
-    await expect(admin.locator('img')).not.toHaveCount(0);
+    // Avatars render as initials since Guideline 1.2, so this guard counts the
+    // avatar ELEMENT rather than an <img>. Its job is unchanged: prove the
+    // layout assertions below are measuring a page that actually has avatars
+    // on it, rather than passing because the list came back empty.
+    await expect(admin.locator('[role="img"][aria-label*="no profile photo"]')).not.toHaveCount(0);
 
     await expectUsableOnAPhone(admin, 'member management');
     await expectNamesTruncate(admin, 'member management');
@@ -280,9 +296,10 @@ test.describe('on a 320px phone', () => {
     const page = await asUser(players[0]!.email);
     await page.goto(`/leagues/${league.slug}/matches/${match.id}`);
     await expect(page.getByRole('heading', { name: match.title })).toBeVisible();
-    // Two in the lists plus the header's own, so the assertions below are
-    // measuring a page that actually has faces on it.
-    await expect(page.locator('img')).not.toHaveCount(0);
+    // Initials in the lists since Guideline 1.2, so the guard counts avatar
+    // elements: the point is that the page has avatars on it at all, not that
+    // any of them is a photograph.
+    await expect(page.locator('[role="img"][aria-label*="no profile photo"]')).not.toHaveCount(0);
 
     await expectUsableOnAPhone(page, 'the match detail page');
     await expectNamesTruncate(page, 'the match detail page');

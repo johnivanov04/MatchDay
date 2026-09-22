@@ -141,6 +141,36 @@ export default async function ProfilePage() {
               </ButtonLink>
             </li>
             <li>
+              {/*
+                App Review Guideline 1.2 asks that blocking be available to
+                members, and a control only reachable by typing a URL is not
+                available in any sense a reviewer would accept. This is the
+                entry point to the page that already existed — no new
+                behaviour, just a way to find it.
+              */}
+              <ButtonLink
+                href="/settings/blocked"
+                variant="ghost"
+                className="w-full justify-start gap-3 rounded-none px-4 py-3.5 text-left"
+              >
+                <span
+                  aria-hidden="true"
+                  className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--radius-md)] bg-pitch-50 text-pitch-700 dark:bg-pitch-900/50 dark:text-pitch-300"
+                >
+                  <ShieldIcon size={18} />
+                </span>
+                <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                  <span className="truncate text-sm font-semibold text-[var(--text-primary)]">
+                    Blocked members
+                  </span>
+                  <span className="truncate text-xs font-normal text-muted">
+                    People you have blocked, and how to unblock them
+                  </span>
+                </span>
+                <ChevronRightIcon size={16} className="text-muted" />
+              </ButtonLink>
+            </li>
+            <li>
               {/* A real form post, not a link: signing out is a state change, and
                   a GET that ends a session is a request any prefetcher can make
                   on somebody's behalf. */}

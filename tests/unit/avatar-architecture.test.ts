@@ -62,9 +62,16 @@ function filesWhere(predicate: (body: string) => boolean): string[] {
 }
 
 describe('URL construction lives in exactly one place', () => {
-  it('is called only by the shared PlayerAvatar wrapper', () => {
+  it('is called by nothing that renders another member', () => {
+    // It used to be called by exactly one place, `PlayerAvatar`. Guideline 1.2
+    // stopped that: a profile photo is unmoderated user content and is no
+    // longer distributed to other members, so the wrapper renders initials and
+    // this resolver has no caller outside its own module.
+    //
+    // The assertion is kept rather than deleted, because the property it
+    // protects got STRONGER. If a call site reappears, somebody has started
+    // handing photographs round again and should have to notice.
     expect(filesWhere((body) => /\bmanagedAvatarUrl\s*\(/.test(body))).toEqual([
-      'src/components/ui/player-avatar.tsx',
       'src/lib/profile/avatar.ts',
     ]);
   });

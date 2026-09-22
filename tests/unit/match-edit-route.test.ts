@@ -95,6 +95,11 @@ vi.mock('@/lib/matches/teams', () => ({
 // Phase 7 addition to the detail page: the caller's own attendance outcome.
 // `ATTENDANCE_OUTCOME_LABELS` is a plain constant, so only the read is stubbed.
 vi.mock('@/lib/matches/attendance', () => ({ getMyAttendance: mocks.getMyAttendance }));
+// Guideline 1.2's report/block controls on each roster row. Mocked to an empty
+// map like every other data read here: the page test is about what the
+// administrator can see, not about the safety projection, which has its own
+// coverage in tests/db/reports-and-blocks.test.ts.
+vi.mock('@/lib/safety/roster-safety', () => ({ getRosterSafety: async () => new Map() }));
 
 const { default: EditMatchPage } = await import(
   '@/app/(app)/leagues/[slug]/matches/[matchId]/edit/page'
