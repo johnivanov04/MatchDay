@@ -116,7 +116,16 @@ export async function blockUserAction(
     }
 
     // Rosters and team sheets render names, and a blocked member's name changes
-    // on every one of them.
+    // on every one of them. `revalidatePath('/', 'layout')` looked like it
+    // covered that and does not: it invalidates the layout, while the match
+    // pages are dynamic routes cached per path. The end-to-end test caught a
+    // reload still showing the blocked member's name.
+    //
+    // `'page'` on the dynamic segment invalidates every match page at once,
+    // which is what a block has to do — somebody blocked on one roster is
+    // blocked on all of them.
+    revalidatePath('/leagues/[slug]/matches/[matchId]', 'page');
+    revalidatePath('/settings/blocked');
     revalidatePath('/', 'layout');
     return actionSuccess(undefined);
   } catch (error: unknown) {
@@ -145,6 +154,8 @@ export async function unblockUserAction(
       throw domainErrorFromDatabase(error);
     }
 
+    revalidatePath('/leagues/[slug]/matches/[matchId]', 'page');
+    revalidatePath('/settings/blocked');
     revalidatePath('/', 'layout');
     return actionSuccess(undefined);
   } catch (error: unknown) {
