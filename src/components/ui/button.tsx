@@ -123,6 +123,7 @@ export function ButtonLink({
   icon,
   className = '',
   label,
+  prefetch,
   children,
 }: {
   href: Route | string;
@@ -133,6 +134,15 @@ export function ButtonLink({
   className?: string;
   /** Overrides the accessible name when the visible text is not enough. */
   label?: string;
+  /**
+   * Off for a link whose destination is rarely the next thing somebody wants.
+   *
+   * A prefetch is a real authenticated request, and several firing at once
+   * while a page is still loading race the Supabase session-cookie refresh —
+   * the loser renders as though it had no session. Default left alone so no
+   * existing call site changes.
+   */
+  prefetch?: boolean;
   children: ReactNode;
 }) {
   // An explicit prop list rather than spreading `ComponentPropsWithoutRef<'a'>`:
@@ -145,6 +155,7 @@ export function ButtonLink({
       href={href as Route}
       className={`${BASE} ${VARIANTS[variant]} ${SIZES[size]} ${block ? 'w-full' : ''} ${className}`}
       {...(label === undefined ? {} : { 'aria-label': label })}
+      {...(prefetch === undefined ? {} : { prefetch })}
     >
       {icon}
       {children}

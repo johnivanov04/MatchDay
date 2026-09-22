@@ -150,6 +150,11 @@ export default async function ProfilePage() {
               */}
               <ButtonLink
                 href="/settings/blocked"
+                // Not prefetched. Two authenticated prefetches firing while the
+                // profile page is still loading race the Supabase session
+                // refresh, and the end-to-end suite caught the loser rendering
+                // as though it had no session.
+                prefetch={false}
                 variant="ghost"
                 className="w-full justify-start gap-3 rounded-none px-4 py-3.5 text-left"
               >
